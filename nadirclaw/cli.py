@@ -602,7 +602,7 @@ def gemini_login(timeout):
     if access_token:
         from nadirclaw.credentials import save_oauth_credential
         expires_in = max(int(expires_at - _time.time()), 3600) if expires_at else 3600
-        save_oauth_credential("gemini", access_token, refresh_token, expires_in, metadata={
+        save_oauth_credential("google", access_token, refresh_token, expires_in, metadata={
             "project_id": project_id,
             "email": email,
         })
@@ -628,7 +628,7 @@ def gemini_logout():
     """Remove stored Gemini OAuth credential."""
     from nadirclaw.credentials import remove_credential
 
-    if remove_credential("gemini"):
+    if remove_credential("google"):
         click.echo("Gemini credential removed.")
     else:
         click.echo("No Gemini credential found.")

@@ -273,6 +273,24 @@ def get_credential(provider: str) -> Optional[str]:
     return None
 
 
+def get_credential_entry(provider: str) -> Optional[dict]:
+    """Return the full credential entry dict for a provider, or None.
+
+    Unlike get_credential() which returns only the token string, this
+    returns the full dict including source, refresh_token, expires_at, etc.
+    Useful for distinguishing OAuth credentials from API keys.
+    """
+    creds = _read_credentials()
+    entry = creds.get(provider)
+    if entry and entry.get("token"):
+        # Ensure token is refreshed if needed
+        _maybe_refresh_oauth(provider, entry)
+        # Re-read in case refresh updated it
+        creds = _read_credentials()
+        return creds.get(provider)
+    return None
+
+
 def get_credential_source(provider: str) -> Optional[str]:
     """Return the source label for how a credential was resolved.
 
