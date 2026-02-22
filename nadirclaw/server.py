@@ -615,7 +615,27 @@ async def _call_litellm(
         litellm_model = model
         cred_provider = provider
 
-    messages = [{"role": m.role, "content": m.text_content()} for m in request.messages]
+    # LiteLLM's "ollama/" provider uses /api/generate which doesn't support
+    # tool calling. Automatically upgrade to "ollama_chat/" (which uses
+    # /api/chat) when the request includes tool definitions.
+    req_extra = request.model_extra or {}
+    if litellm_model.startswith("ollama/") and req_extra.get("tools"):
+        litellm_model = "ollama_chat/" + litellm_model.removeprefix("ollama/")
+        logger.debug("Upgraded ollama → ollama_chat for tool support: %s", litellm_model)
+
+    # Preserve full message structure (tool_calls, tool_call_id, name, etc.)
+    messages = []
+    for message in request.messages:
+        msg: dict[str, Any] = {"role": message.role, "content": message.text_content()}
+        extra_fields = message.model_extra or {}
+        if "tool_calls" in extra_fields:
+            msg["tool_calls"] = extra_fields["tool_calls"]
+        if "tool_call_id" in extra_fields:
+            msg["tool_call_id"] = extra_fields["tool_call_id"]
+        if "name" in extra_fields:
+            msg["name"] = extra_fields["name"]
+        messages.append(msg)
+
     call_kwargs: Dict[str, Any] = {"model": litellm_model, "messages": messages}
     if request.temperature is not None:
         call_kwargs["temperature"] = request.temperature
@@ -623,6 +643,13 @@ async def _call_litellm(
         call_kwargs["max_tokens"] = request.max_tokens
     if request.top_p is not None:
         call_kwargs["top_p"] = request.top_p
+
+    # Pass through tool definitions and tool_choice
+    extra = request.model_extra or {}
+    if extra.get("tools"):
+        call_kwargs["tools"] = extra["tools"]
+    if extra.get("tool_choice"):
+        call_kwargs["tool_choice"] = extra["tool_choice"]
 
     if cred_provider and cred_provider != "ollama":
         api_key = get_credential(cred_provider)
@@ -640,12 +667,23 @@ async def _call_litellm(
             raise RateLimitExhausted(model=model, retry_after=60)
         raise
 
-    return {
-        "content": response.choices[0].message.content,
+    msg = response.choices[0].message
+    result: dict[str, Any] = {
+        "content": msg.content,
         "finish_reason": response.choices[0].finish_reason or "stop",
         "prompt_tokens": response.usage.prompt_tokens if response.usage else 0,
         "completion_tokens": response.usage.completion_tokens if response.usage else 0,
     }
+
+    # Preserve tool_calls from LLM response
+    tool_calls = getattr(msg, "tool_calls", None)
+    if tool_calls:
+        result["tool_calls"] = [
+            tc.model_dump() if hasattr(tc, "model_dump") else tc
+            for tc in tool_calls
+        ]
+
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -965,6 +1003,13 @@ async def chat_completions(
         # ------------------------------------------------------------------
         # Non-streaming response (regular JSON)
         # ------------------------------------------------------------------
+        message: dict[str, Any] = {
+            "role": "assistant",
+            "content": response_data["content"],
+        }
+        if "tool_calls" in response_data:
+            message["tool_calls"] = response_data["tool_calls"]
+
         return {
             "id": request_id,
             "object": "chat.completion",
@@ -973,10 +1018,7 @@ async def chat_completions(
             "choices": [
                 {
                     "index": 0,
-                    "message": {
-                        "role": "assistant",
-                        "content": response_data["content"],
-                    },
+                    "message": message,
                     "finish_reason": response_data["finish_reason"],
                 }
             ],
@@ -1027,8 +1069,12 @@ def _build_streaming_response(
     async def event_generator():
         created = int(time.time())
         content = response_data.get("content", "") or ""
+        tool_calls = response_data.get("tool_calls")
 
-        # Chunk 1: the content
+        # Chunk 1: the content (and tool_calls if present)
+        delta: dict[str, Any] = {"role": "assistant", "content": content}
+        if tool_calls:
+            delta["tool_calls"] = tool_calls
         chunk = {
             "id": request_id,
             "object": "chat.completion.chunk",
@@ -1037,7 +1083,7 @@ def _build_streaming_response(
             "choices": [
                 {
                     "index": 0,
-                    "delta": {"role": "assistant", "content": content},
+                    "delta": delta,
                     "finish_reason": None,
                 }
             ],
