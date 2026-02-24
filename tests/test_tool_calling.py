@@ -227,10 +227,11 @@ class TestCallLitellmMessages:
         call_kwargs = mock_comp.call_args[1]
         messages = call_kwargs["messages"]
 
-        # Assistant message should have tool_calls
+        # Assistant message should have tool_calls and content: None (not "")
         assistant_msg = messages[1]
         assert "tool_calls" in assistant_msg
         assert assistant_msg["tool_calls"] == [SAMPLE_TOOL_CALL]
+        assert assistant_msg["content"] is None
 
         # Tool message should have tool_call_id and name
         tool_msg = messages[2]
@@ -261,6 +262,11 @@ class TestCallLitellmMessages:
         assert "tool_calls" in result
         assert result["tool_calls"] == [SAMPLE_TOOL_CALL]
         assert result["finish_reason"] == "tool_calls"
+
+        # Verify tool_calls round-trips through JSON serialization without TypeError
+        serialized = json.dumps(result)
+        deserialized = json.loads(serialized)
+        assert deserialized["tool_calls"] == [SAMPLE_TOOL_CALL]
 
     @pytest.mark.asyncio
     async def test_no_tool_calls_in_response_when_absent(self):
@@ -369,20 +375,20 @@ class TestNonStreamingToolCalls:
 class TestStreamingToolCalls:
     """Verify tool_calls appear in SSE stream chunks."""
 
-    @pytest.mark.parametrize("response_data,expected_key,expected_value", [
+    @pytest.mark.parametrize("response_data,expected_key,expected_value,expected_finish", [
         (
             {"content": None, "finish_reason": "tool_calls", "prompt_tokens": 10,
              "completion_tokens": 5, "tool_calls": [SAMPLE_TOOL_CALL]},
-            "tool_calls", [SAMPLE_TOOL_CALL],
+            "tool_calls", [SAMPLE_TOOL_CALL], "tool_calls",
         ),
         (
             {"content": "Hello world", "finish_reason": "stop",
              "prompt_tokens": 10, "completion_tokens": 5},
-            "content", "Hello world",
+            "content", "Hello world", "stop",
         ),
     ])
-    def test_streaming_delta(self, response_data, expected_key, expected_value):
-        """SSE stream delta should contain the expected key/value."""
+    def test_streaming_delta(self, response_data, expected_key, expected_value, expected_finish):
+        """SSE stream delta should contain the expected key/value and finish_reason."""
 
         sse_response = _build_streaming_response(
             request_id="test-123",
@@ -403,10 +409,18 @@ class TestStreamingToolCalls:
         data_events = [e for e in events if isinstance(e, dict) and "data" in e]
         assert len(data_events) >= 2
 
+        # First chunk: delta with content or tool_calls
         first_chunk = json.loads(data_events[0]["data"])
         delta = first_chunk["choices"][0]["delta"]
         assert expected_key in delta
         assert delta[expected_key] == expected_value
+        # When tool_calls present, content must be null
+        if "tool_calls" in delta:
+            assert delta["content"] is None
+
+        # Second chunk: finish_reason
+        finish_chunk = json.loads(data_events[1]["data"])
+        assert finish_chunk["choices"][0]["finish_reason"] == expected_finish
 
 
 # ---------------------------------------------------------------------------
