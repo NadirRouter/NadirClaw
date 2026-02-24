@@ -626,7 +626,10 @@ async def _call_litellm(
     # Preserve full message structure (tool_calls, tool_call_id, name, etc.)
     messages = []
     for message in request.messages:
-        msg: dict[str, Any] = {"role": message.role, "content": message.text_content()}
+        # Use text_content() for readable text, but preserve None for
+        # tool-calling assistant messages (OpenAI/Anthropic require null).
+        text = message.text_content()
+        msg: dict[str, Any] = {"role": message.role, "content": text if text else message.content}
         extra_fields = message.model_extra or {}
         if "tool_calls" in extra_fields:
             msg["tool_calls"] = extra_fields["tool_calls"]
@@ -1072,9 +1075,13 @@ def _build_streaming_response(
         tool_calls = response_data.get("tool_calls")
 
         # Chunk 1: the content (and tool_calls if present)
-        delta: dict[str, Any] = {"role": "assistant", "content": content}
+        # When tool_calls are present, content must be null per OpenAI protocol.
+        delta: dict[str, Any] = {"role": "assistant"}
         if tool_calls:
             delta["tool_calls"] = tool_calls
+            delta["content"] = None
+        else:
+            delta["content"] = content
         chunk = {
             "id": request_id,
             "object": "chat.completion.chunk",
