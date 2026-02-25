@@ -659,6 +659,10 @@ async def _call_litellm(
         if api_key:
             call_kwargs["api_key"] = api_key
 
+    # Pass api_base for Ollama models so LiteLLM reaches the right host
+    if litellm_model.startswith("ollama/") or litellm_model.startswith("ollama_chat/"):
+        call_kwargs["api_base"] = settings.OLLAMA_API_BASE
+
     logger.debug("Calling LiteLLM: model=%s (provider=%s)", litellm_model, provider)
     try:
         response = await litellm.acompletion(**call_kwargs)

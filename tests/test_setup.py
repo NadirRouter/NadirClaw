@@ -11,10 +11,13 @@ from click.testing import CliRunner
 
 from nadirclaw.setup import (
     ENV_FILE,
+    OLLAMA_DEFAULT_API_BASE,
+    _check_ollama_connectivity_with_base,
     _filter_anthropic_top,
     _filter_google_top,
     _filter_openai_top,
     _filter_top_models,
+    _normalize_ollama_api_base,
     classify_model_tier,
     detect_existing_config,
     fetch_provider_models,
@@ -506,3 +509,112 @@ class TestSetupCLI:
         runner = CliRunner()
         result = runner.invoke(main, ["setup"], input="n\n")
         assert result.exit_code == 0
+
+
+# ---------------------------------------------------------------------------
+# _normalize_ollama_api_base
+# ---------------------------------------------------------------------------
+
+class TestNormalizeOllamaApiBase:
+    def test_empty_returns_default(self):
+        assert _normalize_ollama_api_base("") == OLLAMA_DEFAULT_API_BASE
+
+    def test_blank_returns_default(self):
+        assert _normalize_ollama_api_base("   ") == OLLAMA_DEFAULT_API_BASE
+
+    def test_already_normalized(self):
+        assert _normalize_ollama_api_base("http://localhost:11434") == "http://localhost:11434"
+
+    def test_missing_scheme(self):
+        assert _normalize_ollama_api_base("localhost:11434") == "http://localhost:11434"
+
+    def test_trailing_slash(self):
+        assert _normalize_ollama_api_base("http://localhost:11434/") == "http://localhost:11434"
+
+    def test_https_preserved(self):
+        assert _normalize_ollama_api_base("https://ollama.example.com") == "https://ollama.example.com"
+
+    def test_custom_host(self):
+        assert _normalize_ollama_api_base("http://192.168.1.50:11434") == "http://192.168.1.50:11434"
+
+
+# ---------------------------------------------------------------------------
+# _check_ollama_connectivity_with_base
+# ---------------------------------------------------------------------------
+
+class TestCheckOllamaConnectivityWithBase:
+    def test_reachable(self, monkeypatch):
+        mock_resp = MagicMock()
+        mock_resp.__enter__ = lambda s: s
+        mock_resp.__exit__ = MagicMock(return_value=False)
+        monkeypatch.setattr("urllib.request.urlopen", lambda *a, **k: mock_resp)
+        assert _check_ollama_connectivity_with_base("http://localhost:11434") is True
+
+    def test_unreachable(self, monkeypatch):
+        monkeypatch.setattr(
+            "urllib.request.urlopen",
+            lambda *a, **k: (_ for _ in ()).throw(Exception("connection refused")),
+        )
+        assert _check_ollama_connectivity_with_base("http://localhost:11434") is False
+
+    def test_normalizes_url(self, monkeypatch):
+        """Should normalize the URL before connecting."""
+        captured = {}
+
+        def fake_urlopen(req, **kw):
+            captured["url"] = req.full_url
+            mock_resp = MagicMock()
+            mock_resp.__enter__ = lambda s: s
+            mock_resp.__exit__ = MagicMock(return_value=False)
+            return mock_resp
+
+        monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+        _check_ollama_connectivity_with_base("localhost:11434/")
+        assert captured["url"] == "http://localhost:11434/api/tags"
+
+
+# ---------------------------------------------------------------------------
+# fetch_provider_models with custom ollama_api_base
+# ---------------------------------------------------------------------------
+
+class TestFetchProviderModelsOllamaBase:
+    def test_ollama_custom_base(self, monkeypatch):
+        """Should use the custom api_base when fetching Ollama models."""
+        captured = {}
+
+        def fake_urlopen(req, **kw):
+            captured["url"] = req.full_url
+            mock_resp = MagicMock()
+            mock_resp.read.return_value = json.dumps({
+                "models": [{"name": "llama3.1:8b"}]
+            }).encode()
+            mock_resp.__enter__ = lambda s: s
+            mock_resp.__exit__ = MagicMock(return_value=False)
+            return mock_resp
+
+        monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+        models = fetch_provider_models("ollama", "", ollama_api_base="http://192.168.1.50:11434")
+        assert "ollama/llama3.1:8b" in models
+        assert captured["url"] == "http://192.168.1.50:11434/api/tags"
+
+
+# ---------------------------------------------------------------------------
+# write_env_file with ollama_api_base
+# ---------------------------------------------------------------------------
+
+class TestWriteEnvFileOllama:
+    def test_includes_ollama_api_base(self, tmp_nadirclaw_dir):
+        _, fake_env = tmp_nadirclaw_dir
+        write_env_file(
+            simple="flash",
+            complex_model="gpt-4.1",
+            ollama_api_base="http://192.168.1.50:11434",
+        )
+        content = fake_env.read_text()
+        assert "OLLAMA_API_BASE=http://192.168.1.50:11434" in content
+
+    def test_omits_ollama_api_base_when_none(self, tmp_nadirclaw_dir):
+        _, fake_env = tmp_nadirclaw_dir
+        write_env_file(simple="flash", complex_model="gpt-4.1")
+        content = fake_env.read_text()
+        assert "OLLAMA_API_BASE" not in content
