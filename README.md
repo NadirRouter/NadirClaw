@@ -698,11 +698,50 @@ Server:        RUNNING (ok)
 
 ## How It Works
 
+NadirClaw sits between your application and the LLM provider as a transparent proxy:
+
+```
+┌─────────────────┐
+│  Your App       │
+│  (Claude Code,  │
+│   Cursor, etc)  │
+└────────┬────────┘
+         │ OpenAI API request
+         ▼
+┌─────────────────┐
+│  NadirClaw      │
+│  Classifier     │
+└────────┬────────┘
+         │ Route decision (10ms)
+         ▼
+┌─────────────────┐
+│  LLM Provider   │
+│  (Claude, GPT,  │
+│   Gemini, etc)  │
+└─────────────────┘
+```
+
 Most LLM usage doesn't need a premium model. NadirClaw routes each prompt to the right tier automatically:
 
 <p align="center">
   <img src="docs/images/usage-distribution.png" alt="Typical LLM usage distribution" width="500" />
 </p>
+
+### Step-by-Step
+
+1. **Your tool sends a request** to `localhost:8856/v1/chat/completions` (OpenAI format)
+
+2. **NadirClaw intercepts it** and runs the prompt through a lightweight classifier based on sentence embeddings
+
+3. **Routes to the cheapest viable model** based on the classification result and routing modifiers
+
+4. **Forwards the request** to the chosen provider and returns the response
+
+5. **Logs everything** for cost analysis and reporting
+
+Total overhead: ~10ms (classifier inference on a warm encoder)
+
+### The Classifier
 
 NadirClaw uses a binary complexity classifier based on sentence embeddings:
 
@@ -723,6 +762,17 @@ NadirClaw uses a binary complexity classifier based on sentence embeddings:
    - **All other models** — called via [LiteLLM](https://docs.litellm.ai), which provides a unified interface to 100+ providers
 
 6. **Fallback chains**: If the selected model fails (429 rate limit, 5xx error, or timeout), NadirClaw cascades through a configurable fallback chain. Set `NADIRCLAW_FALLBACK_CHAIN=gpt-4.1,claude-sonnet-4-5-20250929,gemini-2.5-flash` to define the order. Default chain uses all your configured tier models.
+
+### Why This Works
+
+The key insight: **most prompts don't need the most expensive model.**
+
+In real-world coding assistant usage:
+- **60-70%** of prompts work fine on cheap models (Haiku, GPT-4o-mini, Gemini Flash)
+- **20-30%** need mid-tier (Sonnet, GPT-4o, Gemini Pro)
+- **5-10%** need flagship (Opus, o1, o3)
+
+But without a classifier, everything hits the expensive default. NadirClaw's job is to route smartly without breaking your workflow.
 
 Classification takes ~10ms on a warm encoder. The first request takes ~2-3 seconds to load the embedding model.
 
