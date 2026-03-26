@@ -1260,6 +1260,15 @@ async def chat_completions(
                    f"Maximum is {_MAX_CONTENT_LENGTH:,} chars.",
         )
 
+    # --- Prompt injection detection ---
+    from nadirclaw.prompt_guard import check_and_act, should_block, should_warn
+    _injection_signal = check_and_act(request.messages)
+    if _injection_signal and should_block():
+        raise HTTPException(
+            status_code=400,
+            detail="Request blocked: potential prompt injection detected",
+        )
+
     start_time = time.time()
     request_id = str(uuid.uuid4())
 
@@ -1635,6 +1644,13 @@ async def chat_completions(
                 "reasoning_tokens": response_data["reasoning_tokens"],
             }
 
+        # --- PII redaction on LLM output (non-streaming only) ---
+        from nadirclaw.pii_redactor import redact_pii
+        if message.get("content"):
+            message["content"], pii_found = redact_pii(message["content"])
+            if pii_found:
+                logger.info("PII redacted from response for request %s", request_id)
+
         response_body = {
             "id": request_id,
             "object": "chat.completion",
@@ -1656,7 +1672,10 @@ async def chat_completions(
             },
         }
 
-        return JSONResponse(content=response_body)
+        resp = JSONResponse(content=response_body)
+        if _injection_signal and should_warn():
+            resp.headers["X-Prompt-Guard-Warning"] = _injection_signal.pattern_name
+        return resp
 
     except HTTPException:
         raise  # Re-raise FastAPI HTTP exceptions as-is
