@@ -94,8 +94,8 @@ discuss the approach — it saves time for everyone.
 If you pick up a roadmap item, comment on the relevant issue so others know it is in progress.
 To propose a new integration or feature, open a [GitHub Discussion] first.
 
-[GitHub Discussions]: https://github.com/doramirdor/NadirClaw/discussions
-[GitHub Issues]: https://github.com/doramirdor/NadirClaw/issues
+[GitHub Discussions]: https://github.com/NadirRouter/NadirClaw/discussions
+[GitHub Issues]: https://github.com/NadirRouter/NadirClaw/issues
 
 ---
 

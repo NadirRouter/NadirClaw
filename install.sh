@@ -1,9 +1,9 @@
 #!/bin/sh
 # NadirClaw installer
-# Usage: curl -fsSL https://raw.githubusercontent.com/doramirdor/NadirClaw/main/install.sh | sh
+# Usage: curl -fsSL https://raw.githubusercontent.com/NadirRouter/NadirClaw/main/install.sh | sh
 set -e
 
-REPO="https://github.com/doramirdor/NadirClaw.git"
+REPO="https://github.com/NadirRouter/NadirClaw.git"
 INSTALL_DIR="${NADIRCLAW_INSTALL_DIR:-$HOME/.nadirclaw}"
 BIN_DIR="${NADIRCLAW_BIN_DIR:-/usr/local/bin}"
 

@@ -217,6 +217,59 @@ class Settings:
             return 40
 
     @property
+    def CLASSIFIER(self) -> str:
+        """Classifier type: trained (default), binary, or cascade.
+
+        Set NADIRCLAW_CLASSIFIER=trained for the sklearn-based classifier (96%+ accuracy).
+        Set NADIRCLAW_CLASSIFIER=cascade for the centroid + structural feature cascade.
+        Set NADIRCLAW_CLASSIFIER=binary for the original binary classifier.
+        """
+        val = os.getenv("NADIRCLAW_CLASSIFIER", "trained").lower()
+        if val not in ("binary", "cascade", "trained"):
+            _settings_logger.warning(
+                "Invalid NADIRCLAW_CLASSIFIER=%r -- expected binary|cascade|trained. "
+                "Falling back to 'binary'.",
+                val,
+            )
+            return "binary"
+        return val
+
+    @property
+    def CASCADE_CONFIDENCE_THRESHOLD(self) -> float:
+        """Confidence threshold for the cascade classifier's escalation.
+
+        When the fast centroid classifier's confidence is below this value,
+        the cascade escalates to structural feature analysis.
+        Default: 0.75.
+        """
+        try:
+            return float(os.getenv("NADIRCLAW_CASCADE_THRESHOLD", "0.75"))
+        except ValueError:
+            return 0.75
+
+    @property
+    def CASCADE_SOFTMAX_TEMPERATURE(self) -> float:
+        """Softmax temperature for centroid similarity → probability conversion.
+
+        Lower = sharper decisions.  Default: 0.30.
+        """
+        try:
+            return float(os.getenv("NADIRCLAW_CASCADE_TEMPERATURE", "0.30"))
+        except ValueError:
+            return 0.30
+
+    @property
+    def CASCADE_COMPLEX_SUB_CLUSTERS(self) -> int:
+        """Number of k-means sub-clusters for the complex tier centroid.
+
+        Default: 5.
+        """
+        try:
+            return max(1, int(os.getenv("NADIRCLAW_CASCADE_SUB_CLUSTERS", "5")))
+        except ValueError:
+            return 5
+
+    @property
     def has_explicit_tiers(self) -> bool:
         """True if SIMPLE_MODEL and COMPLEX_MODEL are explicitly set via env."""
         return bool(

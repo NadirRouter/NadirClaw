@@ -1,0 +1,1559 @@
+{
+  "metadata": {
+    "timestamp": "2026-03-26T07:22:20.903687",
+    "total_prompts": 50,
+    "successful": 26,
+    "system_prompt_chars": 3285,
+    "models": {
+      "simple": "gemini/gemini-2.0-flash",
+      "mid": "gemini/gemini-2.5-flash",
+      "complex": "gemini/gemini-2.5-pro"
+    },
+    "baseline": "gemini/gemini-2.5-pro"
+  },
+  "summary": {
+    "routing_accuracy": "26/50",
+    "total_opus_cost": 0.49884,
+    "total_nadir_cost": 0.380439,
+    "total_saved": 0.118401,
+    "savings_pct": 23.7,
+    "avg_opus_latency_ms": 20131,
+    "avg_nadir_latency_ms": 16951
+  },
+  "results": [
+    {
+      "index": 1,
+      "expected_tier": "simple",
+      "routed_tier": "simple",
+      "routed_model": "gemini-2.0-flash",
+      "confidence": 0.933,
+      "classify_ms": 992,
+      "correct_route": true,
+      "nadir": {
+        "success": true,
+        "cost": 9.989999999999999e-05,
+        "latency_ms": 1635,
+        "prompt_tokens": 767,
+        "completion_tokens": 58,
+        "output": "Okay, I understand you're experiencing slow responses in the `us-east-1` region. I'll check the current service status for you.\n\n```tool_code\ncheck_service_status(service=\"all\", region=\"us-east-1\")\n```"
+      },
+      "opus": {
+        "success": false,
+        "cost": 0.0,
+        "latency_ms": 1195,
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "output": ""
+      },
+      "ticket": "Hi, what's the current status of the us-east-1 region? We're seeing slow responses."
+    },
+    {
+      "index": 2,
+      "expected_tier": "simple",
+      "routed_tier": "simple",
+      "routed_model": "gemini-2.0-flash",
+      "confidence": 0.971,
+      "classify_ms": 644,
+      "correct_route": true,
+      "nadir": {
+        "success": false,
+        "cost": 0.0,
+        "latency_ms": 837,
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "output": ""
+      },
+      "opus": {
+        "success": false,
+        "cost": 0.0,
+        "latency_ms": 828,
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "output": ""
+      },
+      "ticket": "How do I reset my MFA device? I got a new phone."
+    },
+    {
+      "index": 3,
+      "expected_tier": "simple",
+      "routed_tier": "simple",
+      "routed_model": "gemini-2.0-flash",
+      "confidence": 0.973,
+      "classify_ms": 596,
+      "correct_route": true,
+      "nadir": {
+        "success": true,
+        "cost": 9.71e-05,
+        "latency_ms": 1284,
+        "prompt_tokens": 763,
+        "completion_tokens": 52,
+        "output": "Thanks for reaching out!\n\nYes, we do offer 24/7 support on the Pro plan. Our team is available around the clock to assist with any issues you might encounter.\n\nIs there anything specific I can help you with right now?\n"
+      },
+      "opus": {
+        "success": false,
+        "cost": 0.0,
+        "latency_ms": 574,
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "output": ""
+      },
+      "ticket": "What are your support hours? Do you have 24/7 support on the Pro plan?"
+    },
+    {
+      "index": 4,
+      "expected_tier": "simple",
+      "routed_tier": "simple",
+      "routed_model": "gemini-2.0-flash",
+      "confidence": 0.934,
+      "classify_ms": 349,
+      "correct_route": true,
+      "nadir": {
+        "success": false,
+        "cost": 0.0,
+        "latency_ms": 547,
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "output": ""
+      },
+      "opus": {
+        "success": true,
+        "cost": 0.010651250000000003,
+        "latency_ms": 10481,
+        "prompt_tokens": 761,
+        "completion_tokens": 970,
+        "output": "Of course, I can certainly help you with that.\n\nTo pull up your account details securely, could you please provide your Account ID? You can typically find this in the top-right corner of your CloudStack Pro dashboard.\n\nIf you don't have that handy, the company name associated with the account will also work.\n\nOnce I have that information, I'll be able to look up your current plan and contract renewal date for you."
+      },
+      "ticket": "Can you tell me what plan we're on and when our contract renews?"
+    },
+    {
+      "index": 5,
+      "expected_tier": "simple",
+      "routed_tier": "complex",
+      "routed_model": "gemini-2.5-pro",
+      "confidence": 0.632,
+      "classify_ms": 276,
+      "correct_route": false,
+      "nadir": {
+        "success": false,
+        "cost": 0.0,
+        "latency_ms": 3764,
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "output": ""
+      },
+      "opus": {
+        "success": false,
+        "cost": 0.0,
+        "latency_ms": 3764,
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "output": ""
+      },
+      "ticket": "Where can I find the API documentation for your REST API v3?"
+    },
+    {
+      "index": 6,
+      "expected_tier": "simple",
+      "routed_tier": "simple",
+      "routed_model": "gemini-2.0-flash",
+      "confidence": 0.928,
+      "classify_ms": 282,
+      "correct_route": true,
+      "nadir": {
+        "success": true,
+        "cost": 0.0006632,
+        "latency_ms": 9506,
+        "prompt_tokens": 760,
+        "completion_tokens": 1468,
+        "output": "Okay, I can help you with that. Here's how you can add a new team member to your CloudStack Pro account with read-only access.  This will allow them to view resources and configurations without making any changes.\n\n**Steps:**\n\n1.  **Log in to the CloudStack Pro Console:**  Use your administrator credentials to log in to the CloudStack Pro web console.\n\n2.  **Navigate to the IAM (Identity and Access Management) Section:**  Look for a section labeled \"IAM,\" \"Users,\" \"Access Control,\" or something similar in the main navigation menu.  The exact name may vary slightly depending on the console version.\n\n3.  **Create a New User:**\n    *   Click on the button or link to create a new user. This is usually labeled \"Add User,\" \"Create User,\" or similar.\n    *   Enter the required information for the new user, such as:\n        *   **Username:** A unique username for the new team member.\n        *   **Email Address:**  The team member's email address.  This is important for password resets and notifications.\n        *   **Password:**  You might be able to set a temporary password for the user, or the system might generate one.  In either case, ensure the user knows how to reset their password upon first login.\n        *   **(Optional) First Name, Last Name:**  Enter the team member's name for better identification.\n\n4.  **Assign the Read-Only Role:** This is the most important step.  You need to assign a role or policy to the new user that grants them read-only access.\n    *   **Look for Role Assignment:**  After creating the user, you'll typically be presented with options to assign roles, policies, or groups.\n    *   **Select the Read-Only Role:**  Look for a pre-defined role named something like:\n        *   `ReadOnly`\n        *   `Viewer`\n        *   `CloudStackReadOnly`\n        *   `OrganizationViewer`\n        *   If you don't see a pre-defined read-only role, you might need to create a custom role.  (See the \"Creating a Custom Read-Only Role\" section below if this is the case).\n    *   **Attach the Role:**  Select the appropriate read-only role and attach it to the newly created user.\n\n5.  **Review and Confirm:**  Double-check all the information you've entered, especially the assigned role.  Confirm the creation of the user.\n\n6.  **Inform the User:**  Provide the new team member with their username and temporary password (if applicable), and instructions on how to log in to the CloudStack Pro console.  Also, instruct them on how to reset their password upon their first login.\n\n**Creating a Custom Read-Only Role (If Necessary):**\n\nIf you don't have a pre-defined read-only role, you'll need to create one.  This involves defining a policy that grants only `GET` or `List` permissions to all relevant resources.  The exact steps will depend on the CloudStack Pro version, but here's the general idea:\n\n1.  **Navigate to the Role Management Section:**  Look for a section labeled \"Roles,\" \"Policies,\" or \"Access Control\" within the IAM section.\n2.  **Create a New Role:**  Click on the button or link to create a new role.\n3.  **Name the Role:**  Give the role a descriptive name, such as \"CustomReadOnly\".\n4.  **Define the Policy:**  This is where you specify the permissions.  You'll need to create a policy that allows `GET` or `List` actions on all relevant CloudStack Pro resources.  This might involve adding multiple statements to the policy.  Here's an example of what a policy statement might look like (the syntax will vary):\n\n    ```json\n    {\n      \"Effect\": \"Allow\",\n      \"Action\": [\n        \"compute:List*\",\n        \"compute:Get*\",\n        \"network:List*\",\n        \"network:Get*\",\n        \"database:List*\",\n        \"database:Get*\",\n        \"iam:ListUsers\",\n        \"iam:GetUser\"\n        // Add more resources and actions as needed\n      ],\n      \"Resource\": \"*\"\n    }\n    ```\n\n    *   **`Effect`: `Allow`**:  This means the policy grants permission.\n    *   **`Action`**:  This specifies the actions that are allowed.  Use `List*` and `Get*` to allow listing and retrieving information.  Avoid `Create`, `Update`, `Delete`, or any other actions that modify resources.  The specific actions available will depend on the CloudStack Pro API.  You'll need to consult the CloudStack Pro documentation for a complete list of actions.  Examples include:\n        *   `compute:ListInstances`\n        *   `compute:GetInstance`\n        *   `network:ListNetworks`\n        *   `network:GetNetwork`\n        *   `database:ListDatabases`\n        *   `database:GetDatabase`\n    *   **`Resource`: `*`**:  This means the policy applies to all resources.  For more granular control, you can specify specific resource IDs, but for a general read-only role, `*` is usually appropriate.\n\n5.  **Save the Role:**  Save the newly created role.\n\n6.  **Assign the Custom Role to the User:**  Follow the steps in the \"Assign the Read-Only Role\" section above, but select your newly created \"CustomReadOnly\" role instead of a pre-defined role.\n\n**Important Considerations:**\n\n*   **Least Privilege:**  Always adhere to the principle of least privilege.  Grant users only the minimum permissions they need to perform their tasks.  Carefully review the actions you include in your custom read-only role to avoid inadvertently granting excessive permissions.\n*   **Testing:**  After creating the user and assigning the role, have the new team member log in and verify that they can access the information they need but cannot make any changes.\n*   **Documentation:**  Refer to the official CloudStack Pro documentation for the most accurate and up-to-date information on IAM and role management.  The specific steps and options may vary depending on your version of CloudStack Pro.  You can search the documentation using keywords like \"IAM,\" \"users,\" \"roles,\" \"permissions,\" and \"access control.\"\n*   **Audit Logging:**  Enable audit logging to track user activity and ensure that the read-only role is functioning as expected.  Review the logs periodically to identify any potential security issues.\n\nLet me know if you have any other questions or if you run into any issues during the process.  I'm here to help!\n"
+      },
+      "opus": {
+        "success": true,
+        "cost": 0.01926125,
+        "latency_ms": 18062,
+        "prompt_tokens": 761,
+        "completion_tokens": 1831,
+        "output": "Of course, I can help with that. Adding a team member with specific, limited permissions is a great security practice.\n\nYou can achieve this by inviting the new user and assigning them the built-in `ReadOnlyAccess` role. Here are the steps to do this through the dashboard, as well as via our CLI and API for more advanced workflows.\n\n### Method 1: Using the CloudStack Pro Dashboard (Recommended)\n\nThis is the most straightforward method:\n\n1.  **Navigate to IAM**: Log in to your CloudStack Pro account and go to the **IAM & Team** section in the left-hand navigation menu.\n2.  **Invite Member**: Click the **\"Invite Member\"** button, usually located in the top-right corner.\n3.  **Enter Details**: In the dialog box, enter the new team member's email address.\n4.  **Assign Role**: In the **\"Role\"** dropdown menu, select the `ReadOnlyAccess` role. This role grants permission to view resources across the account but denies any actions that would create, modify, or delete them.\n5.  **Send Invitation**: Click **\"Send Invitation\"**.\n\nThe user will receive an email inviting them to join your CloudStack Pro organization. Once they accept and create their login, they will have read-only access as specified.\n\n---\n\n### Method 2: Using the CloudStack Pro CLI\n\nIf you prefer managing your team via the command line, you can use the following command:\n\n```bash\n# Ensure you are logged in to the CLI first\ncsp iam invite-user --email \"new-teammate@yourcompany.com\" --role \"ReadOnlyAccess\"\n```\n\nThis will send the same invitation email as the dashboard method.\n\n---\n\n### Method 3: Using the REST API v3\n\nFor programmatic user management, you can make a `POST` request to our API endpoint:\n\n**Endpoint:** `POST /v3/iam/invitations`\n\n**Request Body:**\n```json\n{\n  \"email\": \"new-teammate@yourcompany.com\",\n  \"role_name\": \"ReadOnlyAccess\"\n}\n```\n\n**A quick tip:** While `ReadOnlyAccess` is perfect for most auditing and visibility use cases, you can also create **custom IAM policies** if you need more granular control (e.g., read-only access to only your Kubernetes clusters but not your billing information). You can manage these in the \"IAM & Team\" -> \"Policies\" section of the dashboard.\n\nPlease let me know if you have any other questions!\n\nBest regards,\n\nCloudStack Pro Customer Success"
+      },
+      "ticket": "How do I add a new team member to our account with read-only access?",
+      "judge": {
+        "error": "Unterminated string starting at: line 1 column 51 (char 50)",
+        "verdict": "error"
+      }
+    },
+    {
+      "index": 7,
+      "expected_tier": "simple",
+      "routed_tier": "simple",
+      "routed_model": "gemini-2.0-flash",
+      "confidence": 0.942,
+      "classify_ms": 642,
+      "correct_route": true,
+      "nadir": {
+        "success": true,
+        "cost": 9.279999999999999e-05,
+        "latency_ms": 986,
+        "prompt_tokens": 756,
+        "completion_tokens": 43,
+        "output": "The maximum file upload size for our object storage is 5TB per object.\n\nIs there anything else I can help you with regarding object storage, such as information on pricing, redundancy, or access control?\n"
+      },
+      "opus": {
+        "success": true,
+        "cost": 0.012816250000000001,
+        "latency_ms": 11865,
+        "prompt_tokens": 757,
+        "completion_tokens": 1187,
+        "output": "Hello,\n\nThank you for reaching out with your question about our Object Storage service.\n\nThe maximum file upload size depends on the method you use:\n\n*   For a standard, single `PUT` operation, the maximum object size is **5 GB**.\n*   For files larger than 5 GB, you can use our multipart upload feature, which supports objects up to **5 TB**.\n\nWhen using multipart upload, each part must be between 5 MB and 5 GB, and you can have up to 10,000 parts per object.\n\nThe good news is that our official SDKs (Python, Node, Go, etc.) and the CloudStack Pro CLI handle multipart uploads automatically for large files. For example, using our CLI, you don't need to do anything special:\n\n```bash\n# This command will automatically use multipart upload for files > 5 GB\ncsp-cli storage cp large-video-file.mp4 s3://my-bucket/videos/\n```\n\nYou can find more detailed information and code examples in our documentation here: [Object Storage Large Object Uploads](https://docs.cloudstackpro.com/storage/large-object-uploads).\n\nPlease let me know if you have any other questions"
+      },
+      "ticket": "What's the maximum file upload size for your object storage?",
+      "judge": {
+        "error": "Expecting property name enclosed in double quotes: line 1 column 50 (char 49)",
+        "verdict": "error"
+      }
+    },
+    {
+      "index": 8,
+      "expected_tier": "simple",
+      "routed_tier": "simple",
+      "routed_model": "gemini-2.0-flash",
+      "confidence": 0.935,
+      "classify_ms": 707,
+      "correct_route": true,
+      "nadir": {
+        "success": true,
+        "cost": 0.00022820000000000002,
+        "latency_ms": 2876,
+        "prompt_tokens": 754,
+        "completion_tokens": 382,
+        "output": "```tool_code\nfrom datetime import date, timedelta\n\ntoday = date.today()\nstart_date = today\nend_date = today + timedelta(days=7)\n\n# Placeholder for fetching scheduled maintenance.  Replace with actual API call.\n# scheduled_maintenance = get_scheduled_maintenance(start_date, end_date)\n\n# Example data for testing.  Replace with actual API call.\nscheduled_maintenance = [\n    {\"start\": today + timedelta(days=2), \"end\": today + timedelta(days=2, hours=4), \"service\": \"Database Services\", \"region\": \"us-west-2\", \"description\": \"Routine maintenance on PostgreSQL instances.\"},\n    {\"start\": today + timedelta(days=5), \"end\": today + timedelta(days=5, hours=2), \"service\": \"Networking\", \"region\": \"eu-central-1\", \"description\": \"Network upgrade to improve latency.\"},\n]\n\nif scheduled_maintenance:\n    print(\"Yes, there is scheduled maintenance planned for this week:\")\n    for event in scheduled_maintenance:\n        print(f\"- Service: {event['service']}\")\n        print(f\"  Region: {event['region']}\")\n        print(f\"  Start: {event['start'].strftime('%Y-%m-%d %H:%M %Z') if hasattr(event['start'], 'strftime') else event['start']}\")\n        print(f\"  End: {event['end'].strftime('%Y-%m-%d %H:%M %Z') if hasattr(event['end'], 'strftime') else event['end']}\")\n        print(f\"  Description: {event['description']}\")\nelse:\n    print(\"No, there is no scheduled maintenance currently planned for this week.\")\n```"
+      },
+      "opus": {
+        "success": true,
+        "cost": 0.011933750000000002,
+        "latency_ms": 13195,
+        "prompt_tokens": 755,
+        "completion_tokens": 1099,
+        "output": "Hello,\n\nThank you for reaching out and proactively checking on our maintenance schedule.\n\nAt present, there is no major, platform-wide scheduled maintenance planned for this week. All services are currently operating normally.\n\nFor the most up-to-date information and to receive proactive notifications, our official status page is the best resource. You can view all scheduled maintenance windows, subscribe to updates, and see real-time service health here:\n\n**[https://status.cloudstackpro.com](https://status.cloudstackpro.com)**\n\nWe highly recommend subscribing to notifications for the specific services and regions you rely on. This ensures you receive an email or webhook alert well in advance of any planned work that might affect your resources.\n\nIf you have concerns about a specific service or region, please let me know, and I can provide a more targeted status update.\n\nBest regards,\n\nCloudStack Pro Customer Success"
+      },
+      "ticket": "Is there currently any scheduled maintenance planned for this week?",
+      "judge": {
+        "error": "Expecting ',' delimiter: line 1 column 49 (char 48)",
+        "verdict": "error"
+      }
+    },
+    {
+      "index": 9,
+      "expected_tier": "simple",
+      "routed_tier": "simple",
+      "routed_model": "gemini-2.0-flash",
+      "confidence": 0.973,
+      "classify_ms": 852,
+      "correct_route": true,
+      "nadir": {
+        "success": true,
+        "cost": 0.0001393,
+        "latency_ms": 1522,
+        "prompt_tokens": 753,
+        "completion_tokens": 160,
+        "output": "Okay, I can help you with that. Here's how you can download your last 3 invoices:\n\n1.  **Log in to the CloudStack Pro portal:** Access the portal using your account credentials.\n2.  **Navigate to the Billing section:** Look for a \"Billing\" or \"Account\" section in the main navigation.\n3.  **Find the Invoice History:** Within the Billing section, there should be an \"Invoice History\" or similar page.\n4.  **Download Invoices:** Your recent invoices should be listed here. You should be able to download the last 3 invoices directly from this page, usually as PDF files.\n\nIf you're having trouble locating the invoices, please provide your Account ID so I can assist you further.\n"
+      },
+      "opus": {
+        "success": true,
+        "cost": 0.009962500000000001,
+        "latency_ms": 9134,
+        "prompt_tokens": 754,
+        "completion_tokens": 902,
+        "output": "Of course, I can help you with that. You can download your past invoices directly from the CloudStack Pro portal.\n\nHere are the steps:\n\n1.  Log in to your CloudStack Pro account.\n2.  Navigate to the **Account** section in the top-right corner of the dashboard.\n3.  Select **Billing** from the dropdown menu.\n4.  On the Billing page, you will see a tab or section labeled **Invoice History**.\n5.  Your most recent invoices will be listed there. You can click the **Download PDF** icon or link next to each of the last three invoices you need.\n\nPlease note that you'll need to have `Billing` or `Admin` permissions on your account to access this section. If you don't see the Billing option, please check with your account administrator.\n\nLet me know if you run into any trouble or have any other questions"
+      },
+      "ticket": "How do I download our last 3 invoices?",
+      "judge": {
+        "error": "Unterminated string starting at: line 1 column 51 (char 50)",
+        "verdict": "error"
+      }
+    },
+    {
+      "index": 10,
+      "expected_tier": "simple",
+      "routed_tier": "complex",
+      "routed_model": "gemini-2.5-pro",
+      "confidence": 0.651,
+      "classify_ms": 1135,
+      "correct_route": false,
+      "nadir": {
+        "success": true,
+        "cost": 0.01283125,
+        "latency_ms": 11051,
+        "prompt_tokens": 753,
+        "completion_tokens": 1189,
+        "output": "Hello,\n\nThank you for reaching out. That's a great question.\n\nCloudStack Pro offers managed database hosting across multiple geographic regions to help you optimize for latency and meet data residency requirements. Our core managed database services (PostgreSQL, MySQL, and Redis) are available in the following regions:\n\n**North America**\n*   `us-east-1` (N. Virginia)\n*   `us-east-2` (Ohio)\n*   `us-west-1` (N. California)\n*   `us-west-2` (Oregon)\n*   `ca-central-1` (Canada)\n\n**Europe**\n*   `eu-west-1` (Ireland)\n*   `eu-west-2` (London)\n*   `eu-central-1` (Frankfurt)\n\n**Asia-Pacific**\n*   `ap-southeast-1` (Singapore)\n*   `ap-southeast-2` (Sydney)\n*   `ap-northeast-1` (Tokyo)\n\nYou can view this list and select your desired region directly from the database provisioning page in the CloudStack Pro console.\n\nIf you are planning a new deployment and have specific questions about choosing the right region for your application, please let me know. I'd be happy to provide some guidance."
+      },
+      "opus": {
+        "success": true,
+        "cost": 0.01283125,
+        "latency_ms": 11051,
+        "prompt_tokens": 753,
+        "completion_tokens": 1189,
+        "output": "Hello,\n\nThank you for reaching out. That's a great question.\n\nCloudStack Pro offers managed database hosting across multiple geographic regions to help you optimize for latency and meet data residency requirements. Our core managed database services (PostgreSQL, MySQL, and Redis) are available in the following regions:\n\n**North America**\n*   `us-east-1` (N. Virginia)\n*   `us-east-2` (Ohio)\n*   `us-west-1` (N. California)\n*   `us-west-2` (Oregon)\n*   `ca-central-1` (Canada)\n\n**Europe**\n*   `eu-west-1` (Ireland)\n*   `eu-west-2` (London)\n*   `eu-central-1` (Frankfurt)\n\n**Asia-Pacific**\n*   `ap-southeast-1` (Singapore)\n*   `ap-southeast-2` (Sydney)\n*   `ap-northeast-1` (Tokyo)\n\nYou can view this list and select your desired region directly from the database provisioning page in the CloudStack Pro console.\n\nIf you are planning a new deployment and have specific questions about choosing the right region for your application, please let me know. I'd be happy to provide some guidance."
+      },
+      "ticket": "What regions do you support for database hosting?"
+    },
+    {
+      "index": 11,
+      "expected_tier": "simple",
+      "routed_tier": "complex",
+      "routed_model": "gemini-2.5-pro",
+      "confidence": 0.65,
+      "classify_ms": 475,
+      "correct_route": false,
+      "nadir": {
+        "success": true,
+        "cost": 0.0213825,
+        "latency_ms": 21425,
+        "prompt_tokens": 754,
+        "completion_tokens": 2044,
+        "output": "Of course. Rotating API keys without causing downtime is a critical security practice, and I'm happy to walk you through the recommended, zero-downtime process.\n\nThis strategy is based on a phased approach where both the old and new keys are active for a short period, ensuring a seamless transition for your applications.\n\n---\n\n### Subject: Zero-Downtime API Key Rotation Process\n\nHello,\n\nThank you for reaching out. That's an excellent question and a crucial best practice for maintaining the security of your CloudStack Pro environment.\n\nHere is the recommended, zero-downtime process for rotating your API keys:\n\n#### **Phase 1: Create and Deploy the New Key**\n\n1.  **Generate a New API Key**:\n    *   Navigate to your CloudStack Pro dashboard.\n    *   Go to **Account Settings > API Access**.\n    *   Click \"Create New API Key\". Give it a descriptive name (e.g., `app-server-key-v2-2023-10-27`).\n    *   Securely copy the new API Key and Secret. **Do not delete your old key yet.**\n\n2.  **Deploy the New Key to Your Application**:\n    *   Update your application's configuration (e.g., environment variables, secrets management system like HashiCorp Vault or AWS Secrets Manager) with the `NEW_API_KEY` and `NEW_API_SECRET`.\n    *   Initiate a rolling restart or deployment of your application. This ensures new instances/pods will start using the new key, while old instances continue to function with the old key. At this point, your application fleet might be using a mix of old and new keys, which is perfectly fine as both are active.\n\n#### **Phase 2: Verify the Transition**\n\n3.  **Confirm the New Key is in Use**:\n    *   Wait for your deployment to complete.\n    *   Go back to the **Account Settings > API Access** page in the CloudStack Pro dashboard.\n    *   Check the **\"Last Used\"** timestamp for your new key. You should see it update to \"a few seconds ago\" or a similar recent time.\n    *   Simultaneously, you should see the \"Last Used\" timestamp for your old key become stale as traffic fully migrates to instances using the new key.\n\n4.  **Monitor Your Application**:\n    *   Check your application logs for any API authentication errors to ensure the transition was smooth.\n    *   Allow a safe buffer period (e.g., 1-24 hours, depending on your application's usage patterns) to ensure all processes, including infrequent cron jobs or background workers, have cycled and are now using the new key.\n\n#### **Phase 3: Decommission the Old Key**\n\n5.  **Revoke the Old API Key**:\n    *   Once you are confident that no services"
+      },
+      "opus": {
+        "success": true,
+        "cost": 0.0213825,
+        "latency_ms": 21425,
+        "prompt_tokens": 754,
+        "completion_tokens": 2044,
+        "output": "Of course. Rotating API keys without causing downtime is a critical security practice, and I'm happy to walk you through the recommended, zero-downtime process.\n\nThis strategy is based on a phased approach where both the old and new keys are active for a short period, ensuring a seamless transition for your applications.\n\n---\n\n### Subject: Zero-Downtime API Key Rotation Process\n\nHello,\n\nThank you for reaching out. That's an excellent question and a crucial best practice for maintaining the security of your CloudStack Pro environment.\n\nHere is the recommended, zero-downtime process for rotating your API keys:\n\n#### **Phase 1: Create and Deploy the New Key**\n\n1.  **Generate a New API Key**:\n    *   Navigate to your CloudStack Pro dashboard.\n    *   Go to **Account Settings > API Access**.\n    *   Click \"Create New API Key\". Give it a descriptive name (e.g., `app-server-key-v2-2023-10-27`).\n    *   Securely copy the new API Key and Secret. **Do not delete your old key yet.**\n\n2.  **Deploy the New Key to Your Application**:\n    *   Update your application's configuration (e.g., environment variables, secrets management system like HashiCorp Vault or AWS Secrets Manager) with the `NEW_API_KEY` and `NEW_API_SECRET`.\n    *   Initiate a rolling restart or deployment of your application. This ensures new instances/pods will start using the new key, while old instances continue to function with the old key. At this point, your application fleet might be using a mix of old and new keys, which is perfectly fine as both are active.\n\n#### **Phase 2: Verify the Transition**\n\n3.  **Confirm the New Key is in Use**:\n    *   Wait for your deployment to complete.\n    *   Go back to the **Account Settings > API Access** page in the CloudStack Pro dashboard.\n    *   Check the **\"Last Used\"** timestamp for your new key. You should see it update to \"a few seconds ago\" or a similar recent time.\n    *   Simultaneously, you should see the \"Last Used\" timestamp for your old key become stale as traffic fully migrates to instances using the new key.\n\n4.  **Monitor Your Application**:\n    *   Check your application logs for any API authentication errors to ensure the transition was smooth.\n    *   Allow a safe buffer period (e.g., 1-24 hours, depending on your application's usage patterns) to ensure all processes, including infrequent cron jobs or background workers, have cycled and are now using the new key.\n\n#### **Phase 3: Decommission the Old Key**\n\n5.  **Revoke the Old API Key**:\n    *   Once you are confident that no services"
+      },
+      "ticket": "How do I rotate my API keys without downtime?"
+    },
+    {
+      "index": 12,
+      "expected_tier": "simple",
+      "routed_tier": "complex",
+      "routed_model": "gemini-2.5-pro",
+      "confidence": 0.647,
+      "classify_ms": 789,
+      "correct_route": false,
+      "nadir": {
+        "success": true,
+        "cost": 0.0209325,
+        "latency_ms": 19167,
+        "prompt_tokens": 754,
+        "completion_tokens": 1999,
+        "output": "Hello,\n\nThank you for reaching out. I can certainly provide clarity on CloudStack Pro's SOC 2 compliance.\n\nCloudStack Pro maintains a **SOC 2 Type II** attestation. This means our platform's infrastructure, internal controls, and processes have been independently audited against the trust services criteria for Security, Availability, and Confidentiality.\n\nIt's important to view compliance through a **shared responsibility model**:\n\n*   **CloudStack Pro's Responsibility (Security *of* the Cloud):** We are responsible for securing the underlying infrastructure that runs our services\u2014our data centers, hardware, networking, and the managed services we operate. Our SOC 2 report covers these controls.\n*   **Your Responsibility (Security *in* the Cloud):** You are responsible for how you configure your services, manage user access with IAM, secure your applications, and protect your data within your CloudStack Pro account.\n\nOur compliance provides a foundation that makes it easier for you to achieve and maintain your own SOC 2 compliance for the applications you build on our platform.\n\n**How to get our SOC 2 Report:**\n\nTo assist with your own audits, you can request a copy of our latest SOC 2 Type II report. Due to its confidential nature, it is available under a Non-Disclosure Agreement (NDA).\n\nIf you would like to receive the report, please confirm, and I can initiate the process with our compliance team. I will need the full name and email address of the person authorized to sign the NDA on behalf of your organization.\n\nIn the meantime, here are some platform features that are frequently used by our customers to meet their own SOC 2 control requirements:\n\n*   **IAM Roles & Policies:** For enforcing least-privilege access.\n*   **Audit Logging:** To track all API calls and user activity in your account.\n*   **Vulnerability Scanning:** To identify potential security issues in your running services.\n*   **Encryption at Rest & In Transit:** Enabled by default on most of our services.\n\nPlease let me know if you'd like to proceed with the NDA, or if you have any other questions. We're here to support your compliance journey."
+      },
+      "opus": {
+        "success": true,
+        "cost": 0.0209325,
+        "latency_ms": 19167,
+        "prompt_tokens": 754,
+        "completion_tokens": 1999,
+        "output": "Hello,\n\nThank you for reaching out. I can certainly provide clarity on CloudStack Pro's SOC 2 compliance.\n\nCloudStack Pro maintains a **SOC 2 Type II** attestation. This means our platform's infrastructure, internal controls, and processes have been independently audited against the trust services criteria for Security, Availability, and Confidentiality.\n\nIt's important to view compliance through a **shared responsibility model**:\n\n*   **CloudStack Pro's Responsibility (Security *of* the Cloud):** We are responsible for securing the underlying infrastructure that runs our services\u2014our data centers, hardware, networking, and the managed services we operate. Our SOC 2 report covers these controls.\n*   **Your Responsibility (Security *in* the Cloud):** You are responsible for how you configure your services, manage user access with IAM, secure your applications, and protect your data within your CloudStack Pro account.\n\nOur compliance provides a foundation that makes it easier for you to achieve and maintain your own SOC 2 compliance for the applications you build on our platform.\n\n**How to get our SOC 2 Report:**\n\nTo assist with your own audits, you can request a copy of our latest SOC 2 Type II report. Due to its confidential nature, it is available under a Non-Disclosure Agreement (NDA).\n\nIf you would like to receive the report, please confirm, and I can initiate the process with our compliance team. I will need the full name and email address of the person authorized to sign the NDA on behalf of your organization.\n\nIn the meantime, here are some platform features that are frequently used by our customers to meet their own SOC 2 control requirements:\n\n*   **IAM Roles & Policies:** For enforcing least-privilege access.\n*   **Audit Logging:** To track all API calls and user activity in your account.\n*   **Vulnerability Scanning:** To identify potential security issues in your running services.\n*   **Encryption at Rest & In Transit:** Enabled by default on most of our services.\n\nPlease let me know if you'd like to proceed with the NDA, or if you have any other questions. We're here to support your compliance journey."
+      },
+      "ticket": "Can you confirm our account is SOC2 compliant?"
+    },
+    {
+      "index": 13,
+      "expected_tier": "simple",
+      "routed_tier": "simple",
+      "routed_model": "gemini-2.0-flash",
+      "confidence": 0.945,
+      "classify_ms": 477,
+      "correct_route": true,
+      "nadir": {
+        "success": true,
+        "cost": 0.00039549999999999996,
+        "latency_ms": 5685,
+        "prompt_tokens": 755,
+        "completion_tokens": 800,
+        "output": "Okay, I can definitely help you understand the differences between our Standard and Pro plans. Here's a breakdown of the key features and benefits of each:\n\n**Standard Plan:**\n\n*   **Ideal for:** Small to medium-sized businesses getting started with CloudStack Pro, or those with less demanding infrastructure needs.\n*   **Core Infrastructure:** Includes access to our core infrastructure services like VM provisioning, basic networking, load balancing, and auto-scaling.\n*   **Database Services:** Offers managed PostgreSQL and MySQL databases with standard performance.\n*   **Security:** Basic security features including IAM roles and policies, and standard DDoS protection.\n*   **Support:** Access to our support team via email and chat during business hours.\n*   **Limitations:**\n    *   Limited resource quotas (e.g., number of VMs, storage capacity).\n    *   No guaranteed uptime SLA.\n    *   Fewer advanced features.\n\n**Pro Plan:**\n\n*   **Ideal for:** Larger enterprises and businesses with mission-critical applications requiring high availability, advanced features, and premium support.\n*   **Everything in Standard, plus:**\n*   **Enhanced Infrastructure:** Includes advanced networking features like VPC peering, dedicated load balancers, and CDN configuration.\n*   **Expanded Database Options:** Access to managed Redis, MongoDB Atlas integration, and DynamoDB-compatible tables. Also includes features like connection pooling and read replicas.\n*   **Advanced Security & Compliance:** SSO/SAML integration, SOC2 compliance controls, encryption at rest and in transit, and audit logging.\n*   **Premium Support:** 24/7 priority support with guaranteed response times, plus a dedicated Customer Success Manager.\n*   **Higher Resource Quotas:** Significantly higher resource quotas to accommodate larger workloads.\n*   **Uptime SLA:** Guaranteed uptime SLA with financial compensation for outages.\n*   **Monitoring & Observability:** Built-in metrics, custom dashboards, alerting rules, log aggregation, and distributed tracing.\n\n**Here's a table summarizing the key differences:**\n\n| Feature                | Standard Plan                               | Pro Plan                                                                                                                               |\n| ---------------------- | ------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |\n| **Target Audience**    | SMBs, startups                               | Enterprises, mission-critical apps                                                                                                     |\n| **Support**            | Email/Chat (Business Hours)                 | 24/7 Priority Support, Dedicated CSM                                                                                                   |\n| **Uptime SLA**         | No SLA                                      | Guaranteed Uptime SLA                                                                                                                  |\n| **Resource Quotas**    | Limited                                     | Higher Limits                                                                                                                          |\n| **Networking**         | Basic                                       | Advanced (VPC Peering, CDN)                                                                                                            |\n| **Database Options**   | PostgreSQL, MySQL                           | PostgreSQL, MySQL, Redis, MongoDB Atlas, DynamoDB-compatible                                                                            |\n| **Security**           | Basic IAM, Standard DDoS                    | SSO/SAML, SOC2, Encryption, Audit Logging                                                                                              |\n| **Monitoring**         | Basic                                       | Advanced Metrics, Dashboards, Alerting, Tracing                                                                                          |\n\n**In short:** The Standard plan is a great starting point, while the Pro plan offers more features, higher performance, and enhanced support for demanding workloads.\n\nTo help me recommend the best plan for you, could you tell me a bit more about your specific needs and use case? For example:\n\n*   What type of applications are you planning to run on CloudStack Pro?\n*   What are your performance and availability requirements?\n*   What level of support do you need?\n*   What is your budget?\n\nOnce I have a better understanding of your requirements, I can provide a more tailored recommendation.\n"
+      },
+      "opus": {
+        "success": true,
+        "cost": 0.017315000000000004,
+        "latency_ms": 17280,
+        "prompt_tokens": 756,
+        "completion_tokens": 1637,
+        "output": "Of course, I can clarify the differences between our Standard and Pro plans. Thanks for asking!\n\nAt a high level, the **Standard Plan** is designed for teams and projects that need our core cloud infrastructure with standard support, while the **Pro Plan** is built for businesses running production-critical applications that require advanced security, compliance, and enterprise-grade support.\n\nHere is a breakdown of the key differences:\n\n### Key Differentiators: Standard vs. Pro\n\n| Feature Area | Standard Plan | Pro Plan |\n| :--- | :--- | :--- |\n| **Support & SLA** | \u2022 8-hour response time SLA<br>\u2022 Standard email & ticket support | \u2022 **1-hour response time SLA (P2)**<br>\u2022 **15-min response time SLA (P1)**<br>\u2022 24/7 phone & chat support<br>\u2022 **Dedicated Account Manager** |\n| **Security & Identity** | \u2022 IAM Roles & Policies<br>\u2022 MFA Authentication<br>\u2022 Basic Audit Logs | \u2022 **SSO/SAML Integration** (Okta, Azure AD, etc.)<br>\u2022 Advanced Audit Logging (extended retention)<br>\u2022 Vulnerability Scanning reports |\n| **Compliance** | \u2022 SOC 2 Type II report available | \u2022 All Standard features, plus:<br>\u2022 **HIPAA BAA available**<br>\u2022 **PCI-DSS scope assistance** |\n| **Networking** | \u2022 VPCs, Load Balancers, DNS<br>\u2022 Public Endpoints | \u2022 All Standard features, plus:<br>\u2022 **VPC Peering**<br>\u2022 **Private Link Endpoints**<br>\u2022 Advanced CDN & WAF rules |\n| **Resource Limits** | \u2022 Standard resource quotas | \u2022 **Higher default quotas** for VMs, Kubernetes nodes, etc.<br>\u2022 Access to higher-tier VM instances and database services |\n| **Billing & Cost** | \u2022 Pay-as-you-go usage<br>\u2022 Monthly invoicing | \u2022 All Standard features, plus:<br>\u2022 **Committed-Use Discounts (CUDs)**<br>\u2022 Consolidated enterprise billing<br>\u2022 Detailed cost explorer tools |\n\n---\n\n### Which plan is right for you?\n\n*   **Choose Standard if:** You're a startup, a development team, or running non-critical workloads. You need the power of the CloudStack Pro platform without the enterprise-level overhead.\n*   **Choose Pro if:** You're running production applications, handle sensitive data (e.g., healthcare, finance), require enterprise security integrations like SSO, or need the peace of mind that comes with our highest level of support and SLAs.\n\nTo help you make the best choice, could you tell me a bit more about your company's needs or the applications you plan to run? I'd be happy to provide a more specific recommendation.\n\nIf you'd like a detailed feature-by-feature comparison or a quote for the Pro plan, I can connect you with our accounts team.\n\nLet me know how you'd like to proceed"
+      },
+      "ticket": "What's the difference between your Standard and Pro plans?",
+      "judge": {
+        "error": "Expecting property name enclosed in double quotes: line 1 column 50 (char 49)",
+        "verdict": "error"
+      }
+    },
+    {
+      "index": 14,
+      "expected_tier": "simple",
+      "routed_tier": "simple",
+      "routed_model": "gemini-2.0-flash",
+      "confidence": 0.949,
+      "classify_ms": 359,
+      "correct_route": true,
+      "nadir": {
+        "success": true,
+        "cost": 0.00034409999999999996,
+        "latency_ms": 4983,
+        "prompt_tokens": 753,
+        "completion_tokens": 672,
+        "output": "Okay, I can help you with setting up email notifications for billing alerts. Here's how you can do it:\n\n**Steps:**\n\n1.  **Log in to the CloudStack Pro Console:** Access your CloudStack Pro account through the web console.\n2.  **Navigate to Billing Settings:**\n    *   Look for a \"Billing\" or \"Account\" section in the main navigation.\n    *   Within that section, find \"Billing Alerts\" or \"Notifications.\"\n3.  **Configure Alert Rules:**\n    *   You should see options to create or modify alert rules.\n    *   **Thresholds:** Define the threshold for triggering alerts. This could be a specific dollar amount, a percentage increase in spending, or a usage limit.  For example, \"Send an alert when monthly spending exceeds $500\" or \"Send an alert when spending increases by 20% compared to last month.\"\n    *   **Frequency:**  Set how often you want to receive notifications (e.g., daily, weekly, monthly, or when the threshold is breached).\n    *   **Notification Method:**  Select \"Email\" as the notification method.\n    *   **Recipient:**  Specify the email address(es) where you want the alerts to be sent.  You may be able to add multiple email addresses.\n4.  **Save Your Settings:**  Make sure to save the changes you've made to the alert rules.\n\n**Example Scenario:**\n\nLet's say you want to be notified when your monthly spending exceeds $1,000.  You would:\n\n1.  Go to Billing Alerts.\n2.  Create a new alert rule.\n3.  Set the threshold to \"$1000 monthly spending.\"\n4.  Choose \"Email\" as the notification method.\n5.  Enter your email address.\n6.  Save the rule.\n\n**Important Considerations:**\n\n*   **Email Verification:**  If you're adding a new email address, you might need to verify it before alerts can be sent.\n*   **Alert Types:**  CloudStack Pro may offer different types of billing alerts (e.g., spending alerts, usage alerts, payment failure alerts).  Make sure you configure the ones that are most relevant to you.\n*   **Testing:**  After setting up your alerts, consider triggering a test alert (if the platform provides that option) to ensure that the notifications are being sent correctly.  You might be able to temporarily lower a threshold to trigger an alert.\n*   **Check Spam Folder:**  If you're not receiving alerts, check your spam or junk mail folder.  Add the CloudStack Pro notification email address to your safe sender list.\n\n**If you're having trouble finding these settings in the console, please provide the following information so I can give you more specific instructions:**\n\n*   **The specific version of CloudStack Pro you are using.** (This can usually be found in the \"About\" section of the console).\n*   **A screenshot of your Billing/Account settings page.** (Redact any sensitive information).\n\nI hope this helps! Let me know if you have any other questions.\n"
+      },
+      "opus": {
+        "success": true,
+        "cost": 0.015772500000000002,
+        "latency_ms": 16801,
+        "prompt_tokens": 754,
+        "completion_tokens": 1483,
+        "output": "Hello,\n\nThank you for reaching out. I can certainly help you set up email notifications for your billing alerts. This is a great way to keep track of your spending and avoid any surprises.\n\nYou can configure this directly from the CloudStack Pro console. Here are the steps:\n\n1.  Log in to your CloudStack Pro account.\n2.  Navigate to the **Billing** section from the main navigation menu on the left.\n3.  Select the **Alerts** tab.\n4.  Click the **Create Alert** button.\n5.  Configure the alert threshold. You can set an alert based on:\n    *   **Actual Spend**: Triggers when your month-to-date costs exceed a specific dollar amount.\n    *   **Forecasted Spend**: Triggers when our system predicts your monthly bill will exceed a specific dollar amount.\n6.  In the **Notification Channels** section, select **Email**.\n7.  Enter the email address(es) you want the alerts sent to. You can add multiple addresses by separating them with a comma.\n\n *(Note: This is a placeholder image for illustrative purposes)*\n\n**Pro Tip:** We recommend setting up multiple alerts at different thresholds (e.g., 50%, 75%, and 100% of your expected monthly spend) to get early warnings. You can also use a group email address like `finance@yourcompany.com` to notify your entire team at once.\n\nFor more details, you can also review our documentation here: [Setting Up Billing Alerts](https://docs.cloudstackpro.com/billing/alerts).\n\nPlease let me know if you run into any issues or have any other questions. I'm here to help!\n\nBest regards,\n\nCloudStack Pro Customer Success Agent"
+      },
+      "ticket": "How do I enable email notifications for billing alerts?",
+      "judge": {
+        "error": "Unterminated string starting at: line 1 column 51 (char 50)",
+        "verdict": "error"
+      }
+    },
+    {
+      "index": 15,
+      "expected_tier": "simple",
+      "routed_tier": "simple",
+      "routed_model": "gemini-2.0-flash",
+      "confidence": 0.736,
+      "classify_ms": 891,
+      "correct_route": true,
+      "nadir": {
+        "success": true,
+        "cost": 0.00011860000000000001,
+        "latency_ms": 1433,
+        "prompt_tokens": 754,
+        "completion_tokens": 108,
+        "output": "Thanks for reaching out! For our Enterprise plan, we offer a 99.99% uptime SLA for our core infrastructure services. This includes compute, storage, and network resources. If we fall short of this commitment, you're eligible for service credit refunds as outlined in our SLA policy.\n\nYou can find the full details of our SLA, including the specific terms and conditions, on our website at [link to SLA documentation].\n\nIs there anything else I can help you with regarding our Enterprise plan or the SLA?\n"
+      },
+      "opus": {
+        "success": true,
+        "cost": 0.012403750000000002,
+        "latency_ms": 11460,
+        "prompt_tokens": 755,
+        "completion_tokens": 1146,
+        "output": "Hello,\n\nThank you for asking about our Service Level Agreement (SLA) for the Enterprise plan. This is a great question.\n\nOur Enterprise plan includes a **99.99% uptime SLA** for our core infrastructure services.\n\nThis SLA covers the availability of the following key components:\n*   Compute (Virtual Machines, Kubernetes API server)\n*   Block & Object Storage\n*   VPC Networking\n\nManaged services, such as our Managed Databases (PostgreSQL, MySQL, Redis) and other add-on services, may have their own specific SLAs, which are also detailed in your agreement and are typically 99.95% or higher.\n\nIn the unlikely event that we don't meet this commitment, your account would be eligible for service credits.\n\nYou can find the full, legally binding details in our Master Service Agreement (MSA). If you'd like, I can send over a copy of the relevant documentation for your review.\n\nPlease let me know if you have any other questions"
+      },
+      "ticket": "What's your uptime SLA for the Enterprise plan?",
+      "judge": {
+        "error": "Expecting ',' delimiter: line 1 column 49 (char 48)",
+        "verdict": "error"
+      }
+    },
+    {
+      "index": 16,
+      "expected_tier": "medium",
+      "routed_tier": "complex",
+      "routed_model": "gemini-2.5-pro",
+      "confidence": 0.813,
+      "classify_ms": 812,
+      "correct_route": false,
+      "nadir": {
+        "success": true,
+        "cost": 0.021443750000000004,
+        "latency_ms": 21748,
+        "prompt_tokens": 803,
+        "completion_tokens": 2044,
+        "output": "Hello,\n\nThank you for reaching out to CloudStack Pro support. I understand that having a 30-second replication lag on your PostgreSQL read replica during peak business hours is a significant concern, as it can lead to stale data for your read-heavy workloads. Let's diagnose the potential causes and find the right solution.\n\nBased on the information you've provided (`db.r5.xlarge` instance, ~500 write TPS), a lag of that magnitude during peak load typically points to one of a few common bottlenecks.\n\n### 1. Initial Diagnosis: Check Key Performance Metrics\n\nThe first step is to determine *where* the bottleneck is. During your next peak window (2-4 pm EST), please check the following metrics in your CloudStack Pro monitoring dashboard for both the primary and the replica instances:\n\n*   **Replica Lag (in seconds):** The metric you're already observing.\n*   **CPU Utilization (%):** Is the replica's CPU consistently high (e."
+      },
+      "opus": {
+        "success": true,
+        "cost": 0.021443750000000004,
+        "latency_ms": 21748,
+        "prompt_tokens": 803,
+        "completion_tokens": 2044,
+        "output": "Hello,\n\nThank you for reaching out to CloudStack Pro support. I understand that having a 30-second replication lag on your PostgreSQL read replica during peak business hours is a significant concern, as it can lead to stale data for your read-heavy workloads. Let's diagnose the potential causes and find the right solution.\n\nBased on the information you've provided (`db.r5.xlarge` instance, ~500 write TPS), a lag of that magnitude during peak load typically points to one of a few common bottlenecks.\n\n### 1. Initial Diagnosis: Check Key Performance Metrics\n\nThe first step is to determine *where* the bottleneck is. During your next peak window (2-4 pm EST), please check the following metrics in your CloudStack Pro monitoring dashboard for both the primary and the replica instances:\n\n*   **Replica Lag (in seconds):** The metric you're already observing.\n*   **CPU Utilization (%):** Is the replica's CPU consistently high (e."
+      },
+      "ticket": "Our PostgreSQL read replica is lagging behind the primary by over 30 seconds during peak hours (2-4pm EST). We're on the db.r5.xlarge instance class with about 500 write transactions/sec. What can we do to reduce replication lag?"
+    },
+    {
+      "index": 17,
+      "expected_tier": "medium",
+      "routed_tier": "complex",
+      "routed_model": "gemini-2.5-pro",
+      "confidence": 0.775,
+      "classify_ms": 571,
+      "correct_route": false,
+      "nadir": {
+        "success": false,
+        "cost": 0.0,
+        "latency_ms": 21217,
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "output": ""
+      },
+      "opus": {
+        "success": false,
+        "cost": 0.0,
+        "latency_ms": 21217,
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "output": ""
+      },
+      "ticket": "I'm trying to set up SAML SSO with Okta but getting a 'Invalid SAML Response' error. Here's what I've configured:\n- Entity ID: https://cloudstack.pro/saml/metadata\n- ACS URL: https://cloudstack.pro/saml/acs\n- Name ID: email\nThe error occurs after the user authenticates in Okta. What am I missing?"
+    },
+    {
+      "index": 18,
+      "expected_tier": "medium",
+      "routed_tier": "simple",
+      "routed_model": "gemini-2.0-flash",
+      "confidence": 0.804,
+      "classify_ms": 1037,
+      "correct_route": false,
+      "nadir": {
+        "success": true,
+        "cost": 0.0005071,
+        "latency_ms": 8048,
+        "prompt_tokens": 787,
+        "completion_tokens": 1071,
+        "output": "Okay, I can help you configure automated database backups with a 90-day retention period to meet HIPAA compliance requirements. I will walk you through the steps and provide some important considerations.\n\nFirst, can you tell me which database service you are using? (e.g., Managed PostgreSQL, MySQL, Redis, MongoDB Atlas integration, DynamoDB-compatible tables).  This will allow me to provide specific instructions.\n\nIn the meantime, here's a general outline of the process and considerations for HIPAA compliance:\n\n**General Steps:**\n\n1.  **Access the CloudStack Pro Console:** Log in to your CloudStack Pro account.\n2.  **Navigate to the Database Service:** Find the specific database instance you want to configure.\n3.  **Backup Configuration:** Look for a \"Backups\" or \"Backup Policy\" section.\n4.  **Configure Backup Schedule:**\n    *   Enable automated backups (if not already enabled).\n    *   Set the backup frequency (e.g., daily, weekly).  Daily is generally recommended for better recovery granularity.\n    *   **Crucially, set the retention policy to 90 days.** This is the key change you need to make.\n5.  **Verify Backup Encryption:** Ensure that backups are encrypted at rest. This is usually enabled by default, but double-check.\n6.  **Test Backup and Restore:**  After configuration, perform a test restore to a separate environment to validate the backup process and ensure data integrity.  This is a critical step.\n7.  **Document the Configuration:** Keep a record of your backup configuration, including the schedule, retention period, and encryption settings. This documentation is important for audits.\n\n**Example (assuming Managed PostgreSQL - adjust based on your actual service):**\n\n1.  Log into the CloudStack Pro console.\n2.  Go to \"Database Services\" -> \"PostgreSQL\".\n3.  Select your PostgreSQL instance.\n4.  Click on the \"Backups\" tab.\n5.  Edit the \"Backup Policy\".\n6.  Set \"Backup Frequency\" to \"Daily\".\n7.  Set \"Retention Period\" to \"90 days\".\n8.  Confirm that \"Encryption at Rest\" is enabled.\n9.  Save the changes.\n\n**HIPAA Compliance Considerations:**\n\n*   **HIPAA Security Rule:** The HIPAA Security Rule requires covered entities and business associates to implement technical safeguards to protect electronic protected health information (ePHI). Data backup and recovery are essential components of these safeguards.\n*   **Retention Period:** The 90-day retention period aligns with common HIPAA recommendations for data retention, but you should also consider your organization's specific data retention policies and legal requirements.  Some data *may* need to be retained for longer periods depending on the data type and applicable regulations.\n*   **Encryption:** Backups *must* be encrypted both in transit and at rest to protect ePHI from unauthorized access. CloudStack Pro's managed database services typically handle encryption, but you should verify this in your configuration.\n*   **Access Control:** Restrict access to backups to authorized personnel only. Use IAM roles and policies to enforce the principle of least privilege.\n*   **Audit Logging:** Enable audit logging for all backup-related activities, such as backup creation, restoration, and deletion. This will help you track who accessed the backups and when.\n*   **Business Associate Agreement (BAA):** Ensure that you have a signed Business Associate Agreement (BAA) with CloudStack Pro. This agreement outlines our responsibilities for protecting ePHI.  You can usually find a link to this in your account settings or by contacting our sales team.\n*   **Regular Testing:** Regularly test your backup and restore procedures to ensure that you can recover data in a timely manner. Document these tests.\n*   **Offsite Storage:** CloudStack Pro's backup system typically stores backups in a geographically separate location for disaster recovery purposes. Confirm this is the case for your specific service and region.\n\n**Important Disclaimers:**\n\n*   I am an AI and cannot provide legal advice. This information is for informational purposes only and should not be considered a substitute for legal counsel.\n*   You are ultimately responsible for ensuring that your organization's data backup and recovery practices comply with HIPAA and other applicable regulations.\n*   Consult with your organization's compliance officer or legal counsel to ensure that your backup configuration meets all applicable requirements.\n\n**Next Steps:**\n\n1.  **Confirm your database service:** Please tell me which database service you are using so I can provide more specific instructions.\n2.  **Implement the configuration changes:** Follow the steps outlined above (or the more specific steps I will provide once you tell me your database service) to configure your backups.\n3.  **Test and Document:**  Thoroughly test your backup and restore process and document all configurations and test results.\n4.  **Consult with Compliance/Legal:**  Review the configuration with your internal compliance and legal teams.\n\nLet me know which database service you're using, and I'll provide more tailored instructions.\n"
+      },
+      "opus": {
+        "success": true,
+        "cost": 0.021425,
+        "latency_ms": 19906,
+        "prompt_tokens": 788,
+        "completion_tokens": 2044,
+        "output": "Of course. Ensuring your database backups meet HIPAA compliance requirements is crucial, and I'm happy to guide you through configuring the 90-day retention policy on CloudStack Pro.\n\nHere is a step-by-step guide to updating your backup policy and confirmation on how this aligns with HIPAA requirements.\n\n### Configuring 90-Day Backup Retention\n\nYou can adjust the backup retention period for your managed database instances via the CloudStack Pro console, our CLI, or using our Terraform provider.\n\n#### 1. Via the CloudStack Pro Console (Recommended)\n\n1.  Navigate to the **Database Services** section in your CloudStack Pro dashboard.\n2.  Select the specific database instance you need to update.\n3.  Go to the **Backups** tab.\n4.  You will see a section for **Automated Backup Settings**. Click **\"Edit\"**.\n5.  In the configuration modal, find the **\"Backup Retention Period\"** field. Change the value from `7` to `90` days.\n6.  Click **\"Save Changes\"**.\n\nThe new policy will apply immediately to all automated backups created from this point forward. Existing backups will still expire based on the old 7-day policy.\n\n#### 2. Via the CloudStack Pro CLI\n\nIf you prefer using the command line, you can update the setting with the following command. First, you'll need the unique ID of your database instance.\n\n```bash\n# First, list your databases to find the correct ID\ncsp db list\n\n# Then, update the retention period for the specific instance\ncsp db update --id <your-database-instance-id> --backup-retention-days 90\n```\n\n#### 3. Via the Terraform Provider\n\nIf you manage your infrastructure as code, you can update the `backup_retention_period` argument in your `cloudstackpro_database_instance` resource block and apply the change.\n\n```terraform\nresource \"cloudstackpro_database_instance\" \"patient_records_db\" {\n  # ... other configuration ...\n  engine                  = \"postgres\"\n  engine_version          = \"14.5\"\n  instance_class          = \"db.m6g.large\"\n  \n  # Update this value from 7 to 90\n  backup_retention_period = 90\n  \n  # Ensure"
+      },
+      "ticket": "We need to set up automated database backups that are retained for 90 days for HIPAA compliance. Currently our backups only go back 7 days. Can you walk me through configuring this and confirm it meets HIPAA requirements?",
+      "judge": {
+        "error": "Expecting value: line 3 column 16 (char 35)",
+        "verdict": "error"
+      }
+    },
+    {
+      "index": 19,
+      "expected_tier": "medium",
+      "routed_tier": "complex",
+      "routed_model": "gemini-2.5-pro",
+      "confidence": 0.654,
+      "classify_ms": 856,
+      "correct_route": false,
+      "nadir": {
+        "success": false,
+        "cost": 0.0,
+        "latency_ms": 814,
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "output": ""
+      },
+      "opus": {
+        "success": false,
+        "cost": 0.0,
+        "latency_ms": 814,
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "output": ""
+      },
+      "ticket": "Our Kubernetes pods keep getting OOMKilled. Here's the deployment spec:\n```yaml\nresources:\n  requests:\n    memory: '256Mi'\n  limits:\n    memory: '512Mi'\n```\nThe application is a Java Spring Boot service. We've set -Xmx to 450m. What's going wrong?"
+    },
+    {
+      "index": 20,
+      "expected_tier": "medium",
+      "routed_tier": "complex",
+      "routed_model": "gemini-2.5-pro",
+      "confidence": 0.736,
+      "classify_ms": 164,
+      "correct_route": false,
+      "nadir": {
+        "success": false,
+        "cost": 0.0,
+        "latency_ms": 1652,
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "output": ""
+      },
+      "opus": {
+        "success": false,
+        "cost": 0.0,
+        "latency_ms": 1652,
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "output": ""
+      },
+      "ticket": "We're seeing intermittent 502 errors on our load balancer. It happens about 5% of the time, mostly during deployments. We're using rolling updates with maxUnavailable: 25%. How can we achieve zero-downtime deployments?"
+    },
+    {
+      "index": 21,
+      "expected_tier": "medium",
+      "routed_tier": "complex",
+      "routed_model": "gemini-2.5-pro",
+      "confidence": 0.797,
+      "classify_ms": 245,
+      "correct_route": false,
+      "nadir": {
+        "success": true,
+        "cost": 0.021437499999999998,
+        "latency_ms": 22374,
+        "prompt_tokens": 798,
+        "completion_tokens": 2044,
+        "output": "Hello,\n\nThank you for reaching out. Migrating a production database for GDPR compliance is a critical task, and planning for minimal downtime is absolutely the right approach. I can certainly provide a detailed strategy for migrating your 500GB PostgreSQL database from `us-east-1` to `eu-west-1` using CloudStack Pro's features.\n\nGiven your requirements for minimal downtime with a large, active database, the best strategy is to use **PostgreSQL's native logical replication**. This method allows you to create a live, read-only copy of your database in the new region, keep it synchronized in near real-time, and then perform a very fast cutover during a planned maintenance window.\n\nHere is a step-by-step plan for this migration:\n\n### Recommended Migration Strategy: Logical Replication\n\nThis process involves five main phases: Preparation, Initial Sync, Verification, Cutover, and Decommissioning.\n\n---\n\n### Phase"
+      },
+      "opus": {
+        "success": true,
+        "cost": 0.021437499999999998,
+        "latency_ms": 22374,
+        "prompt_tokens": 798,
+        "completion_tokens": 2044,
+        "output": "Hello,\n\nThank you for reaching out. Migrating a production database for GDPR compliance is a critical task, and planning for minimal downtime is absolutely the right approach. I can certainly provide a detailed strategy for migrating your 500GB PostgreSQL database from `us-east-1` to `eu-west-1` using CloudStack Pro's features.\n\nGiven your requirements for minimal downtime with a large, active database, the best strategy is to use **PostgreSQL's native logical replication**. This method allows you to create a live, read-only copy of your database in the new region, keep it synchronized in near real-time, and then perform a very fast cutover during a planned maintenance window.\n\nHere is a step-by-step plan for this migration:\n\n### Recommended Migration Strategy: Logical Replication\n\nThis process involves five main phases: Preparation, Initial Sync, Verification, Cutover, and Decommissioning.\n\n---\n\n### Phase"
+      },
+      "ticket": "I need to migrate our production database from us-east-1 to eu-west-1 for GDPR compliance. It's a 500GB PostgreSQL database with about 200 active connections. What's the best migration strategy with minimal downtime?"
+    },
+    {
+      "index": 22,
+      "expected_tier": "medium",
+      "routed_tier": "simple",
+      "routed_model": "gemini-2.0-flash",
+      "confidence": 0.587,
+      "classify_ms": 506,
+      "correct_route": false,
+      "nadir": {
+        "success": true,
+        "cost": 0.0004636,
+        "latency_ms": 6981,
+        "prompt_tokens": 848,
+        "completion_tokens": 947,
+        "output": "Okay, I understand you're encountering an \"Error: Provider produced inconsistent result after apply\" error with the `cloudstack_kubernetes_cluster` resource in Terraform, using provider version 2.3.1. This error typically indicates that the state Terraform recorded after creating the cluster doesn't match the actual state of the cluster in CloudStack Pro.\n\nLet's troubleshoot this:\n\n**1. Acknowledge and Diagnose:**\n\nThis error can be tricky, but it often stems from timing issues, eventual consistency problems within CloudStack Pro, or discrepancies in how the provider interprets the cluster's state.  Since you're using version 2.3.1, some known issues in earlier versions should already be addressed.\n\n**2. Actionable Steps:**\n\nHere's a breakdown of steps to try:\n\n*   **Retry the Apply:**  The simplest solution is often the best.  Run `terraform apply` again.  The inconsistency might have been a transient issue.\n\n*   **Inspect CloudStack Pro Console:**  Log into your CloudStack Pro console and verify the state of the \"production\" Kubernetes cluster.  Check if all nodes are running, the correct version is deployed, and the node count matches your configuration.  Any discrepancies here are key.\n\n*   **Refresh Terraform State:**  Run `terraform refresh`. This forces Terraform to re-query CloudStack Pro and update its state file with the current reality.  After refreshing, try `terraform apply` again.\n\n*   **Increase Creation Timeout:**  The cluster creation might be taking longer than Terraform expects.  Add a `timeouts` block to your resource configuration to increase the `create` timeout:\n\n    ```hcl\n    resource \"cloudstack_kubernetes_cluster\" \"main\" {\n      name = \"production\"\n      version = \"1.28\"\n      node_count = 5\n      node_type = \"compute-optimized-8\"\n\n      timeouts {\n        create = \"30m\"  # Adjust as needed, start with 30 minutes\n      }\n    }\n    ```\n\n    After adding the `timeouts` block, run `terraform apply` again.\n\n*   **Check CloudStack Pro API Logs:**  If you have access to CloudStack Pro's API logs (you might need to contact your CloudStack Pro administrator for this), examine the logs during the cluster creation process.  Look for any errors or warnings that might indicate a problem on the CloudStack Pro side.\n\n*   **Provider Debugging:** Enable Terraform provider debugging to get more detailed logs. Set the `TF_LOG` environment variable to `DEBUG` or `TRACE` before running `terraform apply`:\n\n    ```bash\n    export TF_LOG=DEBUG\n    terraform apply\n    ```\n\n    Examine the output for any errors or unexpected behavior during the cluster creation and state reconciliation.  Be mindful that this output can be verbose.\n\n*   **State File Corruption:**  In rare cases, the Terraform state file itself might be corrupted.  As a last resort (and with caution!), you could try removing the resource from the state file and re-importing it.  **Back up your state file first!**\n\n    1.  `terraform state pull > backup.tfstate` (backup)\n    2.  `terraform state rm cloudstack_kubernetes_cluster.main`\n    3.  `terraform import cloudstack_kubernetes_cluster.main <cluster_id>` (You'll need to find the cluster ID in the CloudStack Pro console or via the API)\n    4.  `terraform apply`\n\n    **Warning:**  Incorrectly manipulating the state file can lead to data loss or infrastructure inconsistencies.  Proceed with extreme caution and only if you're comfortable with the risks.\n\n**3. Expectations and Next Steps:**\n\n*   I recommend starting with the simplest steps (retry, refresh) and then progressively moving to the more complex ones (timeouts, debugging).\n*   Please share the output of `terraform refresh` and the relevant sections of the debug logs (if you enable them) if the issue persists.  This will help me diagnose the problem more effectively.\n*   If none of these steps resolve the issue, it's possible there's an underlying bug in the provider or a specific configuration issue within your CloudStack Pro environment.  In that case, I'll need to escalate this to our engineering team.\n\nLet me know how it goes, and we'll work through this together!\n"
+      },
+      "opus": {
+        "success": false,
+        "cost": 0.0,
+        "latency_ms": 5032,
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "output": ""
+      },
+      "ticket": "Our Terraform deployment is failing with 'Error: Provider produced inconsistent result after apply' on the cloudstack_kubernetes_cluster resource. We're using provider version 2.3.1. Here's our config:\n```hcl\nresource \"cloudstack_kubernetes_cluster\" \"main\" {\n  name = \"production\"\n  version = \"1.28\"\n  node_count = 5\n  node_type = \"compute-optimized-8\"\n}\n```"
+    },
+    {
+      "index": 23,
+      "expected_tier": "medium",
+      "routed_tier": "complex",
+      "routed_model": "gemini-2.5-pro",
+      "confidence": 0.637,
+      "classify_ms": 776,
+      "correct_route": false,
+      "nadir": {
+        "success": true,
+        "cost": 0.021423750000000002,
+        "latency_ms": 20147,
+        "prompt_tokens": 787,
+        "completion_tokens": 2044,
+        "output": "Of course, I'd be happy to walk you through setting up a blue-green deployment strategy on CloudStack Pro. This is an excellent approach for minimizing downtime and risk during releases.\n\nThe core principle is to have two identical production environments, \"Blue\" (the current live version) and \"Green\" (the new version), and then seamlessly switch live traffic from Blue to Green once the new version is verified. Our Load Balancer service is the key component for managing this switch.\n\nHere is a step-by-step guide on how to implement this.\n\n### Conceptual Overview\n\n```\n           +-----------------+\nUser --->  |  Load Balancer  | --+\n           +-----------------+   |\n                 |               | (Traffic)\n                 |               |\n       (Currently Active)        (Inactive / Staging)\n                 |               |\n                 v               v\n           +-----------+     +-----------+\n           | Target    |     | Target    |\n           | Group A   |     | Group B   |\n           |  (Blue)   |     |  (Green)  |\n           +-----------+     +-----------+\n                 |               |\n           [Service v1]      [Service v2]\n           [Service v1]      [Service"
+      },
+      "opus": {
+        "success": true,
+        "cost": 0.021423750000000002,
+        "latency_ms": 20147,
+        "prompt_tokens": 787,
+        "completion_tokens": 2044,
+        "output": "Of course, I'd be happy to walk you through setting up a blue-green deployment strategy on CloudStack Pro. This is an excellent approach for minimizing downtime and risk during releases.\n\nThe core principle is to have two identical production environments, \"Blue\" (the current live version) and \"Green\" (the new version), and then seamlessly switch live traffic from Blue to Green once the new version is verified. Our Load Balancer service is the key component for managing this switch.\n\nHere is a step-by-step guide on how to implement this.\n\n### Conceptual Overview\n\n```\n           +-----------------+\nUser --->  |  Load Balancer  | --+\n           +-----------------+   |\n                 |               | (Traffic)\n                 |               |\n       (Currently Active)        (Inactive / Staging)\n                 |               |\n                 v               v\n           +-----------+     +-----------+\n           | Target    |     | Target    |\n           | Group A   |     | Group B   |\n           |  (Blue)   |     |  (Green)  |\n           +-----------+     +-----------+\n                 |               |\n           [Service v1]      [Service v2]\n           [Service v1]      [Service"
+      },
+      "ticket": "We want to implement a blue-green deployment strategy for our application. We have 3 services behind your load balancer. Can you explain how to set this up with your platform and what the switching mechanism looks like?"
+    },
+    {
+      "index": 24,
+      "expected_tier": "medium",
+      "routed_tier": "complex",
+      "routed_model": "gemini-2.5-pro",
+      "confidence": 0.678,
+      "classify_ms": 968,
+      "correct_route": false,
+      "nadir": {
+        "success": true,
+        "cost": 0.02142375,
+        "latency_ms": 21313,
+        "prompt_tokens": 787,
+        "completion_tokens": 2044,
+        "output": "Hello,\n\nThank you for reaching out and for providing the clear details about the duplicate webhook events. I can certainly help clarify this behavior and provide guidance on how to handle it.\n\n### Is this expected behavior?\n\nYes, this is expected behavior in a distributed system like ours. While we strive to deliver each event exactly once, the nature of internet networking means we can only guarantee **at-least-once delivery**.\n\nHere\u2019s a brief explanation of why this happens:\n1.  Our system sends a webhook event to your endpoint.\n2.  We wait for a successful HTTP `200 OK` response from your server within a specific timeout period (typically 10 seconds).\n3.  If we don't receive that `200 OK` in time\u2014due to a transient network issue, a brief slowdown on your server, or any other interruption\u2014our system cannot be certain you received and processed the event.\n4.  To ensure you don't miss a critical event, our system will automatically retry sending it. This is what leads to you receiving the same `event_id` multiple times.\n\nThis retry logic is a standard and robust practice to build a reliable webhook system. The responsibility then falls on the receiving endpoint to handle these duplicates gracefully.\n\n### How should we handle idempotency?\n\nThe key to handling this is to make your webhook processing endpoint **idempotent**. This means that processing the same event multiple times has the exact same effect as processing it just once.\n\nThe recommended approach is to use the unique `event_id` that we include in every webhook payload.\n\nHere is the standard workflow for building an idempotent webhook handler:\n\n1.  **Extract the `event_id`**: When your endpoint receives a request, immediately parse the payload and get the `event_id`.\n2.  **Check for Duplicates**: Before performing any business logic, check a persistent store (like a database table or a Redis cache) to see if you have already successfully processed this `event_id`.\n3.  **Process or Discard**:\n    *   **If the `event_id` has been seen before**: You've already handled it. Immediately return a `200 OK` status to acknowledge receipt and prevent further retries from our system. Do not re-process the event.\n    *   **If the `event_id` is new**:\n        a. First, record the `event_id` in your persistent store, marking it as \"processing\" or \"processed\".\n        b. Then, execute your business logic (e.g., update a customer's subscription, provision a resource, send a notification).\n        c. Once your logic is complete, return a `200 OK` status.\n\n#### Example Implementation (Python/Flask)\n\nHere is a conceptual code snippet to illustrate the logic:\n\n```python\nfrom flask import Flask, request, jsonify\nimport redis\n\napp = Flask(__name__)\n# Use Redis for fast, simple storage of processed event IDs\n# In a production system, you might use a database.\nredis_client = redis.StrictRedis(decode_responses=True)\n\n@app.route('/webhooks/cloudstack-pro', methods=['POST'])\ndef handle_webhook():\n    payload = request.get_json()\n    event_id = payload.get('event_id')\n    event_type = payload.get('type')\n\n    if not event"
+      },
+      "opus": {
+        "success": true,
+        "cost": 0.02142375,
+        "latency_ms": 21313,
+        "prompt_tokens": 787,
+        "completion_tokens": 2044,
+        "output": "Hello,\n\nThank you for reaching out and for providing the clear details about the duplicate webhook events. I can certainly help clarify this behavior and provide guidance on how to handle it.\n\n### Is this expected behavior?\n\nYes, this is expected behavior in a distributed system like ours. While we strive to deliver each event exactly once, the nature of internet networking means we can only guarantee **at-least-once delivery**.\n\nHere\u2019s a brief explanation of why this happens:\n1.  Our system sends a webhook event to your endpoint.\n2.  We wait for a successful HTTP `200 OK` response from your server within a specific timeout period (typically 10 seconds).\n3.  If we don't receive that `200 OK` in time\u2014due to a transient network issue, a brief slowdown on your server, or any other interruption\u2014our system cannot be certain you received and processed the event.\n4.  To ensure you don't miss a critical event, our system will automatically retry sending it. This is what leads to you receiving the same `event_id` multiple times.\n\nThis retry logic is a standard and robust practice to build a reliable webhook system. The responsibility then falls on the receiving endpoint to handle these duplicates gracefully.\n\n### How should we handle idempotency?\n\nThe key to handling this is to make your webhook processing endpoint **idempotent**. This means that processing the same event multiple times has the exact same effect as processing it just once.\n\nThe recommended approach is to use the unique `event_id` that we include in every webhook payload.\n\nHere is the standard workflow for building an idempotent webhook handler:\n\n1.  **Extract the `event_id`**: When your endpoint receives a request, immediately parse the payload and get the `event_id`.\n2.  **Check for Duplicates**: Before performing any business logic, check a persistent store (like a database table or a Redis cache) to see if you have already successfully processed this `event_id`.\n3.  **Process or Discard**:\n    *   **If the `event_id` has been seen before**: You've already handled it. Immediately return a `200 OK` status to acknowledge receipt and prevent further retries from our system. Do not re-process the event.\n    *   **If the `event_id` is new**:\n        a. First, record the `event_id` in your persistent store, marking it as \"processing\" or \"processed\".\n        b. Then, execute your business logic (e.g., update a customer's subscription, provision a resource, send a notification).\n        c. Once your logic is complete, return a `200 OK` status.\n\n#### Example Implementation (Python/Flask)\n\nHere is a conceptual code snippet to illustrate the logic:\n\n```python\nfrom flask import Flask, request, jsonify\nimport redis\n\napp = Flask(__name__)\n# Use Redis for fast, simple storage of processed event IDs\n# In a production system, you might use a database.\nredis_client = redis.StrictRedis(decode_responses=True)\n\n@app.route('/webhooks/cloudstack-pro', methods=['POST'])\ndef handle_webhook():\n    payload = request.get_json()\n    event_id = payload.get('event_id')\n    event_type = payload.get('type')\n\n    if not event"
+      },
+      "ticket": "Our webhook endpoint is receiving duplicate events. We've noticed the same event ID arriving 2-3 times within a 60-second window. Is this expected behavior? How should we handle idempotency?"
+    },
+    {
+      "index": 25,
+      "expected_tier": "medium",
+      "routed_tier": "complex",
+      "routed_model": "gemini-2.5-pro",
+      "confidence": 0.764,
+      "classify_ms": 600,
+      "correct_route": false,
+      "nadir": {
+        "success": true,
+        "cost": 0.02143625,
+        "latency_ms": 20010,
+        "prompt_tokens": 797,
+        "completion_tokens": 2044,
+        "output": "Of course, I can help with that. Setting up cross-region replication for disaster recovery is a critical step for ensuring high availability.\n\nHere are the details on how our Managed Redis replication works, specifically addressing your questions about lag and failover.\n\n### Acknowledgment & Diagnosis\n\nYou're looking to configure a cross-region read replica for your primary Redis cluster in `us-east-1`, with the secondary replica located in `us-west-2` for DR purposes. Your key concerns are understanding the expected replication lag and the nature of the failover process.\n\n### Answering Your Questions\n\n1.  **Expected Replication Lag**:\n    Our cross-region replication for Redis is **asynchronous**. The typical replication lag between `us-east-1` and `us-west-2` is usually **under one second** for moderately loaded clusters. However, this can vary based on three main factors:\n    *   **Inter-region Network Latency**: The physical distance between the regions introduces a baseline latency.\n    *   **Write Volume**: A high volume of write operations on the primary cluster can increase the lag.\n    *   **Instance Size**: The replica must be powerful enough to keep up with applying the stream of changes from the primary.\n\n    You can monitor this precisely using the `ReplicationLag` metric available in your cluster's monitoring dashboard. We highly recommend setting up an alert on this metric to be notified if it exceeds a threshold that is unacceptable for your RPO (Recovery Point Objective).\n\n2.  **Failover Mechanism**:\n    The failover process is **manual**, not automatic. This is a deliberate design choice to prevent unintended failovers during transient network partitions between regions, which could lead to a \"split-brain\" scenario. A manual promotion gives you full control over your DR strategy.\n\n    When you decide to fail over, you will \"promote\" the read replica in `us-west-"
+      },
+      "opus": {
+        "success": true,
+        "cost": 0.02143625,
+        "latency_ms": 20010,
+        "prompt_tokens": 797,
+        "completion_tokens": 2044,
+        "output": "Of course, I can help with that. Setting up cross-region replication for disaster recovery is a critical step for ensuring high availability.\n\nHere are the details on how our Managed Redis replication works, specifically addressing your questions about lag and failover.\n\n### Acknowledgment & Diagnosis\n\nYou're looking to configure a cross-region read replica for your primary Redis cluster in `us-east-1`, with the secondary replica located in `us-west-2` for DR purposes. Your key concerns are understanding the expected replication lag and the nature of the failover process.\n\n### Answering Your Questions\n\n1.  **Expected Replication Lag**:\n    Our cross-region replication for Redis is **asynchronous**. The typical replication lag between `us-east-1` and `us-west-2` is usually **under one second** for moderately loaded clusters. However, this can vary based on three main factors:\n    *   **Inter-region Network Latency**: The physical distance between the regions introduces a baseline latency.\n    *   **Write Volume**: A high volume of write operations on the primary cluster can increase the lag.\n    *   **Instance Size**: The replica must be powerful enough to keep up with applying the stream of changes from the primary.\n\n    You can monitor this precisely using the `ReplicationLag` metric available in your cluster's monitoring dashboard. We highly recommend setting up an alert on this metric to be notified if it exceeds a threshold that is unacceptable for your RPO (Recovery Point Objective).\n\n2.  **Failover Mechanism**:\n    The failover process is **manual**, not automatic. This is a deliberate design choice to prevent unintended failovers during transient network partitions between regions, which could lead to a \"split-brain\" scenario. A manual promotion gives you full control over your DR strategy.\n\n    When you decide to fail over, you will \"promote\" the read replica in `us-west-"
+      },
+      "ticket": "We need to set up cross-region replication for our Redis cluster for disaster recovery. Primary is in us-east-1, and we want a replica in us-west-2. What's the expected replication lag and does it support automatic failover?"
+    },
+    {
+      "index": 26,
+      "expected_tier": "medium",
+      "routed_tier": "complex",
+      "routed_model": "gemini-2.5-pro",
+      "confidence": 0.754,
+      "classify_ms": 1127,
+      "correct_route": false,
+      "nadir": {
+        "success": false,
+        "cost": 0.0,
+        "latency_ms": 13003,
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "output": ""
+      },
+      "opus": {
+        "success": false,
+        "cost": 0.0,
+        "latency_ms": 13003,
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "output": ""
+      },
+      "ticket": "Our API is getting rate limited at 1000 req/min but we need 5000 req/min for our batch processing job that runs nightly. Can we get a temporary rate limit increase? Or is there a better way to handle batch operations?"
+    },
+    {
+      "index": 27,
+      "expected_tier": "medium",
+      "routed_tier": "complex",
+      "routed_model": "gemini-2.5-pro",
+      "confidence": 0.704,
+      "classify_ms": 449,
+      "correct_route": false,
+      "nadir": {
+        "success": false,
+        "cost": 0.0,
+        "latency_ms": 749,
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "output": ""
+      },
+      "opus": {
+        "success": false,
+        "cost": 0.0,
+        "latency_ms": 749,
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "output": ""
+      },
+      "ticket": "I'm seeing high p99 latency (>2s) on our GraphQL endpoint but p50 is fine (200ms). We suspect it's related to N+1 queries. Can you help me set up distributed tracing to identify the bottleneck?"
+    },
+    {
+      "index": 28,
+      "expected_tier": "medium",
+      "routed_tier": "simple",
+      "routed_model": "gemini-2.0-flash",
+      "confidence": 0.892,
+      "classify_ms": 75,
+      "correct_route": false,
+      "nadir": {
+        "success": true,
+        "cost": 0.0008823999999999999,
+        "latency_ms": 13240,
+        "prompt_tokens": 784,
+        "completion_tokens": 2010,
+        "output": "Okay, I can help you with setting up an IPsec VPN connection between your on-premises Cisco ASA and your CloudStack VPC. Here's a breakdown of the recommended parameters and configuration steps.\n\n**1. CloudStack VPC Configuration:**\n\n*   **VPN Gateway:** You'll need to create a VPN Gateway within your CloudStack VPC. This will be the CloudStack-side endpoint for your VPN tunnel. Note the public IP address assigned to this gateway.\n*   **Customer Gateway:** Create a Customer Gateway object in CloudStack, representing your Cisco ASA.  You'll need to provide the public IP address of your ASA.\n*   **VPN Connection:**  Create the VPN Connection itself, linking the VPN Gateway and Customer Gateway. CloudStack will generate a set of IPsec parameters for you.  You'll need to retrieve these parameters, as they are specific to your setup. You can retrieve these parameters via the CloudStack UI or API.  The key parameters you'll need are:\n    *   **CloudStack Gateway Public IP:** The public IP address of your CloudStack VPN Gateway.\n    *   **Pre-shared Key (PSK):**  A secret key used for authentication.\n    *   **IKE Version:**  Usually IKEv1 or IKEv2.\n    *   **IKE Encryption Algorithm:** e.g., AES256, AES128\n    *   **IKE Hash Algorithm:** e.g., SHA256, SHA1\n    *   **IKE DH Group:** e.g., Group 14 (2048-bit MODP)\n    *   **ESP Encryption Algorithm:** e.g., AES256, AES128\n    *   **ESP Hash Algorithm:** e.g., SHA256, SHA1\n    *   **ESP PFS Group:** e.g., Group 14 (2048-bit MODP)\n    *   **CloudStack VPC Subnet CIDR(s):** The subnet(s) within your CloudStack VPC that you want to be accessible from your on-premises network.\n    *   **On-premises Subnet CIDR(s):** The subnet(s) within your on-premises network that you want to be accessible from your CloudStack VPC.\n\n**2. Cisco ASA Configuration:**\n\nHere's a sample configuration for your Cisco ASA, using the parameters you obtained from CloudStack.  *Remember to replace the placeholder values with your actual values.*\n\n```asa\n! Phase 1 - IKE (Key Exchange)\ncrypto ikev1 policy 10\n authentication pre-share\n encryption aes256  ! Match CloudStack IKE Encryption Algorithm\n hash sha256        ! Match CloudStack IKE Hash Algorithm\n group 14           ! Match CloudStack IKE DH Group\n lifetime 86400\n\ncrypto ikev1 pre-shared-key address <CloudStack Gateway Public IP> key <Pre-shared Key>\n\n! Phase 2 - IPsec (Data Encryption)\ncrypto ipsec transform-set <transform-set-name> esp-aes 256 esp-sha256-hmac  ! Match CloudStack ESP Encryption and Hash Algorithms\n mode tunnel\n\ncrypto map outside_map 10 match address <ACL-name>\ncrypto map outside_map 10 set peer <CloudStack Gateway Public IP>\ncrypto map outside_map 10 set ikev1 transform-set <transform-set-name>\ncrypto map outside_map interface outside\n\n! Access List - Define traffic to be encrypted\naccess-list <ACL-name> extended permit ip <On-premises Subnet CIDR> <On-premises Subnet Wildcard Mask> <CloudStack VPC Subnet CIDR> <CloudStack VPC Subnet Wildcard Mask>\n\n! Tunnel Group\ntunnel-group <CloudStack Gateway Public IP> type ipsec-l2l\ntunnel-group <CloudStack Gateway Public IP> general-attributes\n default-group-policy group_policy\ntunnel-group <CloudStack Gateway Public IP> ipsec-attributes\n ikev1 pre-shared-key <Pre-shared Key>\n\n! Enable IKEv1 on the outside interface\ncrypto ikev1 enable outside\n\n! NAT exemption (important to prevent NAT interfering with the VPN)\nnat (inside,outside) source static <On-premises Subnet CIDR> <On-premises Subnet CIDR> destination static <CloudStack VPC Subnet CIDR> <CloudStack VPC Subnet CIDR>\n```\n\n**Explanation of ASA Configuration:**\n\n*   **`crypto ikev1 policy`**: Defines the IKE Phase 1 policy.  Make sure the encryption, hash, and DH group match the CloudStack configuration.  The lifetime is in seconds (86400 = 24 hours).\n*   **`crypto ikev1 pre-shared-key`**:  Sets the pre-shared key for authentication.  Use the key provided by CloudStack.\n*   **`crypto ipsec transform-set`**: Defines the IPsec Phase 2 transform set.  Make sure the ESP encryption and hash algorithms match the CloudStack configuration.  `mode tunnel` specifies tunnel mode.\n*   **`crypto map`**:  Associates the traffic (defined by the access list) with the IPsec policy and transform set.  `outside_map` is a name you choose.  `outside` is the name of your ASA's external interface.\n*   **`access-list`**:  Defines the traffic that will be encrypted and sent through the VPN tunnel.  Replace `<On-premises Subnet CIDR>` and `<CloudStack VPC Subnet CIDR>` with the actual subnet CIDRs.  The wildcard mask is the inverse of the subnet mask (e.g., for a /24 subnet, the wildcard mask is 0.0.0.255).\n*   **`tunnel-group`**:  Configures the tunnel group for the VPN connection.\n*   **`crypto ikev1 enable outside`**: Enables IKEv1 on the outside interface.\n*   **`nat (inside,outside) source static ...`**: This is a crucial NAT exemption rule.  It prevents the ASA from performing NAT on traffic that is destined for the CloudStack VPC subnet.  Without this, the VPN tunnel will likely fail.  Adjust the `inside` and `outside` interface names if necessary.\n\n**Important Considerations:**\n\n*   **IKE Version:** CloudStack supports IKEv1 and IKEv2.  IKEv2 is generally preferred for its improved security and performance.  If you use IKEv2, you'll need to adjust the ASA configuration accordingly.  The above example is for IKEv1.\n*   **Perfect Forward Secrecy (PFS):**  PFS is highly recommended.  Make sure the ESP PFS group on the ASA matches the CloudStack ESP PFS group.\n*   **NAT Traversal (NAT-T):** If your ASA is behind a NAT device, you may need to enable NAT-T. CloudStack usually auto-detects and handles NAT-T.\n*   **Firewall Rules:** Ensure that your ASA's firewall rules allow IKE (UDP port 500), NAT-T (UDP port 4500), and ESP (IP protocol 50) traffic to and from the CloudStack VPN Gateway's public IP address.  Also, ensure that traffic between your on-premises subnets and your CloudStack VPC subnets is allowed.\n*   **Routing:**  Configure routing on both your on-premises network and your CloudStack VPC to ensure that traffic is routed correctly through the VPN tunnel.  You may need to add static routes on your ASA and within your CloudStack VPC.\n*   **Security Groups:**  Within your CloudStack VPC, ensure that your security groups allow traffic from your on-premises subnets to reach your instances.\n*   **MTU Size:**  VPNs can reduce the Maximum Transmission Unit (MTU) size.  Consider adjusting the MTU size on your ASA and within your CloudStack VPC to avoid fragmentation issues.  A common value is 1400 bytes.\n*   **Monitoring:**  Monitor the VPN tunnel status on both the ASA and in CloudStack.  Check the logs for any errors.\n\n**Troubleshooting:**\n\n*   **Check the ASA logs:**  Use the `show log` command on the ASA to check for errors related to IKE or IPsec.\n*   **Use packet captures:**  Use the ASA's packet capture feature or tools like Wireshark to capture traffic on the ASA's outside interface and analyze the IKE and IPsec exchanges.\n*   **Verify connectivity:**  Use `ping` or `traceroute` to test connectivity between your on-premises network and your CloudStack VPC.\n\n**Next Steps:**\n\n1.  Create the VPN Gateway, Customer Gateway, and VPN Connection in CloudStack.\n2.  Retrieve the IPsec parameters from CloudStack.\n3.  Configure your Cisco ASA using the parameters.\n4.  Test the VPN connection.\n5.  Monitor the VPN tunnel and troubleshoot any issues.\n\nLet me know if you have any specific questions about any of these steps.  I can help you refine the configuration based on your specific requirements.  Good luck!\n"
+      },
+      "opus": {
+        "success": false,
+        "cost": 0.0,
+        "latency_ms": 2396,
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "output": ""
+      },
+      "ticket": "We need to set up a VPN connection between our on-premises data center and our CloudStack VPC. We have a Cisco ASA on our end. What are the IPsec parameters we need to configure?"
+    },
+    {
+      "index": 29,
+      "expected_tier": "medium",
+      "routed_tier": "complex",
+      "routed_model": "gemini-2.5-pro",
+      "confidence": 0.812,
+      "classify_ms": 426,
+      "correct_route": false,
+      "nadir": {
+        "success": true,
+        "cost": 0.021447500000000005,
+        "latency_ms": 22547,
+        "prompt_tokens": 806,
+        "completion_tokens": 2044,
+        "output": "Hi there,\n\nThanks for reaching out with this excellent question. Tuning auto-scaling for rapid, high-magnitude traffic spikes is a critical task, and it's a common challenge to get it just right. I can definitely help you analyze your current configuration and provide recommendations.\n\nBased on your description, the primary issue is that your scaling policy's reaction time is slower than the traffic spike's arrival time. A 10x increase in under two minutes is very fast, and a few key parameters in your current setup are likely creating a bottleneck.\n\n### Diagnosis of the Current Configuration\n\n1.  **Cooldown Period (`300s`):** This is the most significant factor. A 5-minute cooldown period means that after a scaling event (e.g., adding one instance), the auto-scaling group will not launch another instance for a full 5 minutes, regardless of what the metrics are doing. Your traffic spike is over and your services are likely already saturated long before this cooldown expires.\n2.  **Target Metric (CPU Utilization at `70%`):** CPU is often a lagging indicator. By the time average CPU across the fleet reaches 70%, your initial instances might already be at 100% and struggling with request latency or even dropping connections. For traffic-based spikes, a metric like Request Count Per Target from the load balancer is often more responsive.\n3.  **Target Tracking Policy:** While simple and effective for gradual changes, a standard target tracking policy might not be aggressive enough for a 10x spike. It will add instances incrementally to try and bring the average CPU back down to 70%, but it won't make a large, decisive jump in capacity.\n\n### Recommended Tuning Steps\n\nHere are a few actionable strategies, starting with the most impactful. I recommend implementing them in order.\n\n#### 1. Drastically Reduce the Cooldown Period\n\nFor your use case, the 300-second cooldown is too conservative. You need the system to be able to make multiple scaling decisions in quick succession during the spike.\n\n*   **Action:** Lower the default cooldown period for the group.\n*   **Recommendation:** Start with a value like **`60` seconds**. This allows the system to add more capacity every minute if the metric threshold is still being breached.\n\n```bash\n# Example using our CLI tool\ncsp-cli asg update-group --name your-asg-name --cooldown 60\n```\n\n#### 2. Use a More Responsive Scaling Metric\n\nInstead of waiting for CPU to climb, scale on a metric that directly reflects incoming traffic. The best choice is typically the request count from your load balancer.\n\n*   **Action:** Change your scaling policy to use `ALBRequestCountPerTarget`.\n*   **Recommendation:** Set a target value that represents a comfortable number of requests per instance before performance degrades. For example, if each instance can handle 200 requests per second (RPS) comfortably, you could set your target there.\n\n#### 3. Implement Step Scaling Policies for Aggressiveness"
+      },
+      "opus": {
+        "success": true,
+        "cost": 0.021447500000000005,
+        "latency_ms": 22547,
+        "prompt_tokens": 806,
+        "completion_tokens": 2044,
+        "output": "Hi there,\n\nThanks for reaching out with this excellent question. Tuning auto-scaling for rapid, high-magnitude traffic spikes is a critical task, and it's a common challenge to get it just right. I can definitely help you analyze your current configuration and provide recommendations.\n\nBased on your description, the primary issue is that your scaling policy's reaction time is slower than the traffic spike's arrival time. A 10x increase in under two minutes is very fast, and a few key parameters in your current setup are likely creating a bottleneck.\n\n### Diagnosis of the Current Configuration\n\n1.  **Cooldown Period (`300s`):** This is the most significant factor. A 5-minute cooldown period means that after a scaling event (e.g., adding one instance), the auto-scaling group will not launch another instance for a full 5 minutes, regardless of what the metrics are doing. Your traffic spike is over and your services are likely already saturated long before this cooldown expires.\n2.  **Target Metric (CPU Utilization at `70%`):** CPU is often a lagging indicator. By the time average CPU across the fleet reaches 70%, your initial instances might already be at 100% and struggling with request latency or even dropping connections. For traffic-based spikes, a metric like Request Count Per Target from the load balancer is often more responsive.\n3.  **Target Tracking Policy:** While simple and effective for gradual changes, a standard target tracking policy might not be aggressive enough for a 10x spike. It will add instances incrementally to try and bring the average CPU back down to 70%, but it won't make a large, decisive jump in capacity.\n\n### Recommended Tuning Steps\n\nHere are a few actionable strategies, starting with the most impactful. I recommend implementing them in order.\n\n#### 1. Drastically Reduce the Cooldown Period\n\nFor your use case, the 300-second cooldown is too conservative. You need the system to be able to make multiple scaling decisions in quick succession during the spike.\n\n*   **Action:** Lower the default cooldown period for the group.\n*   **Recommendation:** Start with a value like **`60` seconds**. This allows the system to add more capacity every minute if the metric threshold is still being breached.\n\n```bash\n# Example using our CLI tool\ncsp-cli asg update-group --name your-asg-name --cooldown 60\n```\n\n#### 2. Use a More Responsive Scaling Metric\n\nInstead of waiting for CPU to climb, scale on a metric that directly reflects incoming traffic. The best choice is typically the request count from your load balancer.\n\n*   **Action:** Change your scaling policy to use `ALBRequestCountPerTarget`.\n*   **Recommendation:** Set a target value that represents a comfortable number of requests per instance before performance degrades. For example, if each instance can handle 200 requests per second (RPS) comfortably, you could set your target there.\n\n#### 3. Implement Step Scaling Policies for Aggressiveness"
+      },
+      "ticket": "Our auto-scaling group isn't scaling up fast enough during traffic spikes. Current config: min=2, max=10, target CPU=70%, cooldown=300s. We get traffic spikes that 10x in under 2 minutes. How should we tune this?"
+    },
+    {
+      "index": 30,
+      "expected_tier": "medium",
+      "routed_tier": "complex",
+      "routed_model": "gemini-2.5-pro",
+      "confidence": 0.68,
+      "classify_ms": 399,
+      "correct_route": false,
+      "nadir": {
+        "success": true,
+        "cost": 0.0214225,
+        "latency_ms": 20215,
+        "prompt_tokens": 786,
+        "completion_tokens": 2044,
+        "output": "Of course, that's an excellent question. Implementing mTLS is a critical security practice for microservices, and we have strong support for it on the CloudStack Pro Kubernetes platform.\n\nTo answer your question directly: We offer a fully managed, native solution called **CloudStack Pro Service Mesh**, and we also fully support customers who wish to install and manage their own **Istio** service mesh.\n\nHere\u2019s a breakdown of both approaches to help you decide which is best for your team.\n\n### Recommended: CloudStack Pro Service Mesh (Native Solution)\n\nFor most of our customers, we recommend starting with our native, managed service mesh. It's designed for simplicity and tight integration with our platform, providing automatic mTLS with minimal configuration.\n\n**Overview:**\nOur native service mesh is built on a lightweight, high-performance proxy that handles security and observability without the operational complexity of a full-blown Istio installation.\n\n**Key Benefits:**\n*   **Simplicity:** Enable mTLS for an entire namespace with a single command or annotation.\n*   **Fully Managed:** We manage the control plane, updates, and scaling, so you can focus on your applications.\n*   **Zero-Config mTLS:** Once enabled, all traffic between pods in the mesh is automatically encrypted and authenticated using certificates we manage and rotate for you.\n*   **Integrated Monitoring:** Service-to-service traffic metrics (latency, traffic volume, error rates) are automatically ingested into your CloudStack Pro monitoring dashboards.\n\n**Getting Started:**\n1.  **Enable the Service Mesh Add-on** for your Kubernetes cluster. You can do this via the UI or the CLI:\n    ```bash\n    # csp k8s mesh enable --cluster my"
+      },
+      "opus": {
+        "success": true,
+        "cost": 0.0214225,
+        "latency_ms": 20215,
+        "prompt_tokens": 786,
+        "completion_tokens": 2044,
+        "output": "Of course, that's an excellent question. Implementing mTLS is a critical security practice for microservices, and we have strong support for it on the CloudStack Pro Kubernetes platform.\n\nTo answer your question directly: We offer a fully managed, native solution called **CloudStack Pro Service Mesh**, and we also fully support customers who wish to install and manage their own **Istio** service mesh.\n\nHere\u2019s a breakdown of both approaches to help you decide which is best for your team.\n\n### Recommended: CloudStack Pro Service Mesh (Native Solution)\n\nFor most of our customers, we recommend starting with our native, managed service mesh. It's designed for simplicity and tight integration with our platform, providing automatic mTLS with minimal configuration.\n\n**Overview:**\nOur native service mesh is built on a lightweight, high-performance proxy that handles security and observability without the operational complexity of a full-blown Istio installation.\n\n**Key Benefits:**\n*   **Simplicity:** Enable mTLS for an entire namespace with a single command or annotation.\n*   **Fully Managed:** We manage the control plane, updates, and scaling, so you can focus on your applications.\n*   **Zero-Config mTLS:** Once enabled, all traffic between pods in the mesh is automatically encrypted and authenticated using certificates we manage and rotate for you.\n*   **Integrated Monitoring:** Service-to-service traffic metrics (latency, traffic volume, error rates) are automatically ingested into your CloudStack Pro monitoring dashboards.\n\n**Getting Started:**\n1.  **Enable the Service Mesh Add-on** for your Kubernetes cluster. You can do this via the UI or the CLI:\n    ```bash\n    # csp k8s mesh enable --cluster my"
+      },
+      "ticket": "We want to implement mutual TLS (mTLS) between our microservices running on your Kubernetes platform. What's the recommended approach? Do you support Istio service mesh or do you have a native solution?"
+    },
+    {
+      "index": 31,
+      "expected_tier": "medium",
+      "routed_tier": "complex",
+      "routed_model": "gemini-2.5-pro",
+      "confidence": 0.619,
+      "classify_ms": 526,
+      "correct_route": false,
+      "nadir": {
+        "success": false,
+        "cost": 0.0,
+        "latency_ms": 970,
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "output": ""
+      },
+      "opus": {
+        "success": false,
+        "cost": 0.0,
+        "latency_ms": 970,
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "output": ""
+      },
+      "ticket": "We're getting 'connection pool exhausted' errors on our managed PostgreSQL. We have 3 application servers each configured with a pool size of 50, and our database plan supports 100 max connections. How should we restructure this?"
+    },
+    {
+      "index": 32,
+      "expected_tier": "medium",
+      "routed_tier": "complex",
+      "routed_model": "gemini-2.5-pro",
+      "confidence": 0.641,
+      "classify_ms": 64,
+      "correct_route": false,
+      "nadir": {
+        "success": false,
+        "cost": 0.0,
+        "latency_ms": 861,
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "output": ""
+      },
+      "opus": {
+        "success": false,
+        "cost": 0.0,
+        "latency_ms": 861,
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "output": ""
+      },
+      "ticket": "Can you help me set up a CI/CD pipeline using your CLI tools? We use GitHub Actions and want to deploy to staging on PR merge and production on tag push. We need approval gates for production."
+    },
+    {
+      "index": 33,
+      "expected_tier": "medium",
+      "routed_tier": "complex",
+      "routed_model": "gemini-2.5-pro",
+      "confidence": 0.656,
+      "classify_ms": 294,
+      "correct_route": false,
+      "nadir": {
+        "success": false,
+        "cost": 0.0,
+        "latency_ms": 836,
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "output": ""
+      },
+      "opus": {
+        "success": false,
+        "cost": 0.0,
+        "latency_ms": 836,
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "output": ""
+      },
+      "ticket": "Our CDN cache hit ratio dropped from 92% to 45% after we deployed a new version last week. We're using versioned assets with content hashing. What could cause this and how do we debug it?"
+    },
+    {
+      "index": 34,
+      "expected_tier": "medium",
+      "routed_tier": "complex",
+      "routed_model": "gemini-2.5-pro",
+      "confidence": 0.61,
+      "classify_ms": 215,
+      "correct_route": false,
+      "nadir": {
+        "success": false,
+        "cost": 0.0,
+        "latency_ms": 625,
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "output": ""
+      },
+      "opus": {
+        "success": false,
+        "cost": 0.0,
+        "latency_ms": 625,
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "output": ""
+      },
+      "ticket": "We need to implement IP allowlisting for our API but we have 200+ office locations with dynamic IPs. Is there a way to do this with your platform that doesn't require constant updates?"
+    },
+    {
+      "index": 35,
+      "expected_tier": "medium",
+      "routed_tier": "complex",
+      "routed_model": "gemini-2.5-pro",
+      "confidence": 0.806,
+      "classify_ms": 35,
+      "correct_route": false,
+      "nadir": {
+        "success": false,
+        "cost": 0.0,
+        "latency_ms": 1977,
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "output": ""
+      },
+      "opus": {
+        "success": false,
+        "cost": 0.0,
+        "latency_ms": 1977,
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "output": ""
+      },
+      "ticket": "Our monitoring alerts are too noisy \u2014 we're getting 50+ alerts per day and most are false positives. Can you help us tune our alerting rules? We're using your built-in monitoring with Slack integration."
+    },
+    {
+      "index": 36,
+      "expected_tier": "complex",
+      "routed_tier": "complex",
+      "routed_model": "gemini-2.5-pro",
+      "confidence": 0.683,
+      "classify_ms": 347,
+      "correct_route": true,
+      "nadir": {
+        "success": true,
+        "cost": 0.021610000000000004,
+        "latency_ms": 23185,
+        "prompt_tokens": 936,
+        "completion_tokens": 2044,
+        "output": "This is a P1 incident, and I am treating this with the highest priority. I understand your payment processing service is down, impacting 50,000 users. Let's work together to stabilize the system immediately and then diagnose the root cause.\n\nBased on the symptoms you've described\u2014`CrashLoopBackOff`, 100% database CPU, and `FATAL: too many connections` errors\u2014this points to a classic connection exhaustion scenario, likely triggered by the recent deployment. The HPA scaling up is exacerbating the issue by creating more pods that immediately try to connect, adding to the connection storm.\n\nHere is an immediate action plan to restore service. Please execute these steps in order.\n\n### **Phase 1: Immediate Stabilization (Stop the"
+      },
+      "opus": {
+        "success": true,
+        "cost": 0.021610000000000004,
+        "latency_ms": 23185,
+        "prompt_tokens": 936,
+        "completion_tokens": 2044,
+        "output": "This is a P1 incident, and I am treating this with the highest priority. I understand your payment processing service is down, impacting 50,000 users. Let's work together to stabilize the system immediately and then diagnose the root cause.\n\nBased on the symptoms you've described\u2014`CrashLoopBackOff`, 100% database CPU, and `FATAL: too many connections` errors\u2014this points to a classic connection exhaustion scenario, likely triggered by the recent deployment. The HPA scaling up is exacerbating the issue by creating more pods that immediately try to connect, adding to the connection storm.\n\nHere is an immediate action plan to restore service. Please execute these steps in order.\n\n### **Phase 1: Immediate Stabilization (Stop the"
+      },
+      "ticket": "We're experiencing a production outage affecting our payment processing service. Our Kubernetes cluster in us-east-1 shows multiple pods in CrashLoopBackOff state. The service connects to a PostgreSQL database which is showing 100% CPU. Our error logs show 'FATAL: too many connections' mixed with 'connection refused' errors. We have 50,000 active users unable to complete transactions. This is P1 \u2014 we need immediate help.\n\nCluster info:\n- 12 nodes, 8 running payment-svc pods\n- HPA target: 80% CPU, currently at 95%\n- Database: db.r5.4xlarge, 100 max connections\n- Last deployment: 2 hours ago (rollback attempted, didn't help)\n- PgBouncer in front of DB with pool_mode=transaction, default_pool_size=25"
+    },
+    {
+      "index": 37,
+      "expected_tier": "complex",
+      "routed_tier": "complex",
+      "routed_model": "gemini-2.5-pro",
+      "confidence": 0.885,
+      "classify_ms": 734,
+      "correct_route": true,
+      "nadir": {
+        "success": true,
+        "cost": 0.021636250000000003,
+        "latency_ms": 21013,
+        "prompt_tokens": 949,
+        "completion_tokens": 2045,
+        "output": ""
+      },
+      "opus": {
+        "success": true,
+        "cost": 0.021636250000000003,
+        "latency_ms": 21013,
+        "prompt_tokens": 949,
+        "completion_tokens": 2045,
+        "output": ""
+      },
+      "ticket": "We're planning a major architecture migration. Currently we run a monolithic Django application on 4 EC2-equivalent VMs behind a load balancer with a single PostgreSQL database (2TB). We want to decompose into microservices on Kubernetes.\n\nOur services would be:\n1. User service (auth, profiles) \u2014 ~500 req/s\n2. Product catalog \u2014 ~2000 req/s, heavy reads\n3. Order processing \u2014 ~200 req/s, transactional\n4. Payment gateway integration \u2014 ~100 req/s, PCI scope\n5. Notification service \u2014 ~1000 events/s, async\n6. Analytics pipeline \u2014 ~5000 events/s, eventual consistency OK\n\nWe need: a phased migration plan, data decomposition strategy, service mesh recommendation, CI/CD pipeline design, observability stack, and cost estimate comparing current vs target architecture. Our budget for the migration is $200K over 6 months."
+    },
+    {
+      "index": 38,
+      "expected_tier": "complex",
+      "routed_tier": "complex",
+      "routed_model": "gemini-2.5-pro",
+      "confidence": 0.855,
+      "classify_ms": 1029,
+      "correct_route": true,
+      "nadir": {
+        "success": true,
+        "cost": 0.021570000000000002,
+        "latency_ms": 20364,
+        "prompt_tokens": 904,
+        "completion_tokens": 2044,
+        "output": "Of course. This is a critical and time-sensitive project, especially with a compliance audit on the horizon. I understand the urgency and the need for a robust, actionable plan. Achieving an RPO of < 1 minute and an R"
+      },
+      "opus": {
+        "success": true,
+        "cost": 0.021570000000000002,
+        "latency_ms": 20364,
+        "prompt_tokens": 904,
+        "completion_tokens": 2044,
+        "output": "Of course. This is a critical and time-sensitive project, especially with a compliance audit on the horizon. I understand the urgency and the need for a robust, actionable plan. Achieving an RPO of < 1 minute and an R"
+      },
+      "ticket": "We need to design a disaster recovery strategy that achieves RPO < 1 minute and RTO < 5 minutes across 3 regions (us-east-1, eu-west-1, ap-southeast-1). Our stack includes:\n- 5 Kubernetes clusters (200+ services)\n- 12 PostgreSQL databases (largest is 5TB)\n- 3 Redis clusters (session store, cache, pub/sub)\n- Object storage (50TB)\n- Message queue (processing 10K msgs/sec)\n\nWe currently have no DR strategy and our compliance audit is in 6 weeks. We need a detailed implementation plan with your platform's capabilities, including automated failover, data sync strategies, and testing procedures."
+    },
+    {
+      "index": 39,
+      "expected_tier": "complex",
+      "routed_tier": "complex",
+      "routed_model": "gemini-2.5-pro",
+      "confidence": 0.804,
+      "classify_ms": 836,
+      "correct_route": true,
+      "nadir": {
+        "success": true,
+        "cost": 0.02161875,
+        "latency_ms": 53732,
+        "prompt_tokens": 943,
+        "completion_tokens": 2044,
+        "output": "Subject: **[P1 URGENT] Security Incident Response Plan for Account [Your Account ID]**\nTicket ID: 8675309\nPriority: P1 (Critical)\n\nHi [Customer Name],\n\nThank you for immediately reporting this critical security incident. We understand the extreme urgency and are treating this as our highest priority (P1). The actions you've described indicate a serious compromise, and our security team has been engaged to support you.\n\nBased on the details you provided, this is a security incident involving compromised credentials for the `deploy-bot` IAM user, leading to privilege escalation, potential data access, and the creation of a backdoor.\n\nWe must act immediately to contain the threat and then move to investigation and remediation. Please follow these steps precisely.\n\n### **Phase 1: Immediate Containment (Execute NOW)**\n\nThe goal of this phase is to immediately revoke the attacker's access and close the entry points they created.\n\n1.  **Revoke All Compromised Credentials:**\n    *   **Disable the `deploy-bot` User's Keys:** Immediately navigate to IAM -> Users -> `deploy-bot` -> Security credentials and deactivate or delete all active API keys.\n    *   **Revoke the New Admin Key:** Using the audit logs, identify the `accessKeyId` of the new admin key created by the attacker between 2:00 AM and 2:47 AM UTC. Navigate to IAM and delete this key immediately. This is critical to remove their persistent administrative access.\n\n2.  **Rotate Database Credentials:**\n    *   The attacker successfully called `GetDatabase"
+      },
+      "opus": {
+        "success": true,
+        "cost": 0.02161875,
+        "latency_ms": 53732,
+        "prompt_tokens": 943,
+        "completion_tokens": 2044,
+        "output": "Subject: **[P1 URGENT] Security Incident Response Plan for Account [Your Account ID]**\nTicket ID: 8675309\nPriority: P1 (Critical)\n\nHi [Customer Name],\n\nThank you for immediately reporting this critical security incident. We understand the extreme urgency and are treating this as our highest priority (P1). The actions you've described indicate a serious compromise, and our security team has been engaged to support you.\n\nBased on the details you provided, this is a security incident involving compromised credentials for the `deploy-bot` IAM user, leading to privilege escalation, potential data access, and the creation of a backdoor.\n\nWe must act immediately to contain the threat and then move to investigation and remediation. Please follow these steps precisely.\n\n### **Phase 1: Immediate Containment (Execute NOW)**\n\nThe goal of this phase is to immediately revoke the attacker's access and close the entry points they created.\n\n1.  **Revoke All Compromised Credentials:**\n    *   **Disable the `deploy-bot` User's Keys:** Immediately navigate to IAM -> Users -> `deploy-bot` -> Security credentials and deactivate or delete all active API keys.\n    *   **Revoke the New Admin Key:** Using the audit logs, identify the `accessKeyId` of the new admin key created by the attacker between 2:00 AM and 2:47 AM UTC. Navigate to IAM and delete this key immediately. This is critical to remove their persistent administrative access.\n\n2.  **Rotate Database Credentials:**\n    *   The attacker successfully called `GetDatabase"
+      },
+      "ticket": "We suspect we've had a security breach. Our audit logs show an IAM user 'deploy-bot' making API calls from an IP address (203.0.113.42) that isn't in our known IP ranges. The calls include:\n- ListAllUsers (succeeded)\n- GetDatabaseCredentials for prod-db (succeeded)\n- CreateAPIKey with admin scope (succeeded)\n- ModifySecurityGroup to allow 0.0.0.0/0 on port 22 (succeeded)\n\nThis happened between 2:00 AM and 2:47 AM UTC today. The deploy-bot service account was last legitimately used 3 days ago.\n\nWe need: immediate containment steps, forensic investigation guidance, impact assessment, remediation plan, and help preparing an incident report for our SOC2 auditor. We're also a HIPAA-covered entity with PHI in the affected database."
+    },
+    {
+      "index": 40,
+      "expected_tier": "complex",
+      "routed_tier": "complex",
+      "routed_model": "gemini-2.5-pro",
+      "confidence": 0.846,
+      "classify_ms": 864,
+      "correct_route": true,
+      "nadir": {
+        "success": false,
+        "cost": 0.0,
+        "latency_ms": 20183,
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "output": ""
+      },
+      "opus": {
+        "success": false,
+        "cost": 0.0,
+        "latency_ms": 20183,
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "output": ""
+      },
+      "ticket": "We want to implement a multi-tenant architecture on your platform for our SaaS product. We currently have 500 tenants and expect to grow to 5,000 within 18 months. Requirements:\n- Data isolation (some tenants require dedicated databases for compliance)\n- Per-tenant resource quotas and rate limiting\n- Tenant-aware routing at the load balancer level\n- Shared infrastructure for small tenants, dedicated for enterprise\n- Per-tenant billing and usage metering\n- Tenant provisioning API (new tenant live in < 5 minutes)\n- Cross-tenant analytics (aggregated, anonymized)\n\nOur stack: React frontend, Node.js API layer, PostgreSQL (with row-level security currently), Redis for caching. Budget: want to keep infrastructure cost under $50/tenant/month for shared-tier tenants."
+    },
+    {
+      "index": 41,
+      "expected_tier": "complex",
+      "routed_tier": "complex",
+      "routed_model": "gemini-2.5-pro",
+      "confidence": 0.714,
+      "classify_ms": 888,
+      "correct_route": true,
+      "nadir": {
+        "success": false,
+        "cost": 0.0,
+        "latency_ms": 1813,
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "output": ""
+      },
+      "opus": {
+        "success": false,
+        "cost": 0.0,
+        "latency_ms": 1813,
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "output": ""
+      },
+      "ticket": "We need to achieve PCI-DSS Level 1 compliance for our payment processing platform running on CloudStack. Our current architecture:\n- Frontend: React app on CDN\n- API: 6 Node.js microservices on Kubernetes\n- Database: PostgreSQL with card data (currently stored as encrypted fields)\n- Message queue for async processing\n- Third-party integrations: Stripe, PayPal, bank ACH\n\nWe need a gap analysis against PCI-DSS v4.0 requirements, a remediation plan covering: network segmentation (CDE isolation), encryption standards, access controls, logging/monitoring, vulnerability management, and a penetration testing schedule. Our QSA assessment is in 4 months."
+    },
+    {
+      "index": 42,
+      "expected_tier": "complex",
+      "routed_tier": "complex",
+      "routed_model": "gemini-2.5-pro",
+      "confidence": 0.84,
+      "classify_ms": 445,
+      "correct_route": true,
+      "nadir": {
+        "success": true,
+        "cost": 0.021588750000000004,
+        "latency_ms": 20774,
+        "prompt_tokens": 919,
+        "completion_tokens": 2044,
+        "output": "Of course. This is an excellent and challenging use case for a real-time data platform, and CloudStack Pro has all the necessary components to build a robust, scalable, and performant solution. I'll provide a detailed architectural recommendation, component sizing, and a cost projection based on your requirements.\n\n**Subject: Architectural Recommendation"
+      },
+      "opus": {
+        "success": true,
+        "cost": 0.021588750000000004,
+        "latency_ms": 20774,
+        "prompt_tokens": 919,
+        "completion_tokens": 2044,
+        "output": "Of course. This is an excellent and challenging use case for a real-time data platform, and CloudStack Pro has all the necessary components to build a robust, scalable, and performant solution. I'll provide a detailed architectural recommendation, component sizing, and a cost projection based on your requirements.\n\n**Subject: Architectural Recommendation"
+      },
+      "ticket": "We're building a real-time data pipeline on your platform that needs to process 500K events/second from IoT devices with end-to-end latency under 100ms. The pipeline:\n1. Ingest: MQTT \u2192 message broker\n2. Stream processing: windowed aggregations (1min, 5min, 1hr)\n3. Enrichment: join with reference data (50GB, updated daily)\n4. Anomaly detection: ML model inference (TensorFlow Serving)\n5. Storage: time-series DB for hot data (30 days), object storage for cold\n6. Real-time dashboards: WebSocket push to 10K concurrent viewers\n\nWhat infrastructure do you recommend? We need detailed sizing, cost projections, and architectural guidance. Current monthly budget: $80K."
+    },
+    {
+      "index": 43,
+      "expected_tier": "complex",
+      "routed_tier": "complex",
+      "routed_model": "gemini-2.5-pro",
+      "confidence": 0.768,
+      "classify_ms": 716,
+      "correct_route": true,
+      "nadir": {
+        "success": true,
+        "cost": 0.021557500000000004,
+        "latency_ms": 24556,
+        "prompt_tokens": 902,
+        "completion_tokens": 2043,
+        "output": "Of course. Thank you for reaching out with this detailed overview of your observability goals. These are common, yet critical, challenges for growing microservices architectures, and moving to a modern, unified observability stack is absolutely the right approach. Your goals of reducing MTTR, cutting alert noise, and implementing SLOs are exactly what a well-designed system should achieve.\n\nBased on your requirements, here is our recommended observability stack and a phased implementation plan, leveraging both industry best practices and CloudStack Pro's integrated services.\n\n### Recommended Observability Stack on CloudStack Pro\n\nThe modern standard for observability is built on the three pillars: **metrics, traces, and logs**. The key to solving your current problems is to unify the collection and correlation of this data. We strongly recommend adopting **OpenTelemetry (OTel)** as the foundation for instrumentation.\n\n1.  **Metrics**: **CloudStack Pro Managed Service for Prometheus**\n    *   **Why**: Prometheus is the de facto standard for Kubernetes monitoring. Our managed service handles the scaling, high-availability, and long-term storage, so your team can focus on defining metrics, not managing infrastructure.\n    *   **Visualization**: **Managed Grafana**. It integrates seamlessly with our Prometheus service, allowing you to build the unified, team-specific dashboards you need.\n\n2.  **Distributed Tracing**: **OpenTelemetry Collector + Jaeger/Tempo Backend**\n    *   **Why**: Instrumenting your services with the OpenTelemetry SDKs will generate traces that show the full lifecycle of a request across all 45 services. The OTel Collector, which can be deployed as a sidecar or daemonset in your Kubernetes clusters, can then process and forward these traces to a compatible backend. CloudStack Pro offers a managed Jaeger-compatible endpoint for easy setup.\n\n3.  **Log Aggregation**: **CloudStack Pro LogStream + OpenSearch**\n    *   **Why**: To solve your slow query problem, our LogStream service uses a high-throughput ingestion pipeline coupled with a managed OpenSearch backend. By enriching logs with trace and span IDs from OpenTelemetry, you can instantly pivot from a slow trace span directly to the relevant logs for that specific request. This is a game-changer for reducing MTTR.\n\n### Phased Implementation Plan\n\nA \"big bang\" rollout is risky. We recommend a phased approach, starting with a single critical service to prove the value and create a blueprint for the rest of your architecture.\n\n"
+      },
+      "opus": {
+        "success": true,
+        "cost": 0.021557500000000004,
+        "latency_ms": 24556,
+        "prompt_tokens": 902,
+        "completion_tokens": 2043,
+        "output": "Of course. Thank you for reaching out with this detailed overview of your observability goals. These are common, yet critical, challenges for growing microservices architectures, and moving to a modern, unified observability stack is absolutely the right approach. Your goals of reducing MTTR, cutting alert noise, and implementing SLOs are exactly what a well-designed system should achieve.\n\nBased on your requirements, here is our recommended observability stack and a phased implementation plan, leveraging both industry best practices and CloudStack Pro's integrated services.\n\n### Recommended Observability Stack on CloudStack Pro\n\nThe modern standard for observability is built on the three pillars: **metrics, traces, and logs**. The key to solving your current problems is to unify the collection and correlation of this data. We strongly recommend adopting **OpenTelemetry (OTel)** as the foundation for instrumentation.\n\n1.  **Metrics**: **CloudStack Pro Managed Service for Prometheus**\n    *   **Why**: Prometheus is the de facto standard for Kubernetes monitoring. Our managed service handles the scaling, high-availability, and long-term storage, so your team can focus on defining metrics, not managing infrastructure.\n    *   **Visualization**: **Managed Grafana**. It integrates seamlessly with our Prometheus service, allowing you to build the unified, team-specific dashboards you need.\n\n2.  **Distributed Tracing**: **OpenTelemetry Collector + Jaeger/Tempo Backend**\n    *   **Why**: Instrumenting your services with the OpenTelemetry SDKs will generate traces that show the full lifecycle of a request across all 45 services. The OTel Collector, which can be deployed as a sidecar or daemonset in your Kubernetes clusters, can then process and forward these traces to a compatible backend. CloudStack Pro offers a managed Jaeger-compatible endpoint for easy setup.\n\n3.  **Log Aggregation**: **CloudStack Pro LogStream + OpenSearch**\n    *   **Why**: To solve your slow query problem, our LogStream service uses a high-throughput ingestion pipeline coupled with a managed OpenSearch backend. By enriching logs with trace and span IDs from OpenTelemetry, you can instantly pivot from a slow trace span directly to the relevant logs for that specific request. This is a game-changer for reducing MTTR.\n\n### Phased Implementation Plan\n\nA \"big bang\" rollout is risky. We recommend a phased approach, starting with a single critical service to prove the value and create a blueprint for the rest of your architecture.\n\n"
+      },
+      "ticket": "We need to implement a comprehensive observability strategy for our microservices architecture (45 services, 200+ pods). Current problems:\n- No distributed tracing \u2014 can't debug cross-service issues\n- Metrics are siloed per service, no unified view\n- Log aggregation exists but search is slow (>30s for queries)\n- Alert fatigue: 200+ alerts/day, <5% actionable\n- MTTR for incidents is 4+ hours\n- No SLO tracking\n\nWe want to achieve: <15min MTTR, <10 actionable alerts/day, SLO-based alerting, full request tracing, unified dashboards per team, and automated runbooks for common issues. What's your recommended observability stack and implementation plan?"
+    },
+    {
+      "index": 44,
+      "expected_tier": "complex",
+      "routed_tier": "complex",
+      "routed_model": "gemini-2.5-pro",
+      "confidence": 0.779,
+      "classify_ms": 577,
+      "correct_route": true,
+      "nadir": {
+        "success": false,
+        "cost": 0.0,
+        "latency_ms": 60154,
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "output": ""
+      },
+      "opus": {
+        "success": false,
+        "cost": 0.0,
+        "latency_ms": 60154,
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "output": ""
+      },
+      "ticket": "Our application performance has degraded significantly over the past month. P99 latency went from 500ms to 8 seconds. We've already checked:\n- CPU utilization: 45% average (not the bottleneck)\n- Memory: 60% utilized, no OOM events\n- Database: query performance looks normal, connection count stable\n- Network: no packet loss, bandwidth well within limits\n\nBut we've noticed:\n- GC pause times increased from 50ms to 800ms\n- Thread pool utilization went from 30% to 95%\n- Connection pool wait times spiked\n- Heap dumps show growing number of unreleased HTTP client connections\n\nWe're running Java 17 on Kubernetes, 8 pods with 4GB heap each. The issue correlates with when we integrated a new third-party API (inventory service) that sometimes responds in 30+ seconds.\n\nNeed: root cause analysis, immediate mitigation, and long-term architecture recommendations."
+    },
+    {
+      "index": 45,
+      "expected_tier": "complex",
+      "routed_tier": "complex",
+      "routed_model": "gemini-2.5-pro",
+      "confidence": 0.84,
+      "classify_ms": 877,
+      "correct_route": true,
+      "nadir": {
+        "success": false,
+        "cost": 0.0,
+        "latency_ms": 55140,
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "output": ""
+      },
+      "opus": {
+        "success": false,
+        "cost": 0.0,
+        "latency_ms": 55140,
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "output": ""
+      },
+      "ticket": "We're designing a global content delivery architecture for our video streaming platform. Requirements:\n- 4K video streaming to 1M+ concurrent users\n- Content in 3 tiers: live (ultra-low latency <2s), VOD (standard), and user-generated (variable quality)\n- DRM integration (Widevine + FairPlay)\n- Adaptive bitrate streaming (HLS + DASH)\n- Geographic restrictions for licensed content\n- Real-time analytics: viewer count, quality metrics, engagement\n- Cost optimization: edge caching strategy, origin shield\n\nCurrent infrastructure handles 100K concurrent users. We need to 10x capacity in 3 months for a major content launch. What's the architecture and migration plan using your CDN and compute services?"
+    },
+    {
+      "index": 46,
+      "expected_tier": "complex",
+      "routed_tier": "complex",
+      "routed_model": "gemini-2.5-pro",
+      "confidence": 0.736,
+      "classify_ms": 1302,
+      "correct_route": true,
+      "nadir": {
+        "success": true,
+        "cost": 0.021576250000000005,
+        "latency_ms": 22135,
+        "prompt_tokens": 909,
+        "completion_tokens": 2044,
+        "output": "Of course. Thank you for reaching out with this critical initiative. Designing and implementing a zero-trust architecture is a significant undertaking, but it's the gold standard for securing sensitive workloads, especially for a healthcare company handling PHI. CloudStack Pro provides all the necessary primitives to build a robust, compliant, and secure environment.\n\nLet's break down your requirements and map them to a phased implementation plan using CloudStack Pro features.\n\n### Acknowledgment & Diagnosis\n\nYour current state (flat network, shared accounts, SSH keys) presents significant security and compliance risks. Moving to a zero-trust model will fundamentally improve your security posture by shifting from a \"trust but verify\" to a \"never trust, always verify\" paradigm. This aligns perfectly with the stringent requirements of HIPAA, SOC2, and HITRUST.\n\nHere is a blueprint for achieving a zero-trust architecture on CloudStack Pro, broken down by security domain.\n\n---\n\n### 1. Identity-Driven Controls ("
+      },
+      "opus": {
+        "success": true,
+        "cost": 0.021576250000000005,
+        "latency_ms": 22135,
+        "prompt_tokens": 909,
+        "completion_tokens": 2044,
+        "output": "Of course. Thank you for reaching out with this critical initiative. Designing and implementing a zero-trust architecture is a significant undertaking, but it's the gold standard for securing sensitive workloads, especially for a healthcare company handling PHI. CloudStack Pro provides all the necessary primitives to build a robust, compliant, and secure environment.\n\nLet's break down your requirements and map them to a phased implementation plan using CloudStack Pro features.\n\n### Acknowledgment & Diagnosis\n\nYour current state (flat network, shared accounts, SSH keys) presents significant security and compliance risks. Moving to a zero-trust model will fundamentally improve your security posture by shifting from a \"trust but verify\" to a \"never trust, always verify\" paradigm. This aligns perfectly with the stringent requirements of HIPAA, SOC2, and HITRUST.\n\nHere is a blueprint for achieving a zero-trust architecture on CloudStack Pro, broken down by security domain.\n\n---\n\n### 1. Identity-Driven Controls ("
+      },
+      "ticket": "We need help designing a zero-trust security architecture for our platform. We're a healthcare company processing PHI across multiple services. Requirements:\n- Every service-to-service call must be authenticated and authorized\n- Network policies: deny-all default, explicit allow rules\n- Identity-based access (not network-based) for all resources\n- Continuous verification (not just at connection time)\n- Data classification and DLP policies\n- Encrypted everywhere (in transit, at rest, in use where possible)\n- Privileged access management for operations team\n- Compliance: HIPAA, SOC2 Type II, HITRUST\n\nCurrent state: flat network, shared service accounts, SSH key-based access, no service mesh. 30 microservices, 5 databases, 3 message queues."
+    },
+    {
+      "index": 47,
+      "expected_tier": "complex",
+      "routed_tier": "complex",
+      "routed_model": "gemini-2.5-pro",
+      "confidence": 0.725,
+      "classify_ms": 734,
+      "correct_route": true,
+      "nadir": {
+        "success": true,
+        "cost": 0.021611250000000002,
+        "latency_ms": 19938,
+        "prompt_tokens": 929,
+        "completion_tokens": 2045,
+        "output": ""
+      },
+      "opus": {
+        "success": true,
+        "cost": 0.021611250000000002,
+        "latency_ms": 19938,
+        "prompt_tokens": 929,
+        "completion_tokens": 2045,
+        "output": ""
+      },
+      "ticket": "We want to implement a sophisticated cost optimization strategy. Our monthly CloudStack bill is $450K and the CFO wants it under $300K without sacrificing performance or reliability. Current usage:\n- 150 Kubernetes nodes (mix of compute and memory optimized)\n- 25 database instances (PostgreSQL, Redis, MongoDB)\n- 50TB object storage with 10TB/day egress\n- 3 regions for redundancy (but traffic is 80% us-east-1)\n- Dev/staging environments running 24/7 (same config as prod)\n- No reserved capacity, everything on-demand\n- Auto-scaling configured but rarely triggers (conservative thresholds)\n\nNeed: detailed analysis of waste, rightsizing recommendations, reserved capacity strategy, environment scheduling, architecture changes for cost efficiency, and a month-by-month reduction plan."
+    },
+    {
+      "index": 48,
+      "expected_tier": "complex",
+      "routed_tier": "complex",
+      "routed_model": "gemini-2.5-pro",
+      "confidence": 0.857,
+      "classify_ms": 670,
+      "correct_route": true,
+      "nadir": {
+        "success": false,
+        "cost": 0.0,
+        "latency_ms": 727,
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "output": ""
+      },
+      "opus": {
+        "success": false,
+        "cost": 0.0,
+        "latency_ms": 727,
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "output": ""
+      },
+      "ticket": "We're implementing a data sovereignty solution for our global SaaS platform. We have customers in EU (GDPR), Brazil (LGPD), India (DPDPA), and California (CCPA). Requirements:\n- Customer data must reside in the customer's declared region\n- Cross-border data transfers must comply with applicable frameworks (SCCs, adequacy decisions)\n- Right to deletion must propagate across all systems within 72 hours\n- Data processing records must be maintained per Article 30\n- Consent management integration\n- Audit trail for all data access\n- Breach notification workflow (72hr GDPR, varies by jurisdiction)\n\nOur current architecture is US-only with a single PostgreSQL database. We need a migration plan to a multi-region, data-sovereign architecture."
+    },
+    {
+      "index": 49,
+      "expected_tier": "complex",
+      "routed_tier": "complex",
+      "routed_model": "gemini-2.5-pro",
+      "confidence": 0.842,
+      "classify_ms": 200,
+      "correct_route": true,
+      "nadir": {
+        "success": false,
+        "cost": 0.0,
+        "latency_ms": 993,
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "output": ""
+      },
+      "opus": {
+        "success": false,
+        "cost": 0.0,
+        "latency_ms": 993,
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "output": ""
+      },
+      "ticket": "We're seeing cascading failures across our microservices during peak traffic. The pattern:\n1. Inventory service slows down (p99 goes from 200ms to 10s)\n2. Order service threads get blocked waiting for inventory\n3. Order service health checks fail, pods restart\n4. Cart service can't reach order service, starts failing\n5. Frontend gets 503s, users retry, amplifying load\n6. Full cascade in ~3 minutes, recovery takes 20+ minutes\n\nThis has happened 4 times in the past month, always during peak hours (11am-1pm EST). We need:\n- Immediate fixes (circuit breakers, bulkheads, timeouts)\n- Architecture review for resilience patterns\n- Load testing strategy to validate fixes\n- Chaos engineering plan\n- Runbook for when cascades start\n\nOur stack: 12 services on Kubernetes, gRPC between services, no service mesh currently, PostgreSQL + Redis."
+    },
+    {
+      "index": 50,
+      "expected_tier": "complex",
+      "routed_tier": "complex",
+      "routed_model": "gemini-2.5-pro",
+      "confidence": 0.826,
+      "classify_ms": 347,
+      "correct_route": true,
+      "nadir": {
+        "success": false,
+        "cost": 0.0,
+        "latency_ms": 631,
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "output": ""
+      },
+      "opus": {
+        "success": false,
+        "cost": 0.0,
+        "latency_ms": 631,
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "output": ""
+      },
+      "ticket": "We need to build a comprehensive API gateway strategy. We currently have 30+ microservices each exposing their own endpoints directly. Problems:\n- No unified rate limiting (each service implements its own)\n- Authentication is duplicated across services\n- No request/response transformation\n- API versioning is inconsistent\n- No developer portal or API documentation aggregation\n- GraphQL federation attempted but abandoned\n- Partner integrations need different auth (OAuth2, API keys, mTLS)\n\nWe need: gateway architecture recommendation, migration plan from direct service exposure, unified auth strategy, rate limiting design, API versioning strategy, developer portal setup, and analytics/monitoring for API usage. We serve 500 API consumers (mix of internal teams, partners, and public developers)."
+    }
+  ],
+  "judge_results": [
+    {
+      "index": 6,
+      "tier": "simple",
+      "routed_model": "gemini-2.0-flash",
+      "judge": {
+        "response_a": {
+          "accuracy": 4,
+          "completeness": 4,
+          "actionability": 4,
+          "tone": 4,
+          "efficiency": 4,
+          "overall": 4
+        },
+        "response_b": {
+          "accuracy": 4,
+          "completeness": 4,
+          "actionability": 4,
+          "tone": 4,
+          "efficiency": 4,
+          "overall": 4
+        },
+        "verdict": "A_better",
+        "reasoning": "Both responses are good, but A is slightly better because it provides more detailed steps and covers the possibility of needing to create a custom read-only role, making it more helpful for users who might not have a pre-defined role available."
+      }
+    },
+    {
+      "index": 7,
+      "tier": "simple",
+      "routed_model": "gemini-2.0-flash",
+      "judge": {
+        "response_a": {
+          "accuracy": 4,
+          "completeness": 4,
+          "actionability": 4,
+          "tone": 4,
+          "efficiency": 4,
+          "overall": 4
+        },
+        "response_b": {
+          "accuracy": 4,
+          "completeness": 4,
+          "actionability": 4,
+          "tone": 4,
+          "efficiency": 4,
+          "overall": 4
+        },
+        "verdict": "B_better",
+        "reasoning": "Response B provides a more complete answer by explaining the different size limits depending on the upload method, and provides helpful information about multipart uploads and links to documentation."
+      }
+    },
+    {
+      "index": 8,
+      "tier": "simple",
+      "routed_model": "gemini-2.0-flash",
+      "judge": {
+        "response_a": {
+          "accuracy": 4,
+          "completeness": 4,
+          "actionability": 4,
+          "tone": 4,
+          "efficiency": 4,
+          "overall": 4
+        },
+        "response_b": {
+          "accuracy": 4,
+          "completeness": 4,
+          "actionability": 4,
+          "tone": 4,
+          "efficiency": 4,
+          "overall": 4
+        },
+        "verdict": "A_better",
+        "reasoning": "Response A provides specific details about scheduled maintenance, including service, region, start and end times, and a description. Response B gives a general answer and directs the user to a status page. While the status page is helpful, the direct information in A is more immediately useful."
+      }
+    },
+    {
+      "index": 9,
+      "tier": "simple",
+      "routed_model": "gemini-2.0-flash",
+      "judge": {
+        "response_a": {
+          "accuracy": 4,
+          "completeness": 4,
+          "actionability": 4,
+          "tone": 4,
+          "efficiency": 4,
+          "overall": 4
+        },
+        "response_b": {
+          "accuracy": 4,
+          "completeness": 4,
+          "actionability": 4,
+          "tone": 4,
+          "efficiency": 4,
+          "overall": 4
+        },
+        "verdict": "B_better",
+        "reasoning": "Response B is slightly better because it provides more specific instructions, such as where to find the 'Account' section (top-right corner) and the exact wording of the download link ('Download PDF'). It also includes a helpful note about the necessary account permissions."
+      }
+    },
+    {
+      "index": 13,
+      "tier": "simple",
+      "routed_model": "gemini-2.0-flash",
+      "judge": {
+        "response_a": {
+          "accuracy": 4,
+          "completeness": 4,
+          "actionability": 4,
+          "tone": 4,
+          "efficiency": 4,
+          "overall": 4
+        },
+        "response_b": {
+          "accuracy": 4,
+          "completeness": 4,
+          "actionability": 4,
+          "tone": 4,
+          "efficiency": 4,
+          "overall": 4
+        },
+        "verdict": "B_better",
+        "reasoning": "Both responses are good and provide a detailed comparison of the Standard and Pro plans. Response B is slightly better because it includes more specific details about the support SLAs and security features, and it offers tailored advice based on the customer's needs."
+      }
+    },
+    {
+      "index": 14,
+      "tier": "simple",
+      "routed_model": "gemini-2.0-flash",
+      "judge": {
+        "response_a": {
+          "accuracy": 4,
+          "completeness": 4,
+          "actionability": 4,
+          "tone": 4,
+          "efficiency": 4,
+          "overall": 4
+        },
+        "response_b": {
+          "accuracy": 4,
+          "completeness": 4,
+          "actionability": 4,
+          "tone": 4,
+          "efficiency": 4,
+          "overall": 4
+        },
+        "verdict": "A_better",
+        "reasoning": "Response A is slightly better because it provides more comprehensive guidance, including considerations for email verification, different alert types, testing, and checking the spam folder. It also offers a more detailed example scenario and asks for specific information to provide more tailored instructions if the user is having trouble."
+      }
+    },
+    {
+      "index": 15,
+      "tier": "simple",
+      "routed_model": "gemini-2.0-flash",
+      "judge": {
+        "response_a": {
+          "accuracy": 4,
+          "completeness": 4,
+          "actionability": 4,
+          "tone": 4,
+          "efficiency": 4,
+          "overall": 4
+        },
+        "response_b": {
+          "accuracy": 4,
+          "completeness": 4,
+          "actionability": 4,
+          "tone": 4,
+          "efficiency": 4,
+          "overall": 4
+        },
+        "verdict": "A_better",
+        "reasoning": "Both responses are good, but response A is slightly better because it provides a direct link to the SLA documentation, making it easier for the customer to find the information they need. Response B offers to send the documentation, which adds an extra step."
+      }
+    },
+    {
+      "index": 18,
+      "tier": "medium",
+      "routed_model": "gemini-2.0-flash",
+      "judge": {
+        "response_a": {
+          "accuracy": 4,
+          "completeness": 4,
+          "actionability": 4,
+          "tone": 4,
+          "efficiency": 4,
+          "overall": 4
+        },
+        "response_b": {
+          "accuracy": 4,
+          "completeness": 4,
+          "actionability": 4,
+          "tone": 4,
+          "efficiency": 4,
+          "overall": 4
+        },
+        "verdict": "A_better",
+        "reasoning": "Response A is slightly better because it includes a section on HIPAA compliance considerations, which is directly relevant to the customer's request. Both responses provide good instructions on how to configure the backups."
+      }
+    }
+  ]
+}

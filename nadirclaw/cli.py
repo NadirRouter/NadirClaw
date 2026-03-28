@@ -9,11 +9,117 @@ from pathlib import Path
 import click
 
 
-@click.group()
+@click.group(invoke_without_command=True)
 @click.version_option(version=None, prog_name="nadirclaw", package_name="nadirclaw")
-def main():
+@click.pass_context
+def main(ctx):
     """NadirClaw — Open-source LLM router."""
-    pass
+    if ctx.invoked_subcommand is None:
+        click.echo("NadirClaw — Open-source LLM router\n")
+        click.echo("Quick start:")
+        click.echo(f"  {click.style('nadirclaw setup', bold=True)}      Configure providers and models")
+        click.echo(f"  {click.style('nadirclaw serve', bold=True)}      Start the router on localhost:8856")
+        click.echo(f"  {click.style('nadirclaw demo', bold=True)}       See routing in action (no API keys needed)")
+        click.echo(f"  {click.style('nadirclaw classify', bold=True)}   Test the classifier on a prompt")
+        click.echo()
+        click.echo("Monitoring:")
+        click.echo(f"  {click.style('nadirclaw report', bold=True)}     Cost and usage report")
+        click.echo(f"  {click.style('nadirclaw dashboard', bold=True)}  Live terminal dashboard")
+        click.echo(f"  {click.style('nadirclaw savings', bold=True)}    See how much you've saved")
+        click.echo()
+        click.echo(f"Run {click.style('nadirclaw --help', bold=True)} for all commands.")
+
+
+@main.command()
+@click.option("--count", default=10, help="Number of sample prompts to classify")
+def demo(count):
+    """Run a quick demo — classify sample prompts and show projected savings."""
+    click.echo("NadirClaw Demo — classifying sample prompts...\n")
+
+    sample_prompts = [
+        ("What is 2+2?", "simple"),
+        ("Format this JSON for me", "simple"),
+        ("Translate 'hello' to French", "simple"),
+        ("Write a docstring for this function", "simple"),
+        ("List all files in the current directory", "simple"),
+        ("Refactor this authentication module to use JWT tokens with refresh token rotation, add rate limiting per user, and write integration tests", "complex"),
+        ("Debug this race condition in our async task queue that causes duplicate processing under high load", "complex"),
+        ("Design a microservices architecture for a real-time multiplayer game with matchmaking, leaderboards, and replay storage", "complex"),
+        ("Explain the difference between TCP and UDP", "medium"),
+        ("Write a Python function to validate email addresses", "medium"),
+        ("How do I set up a basic Express.js server?", "medium"),
+        ("What are the pros and cons of NoSQL vs SQL databases?", "medium"),
+        ("Create a React component that fetches and displays a list of users", "medium"),
+    ]
+
+    # Use at most `count` prompts
+    prompts = sample_prompts[:count]
+
+    from nadirclaw.classifier import get_classifier
+    classifier = get_classifier()
+
+    simple_count = 0
+    mid_count = 0
+    complex_count = 0
+
+    # Cost assumptions (per request, approximate)
+    premium_cost = 0.045  # avg cost if all went to premium model
+    simple_cost = 0.002
+    mid_cost = 0.012
+
+    for prompt_text, expected in prompts:
+        result = classifier.classify(prompt_text)
+        # Handle different return types from different classifiers
+        if isinstance(result, tuple):
+            if len(result) == 2:
+                is_complex, confidence = result
+                tier = "complex" if is_complex else "simple"
+            elif len(result) == 3:
+                tier, confidence, _ = result
+        elif isinstance(result, dict):
+            tier = result.get("tier_name", "unknown")
+            confidence = result.get("confidence", 0)
+        else:
+            tier = str(result)
+            confidence = 0.0
+
+        # Normalize tier name
+        if tier in ("mid", "medium"):
+            tier_display = "MEDIUM"
+            mid_count += 1
+        elif tier == "complex":
+            tier_display = "COMPLEX"
+            complex_count += 1
+        else:
+            tier_display = "SIMPLE"
+            simple_count += 1
+
+        # Color coding
+        if tier_display == "SIMPLE":
+            color = "green"
+        elif tier_display == "MEDIUM":
+            color = "yellow"
+        else:
+            color = "blue"
+
+        # Truncate prompt for display
+        display_prompt = prompt_text[:60] + "..." if len(prompt_text) > 60 else prompt_text
+        click.echo(f"  {click.style(tier_display.ljust(7), fg=color, bold=True)}  \"{display_prompt}\"")
+
+    total = len(prompts)
+    routed_cheaper = simple_count + mid_count
+    all_premium_cost = total * premium_cost
+    routed_cost = (simple_count * simple_cost) + (mid_count * mid_cost) + (complex_count * premium_cost)
+    savings_pct = ((all_premium_cost - routed_cost) / all_premium_cost * 100) if all_premium_cost > 0 else 0
+
+    click.echo(f"\n{'─' * 50}")
+    click.echo(f"  {click.style(str(routed_cheaper), fg='green', bold=True)} of {total} routed to cheaper models")
+    click.echo(f"  Projected cost with routing:    {click.style(f'${routed_cost:.3f}', fg='green')}")
+    click.echo(f"  Cost without routing:           ${all_premium_cost:.3f}")
+    click.echo(f"  {click.style(f'Estimated savings: {savings_pct:.0f}%', fg='green', bold=True)}")
+    click.echo(f"\n  Ready to start saving? Run:")
+    click.echo(f"    {click.style('nadirclaw setup', bold=True)}    (configure your API keys)")
+    click.echo(f"    {click.style('nadirclaw serve', bold=True)}    (start the router)")
 
 
 @main.command()
@@ -85,6 +191,13 @@ def serve(port, simple_model, complex_model, models, token, verbose, log_raw, op
     click.echo(f"  Complex model: {settings.COMPLEX_MODEL}")
     if settings.OPTIMIZE != "off":
         click.echo(f"  Optimize:      {settings.OPTIMIZE}")
+
+    click.echo()
+    click.echo(f"  Point your tools to: {click.style(f'http://localhost:{actual_port}/v1', fg='blue', bold=True)}")
+    click.echo(f"  Dashboard:           {click.style(f'http://localhost:{actual_port}/dashboard', fg='blue')}")
+    click.echo(f"  Health check:        curl http://localhost:{actual_port}/health")
+    click.echo()
+
     uvicorn.run(
         "nadirclaw.server:app",
         host="0.0.0.0",
@@ -96,39 +209,66 @@ def serve(port, simple_model, complex_model, models, token, verbose, log_raw, op
 @main.command()
 @click.argument("prompt", nargs=-1, required=True)
 @click.option("--format", "fmt", default="text", type=click.Choice(["text", "json"]), help="Output format")
-def classify(prompt, fmt):
-    """Classify a prompt as simple or complex (no server needed)."""
+@click.option("--cascade", is_flag=True, help="Use cascade classifier (ternary)")
+def classify(prompt, fmt, cascade):
+    """Classify a prompt as simple, medium, or complex (no server needed)."""
     import logging
 
     logging.basicConfig(level=logging.WARNING)
 
-    from nadirclaw.classifier import BinaryComplexityClassifier
     from nadirclaw.settings import settings
 
     prompt_text = " ".join(prompt)
-    classifier = BinaryComplexityClassifier()
-    is_complex, confidence = classifier.classify(prompt_text)
 
-    tier = "complex" if is_complex else "simple"
-    score = classifier._confidence_to_score(is_complex, confidence)
+    use_cascade = cascade or settings.CLASSIFIER == "cascade"
+
+    if use_cascade:
+        from nadirclaw.classifier import ConfidenceAwareCascadeClassifier
+
+        clf = ConfidenceAwareCascadeClassifier()
+        tier_name, confidence, metadata = clf.classify(prompt_text)
+        from nadirclaw.classifier import _tier_to_score
+        score = _tier_to_score(tier_name, confidence)
+        is_complex = tier_name in ("medium", "complex")
+        escalated = metadata.get("confidence_escalated", False)
+    else:
+        from nadirclaw.classifier import BinaryComplexityClassifier
+
+        clf = BinaryComplexityClassifier()
+        is_complex, confidence = clf.classify(prompt_text)
+        tier_name = "complex" if is_complex else "simple"
+        score = clf._confidence_to_score(is_complex, confidence)
+        escalated = False
 
     # Pick model from explicit tier config
-    model = settings.COMPLEX_MODEL if is_complex else settings.SIMPLE_MODEL
+    if tier_name == "complex":
+        model = settings.COMPLEX_MODEL
+    elif tier_name in ("mid", "medium"):
+        model = settings.MID_MODEL
+    else:
+        model = settings.SIMPLE_MODEL
 
     if fmt == "json":
-        click.echo(json.dumps({
-            "tier": tier,
+        result = {
+            "tier": tier_name,
             "is_complex": is_complex,
             "confidence": round(confidence, 4),
             "score": round(score, 4),
             "model": model,
             "prompt": prompt_text,
-        }))
+            "classifier": "cascade" if use_cascade else "binary",
+        }
+        if use_cascade:
+            result["escalated"] = escalated
+        click.echo(json.dumps(result))
     else:
-        click.echo(f"Tier:       {tier}")
+        click.echo(f"Classifier: {'cascade' if use_cascade else 'binary'}")
+        click.echo(f"Tier:       {tier_name}")
         click.echo(f"Confidence: {confidence:.4f}")
         click.echo(f"Score:      {score:.4f}")
         click.echo(f"Model:      {model}")
+        if use_cascade and escalated:
+            click.echo(f"Escalated:  yes")
 
 
 @main.command("optimize")
@@ -493,8 +633,159 @@ def export(fmt, since, model, output_path):
         click.echo(output, nl=False)
 
 
-@main.command(name="build-centroids")
-def build_centroids():
+@main.command(name="export-labeled")
+@click.option("--format", "fmt", default="json", type=click.Choice(["json", "jsonl"]), help="Export format")
+@click.option("--since", default=None, help="Start date filter (ISO format or YYYY-MM-DD)")
+@click.option("--until", default=None, help="End date filter (ISO format or YYYY-MM-DD)")
+@click.option("--output", "-o", "output_path", default=None, type=click.Path(), help="Output file (default: stdout)")
+def export_labeled(fmt, since, until, output_path):
+    """Export human-labeled prompts for classifier retraining.
+
+    \b
+    Examples:
+      nadirclaw export-labeled                              # all labels as JSON
+      nadirclaw export-labeled --format jsonl -o train.jsonl
+      nadirclaw export-labeled --since 2026-03-01 --until 2026-03-31
+    """
+    from nadirclaw.request_logger import export_labeled_prompts
+
+    labels = export_labeled_prompts(since=since, until=until)
+
+    if not labels:
+        click.echo("No labeled prompts found. Use 'nadirclaw label' to label some requests.")
+        return
+
+    if fmt == "json":
+        output = json.dumps(labels, indent=2, default=str)
+    else:
+        lines = [json.dumps(entry, default=str) for entry in labels]
+        output = "\n".join(lines) + "\n"
+
+    if output_path:
+        Path(output_path).write_text(output)
+        click.echo(f"Exported {len(labels)} labeled prompts to {output_path}")
+    else:
+        click.echo(output, nl=False)
+
+
+@main.command()
+@click.option("--last", "last_n", default=20, type=int, help="Number of recent requests to show (default: 20)")
+def label(last_n):
+    """Interactively label recent requests with correct tiers for classifier retraining.
+
+    \b
+    Shows recent requests from SQLite logs, lets you confirm or correct
+    the predicted tier. Labels are stored in the labeled_prompts table
+    and can be exported with 'nadirclaw export-labeled'.
+
+    \b
+    Examples:
+      nadirclaw label            # label last 20 requests
+      nadirclaw label --last 50  # label last 50 requests
+    """
+    from nadirclaw.request_logger import get_recent_requests, store_label
+    from nadirclaw.settings import settings
+
+    db_path = settings.LOG_DIR / "requests.db"
+    if not db_path.exists():
+        click.echo("No request database found. Start the server and make some requests first.")
+        return
+
+    requests = get_recent_requests(limit=last_n)
+    if not requests:
+        click.echo("No requests found in logs.")
+        return
+
+    click.echo(f"Found {len(requests)} recent requests. For each, enter the correct tier.")
+    click.echo(f"Options: [s]imple, [m]edium, [c]omplex, [enter] to confirm predicted, [q]uit\n")
+
+    labeled_count = 0
+    skipped_count = 0
+    tier_map = {"s": "simple", "m": "medium", "c": "complex"}
+
+    for i, req in enumerate(requests, 1):
+        request_id = req.get("request_id", "?")
+        prompt = req.get("prompt", "")
+        predicted_tier = req.get("tier", "?")
+        confidence = req.get("confidence", 0)
+        model = req.get("selected_model", "?")
+        timestamp = req.get("timestamp", "?")
+
+        # Truncate prompt for display
+        display_prompt = prompt[:120] + "..." if len(prompt) > 120 else prompt
+        display_prompt = display_prompt.replace("\n", " ")
+
+        # Color-code the predicted tier
+        tier_colors = {"simple": "green", "medium": "yellow", "complex": "blue", "mid": "yellow"}
+        tier_color = tier_colors.get(predicted_tier, "white")
+
+        click.echo(f"[{i}/{len(requests)}] {timestamp}")
+        click.echo(f"  Prompt:    \"{display_prompt}\"")
+        click.echo(f"  Predicted: {click.style(str(predicted_tier), fg=tier_color, bold=True)}  "
+                    f"(confidence: {confidence:.3f})" if confidence else
+                    f"  Predicted: {click.style(str(predicted_tier), fg=tier_color, bold=True)}")
+        click.echo(f"  Model:     {model}")
+
+        choice = click.prompt(
+            "  Correct tier",
+            default="",
+            show_default=False,
+            prompt_suffix=" [s/m/c/enter/q]: ",
+        ).strip().lower()
+
+        if choice == "q":
+            click.echo("\nStopping.")
+            break
+        elif choice == "":
+            # Confirm predicted tier
+            correct_tier = predicted_tier if predicted_tier in ("simple", "medium", "complex") else None
+            if correct_tier is None:
+                # Normalize 'mid' -> 'medium'
+                correct_tier = "medium" if predicted_tier == "mid" else "simple"
+        elif choice in tier_map:
+            correct_tier = tier_map[choice]
+        else:
+            click.echo("  Skipped (invalid input).")
+            skipped_count += 1
+            click.echo()
+            continue
+
+        result = store_label(
+            request_id=request_id,
+            correct_tier=correct_tier,
+            prompt=prompt,
+            system_prompt=req.get("system_prompt"),
+            predicted_tier=predicted_tier,
+            confidence=confidence,
+        )
+
+        if "error" in result:
+            click.echo(f"  Error: {result['error']}")
+            skipped_count += 1
+        else:
+            was_correct = correct_tier == predicted_tier or (
+                correct_tier == "medium" and predicted_tier == "mid"
+            )
+            if was_correct:
+                click.echo(f"  Confirmed: {click.style(correct_tier, fg='green')}")
+            else:
+                click.echo(
+                    f"  Corrected: {click.style(str(predicted_tier), fg='red')} -> "
+                    f"{click.style(correct_tier, fg='green')}"
+                )
+            labeled_count += 1
+
+        click.echo()
+
+    click.echo(f"{'─' * 50}")
+    click.echo(f"Labeled: {labeled_count}  Skipped: {skipped_count}")
+    if labeled_count > 0:
+        click.echo(f"\nExport with: nadirclaw export-labeled -o training_data.json")
+
+
+@main.command(name="build-centroids", hidden=True)
+@click.option("--ternary", is_flag=True, help="Also build ternary centroids for cascade classifier")
+def build_centroids(ternary):
     """Regenerate centroid .npy files from prototype prompts."""
     import logging
 
@@ -503,11 +794,12 @@ def build_centroids():
     logging.basicConfig(level=logging.INFO, format="%(message)s")
 
     from nadirclaw.encoder import get_shared_encoder_sync
-    from nadirclaw.prototypes import COMPLEX_PROTOTYPES, SIMPLE_PROTOTYPES
+    from nadirclaw.prototypes import COMPLEX_PROTOTYPES, MEDIUM_PROTOTYPES, SIMPLE_PROTOTYPES
 
     click.echo("Loading encoder...")
     encoder = get_shared_encoder_sync()
 
+    # --- Binary centroids (always built) ---
     click.echo(f"Encoding {len(SIMPLE_PROTOTYPES)} simple prototypes...")
     simple_embs = encoder.encode(SIMPLE_PROTOTYPES, show_progress_bar=False)
     simple_centroid = simple_embs.mean(axis=0)
@@ -528,6 +820,217 @@ def build_centroids():
     click.echo(f"\nSaved: {simple_path}")
     click.echo(f"Saved: {complex_path}")
     click.echo(f"Centroid dimension: {simple_centroid.shape[0]}")
+
+    # --- Ternary centroids (for cascade classifier) ---
+    if ternary:
+        from nadirclaw.settings import settings
+
+        click.echo(f"\nEncoding {len(MEDIUM_PROTOTYPES)} medium prototypes...")
+        medium_embs = encoder.encode(MEDIUM_PROTOTYPES, show_progress_bar=False)
+        medium_centroid = medium_embs.mean(axis=0)
+        medium_centroid = medium_centroid / np.linalg.norm(medium_centroid)
+
+        # K-means sub-clustering for complex tier
+        k = settings.CASCADE_COMPLEX_SUB_CLUSTERS
+        k = min(k, len(complex_embs))
+        if k >= 2:
+            try:
+                from sklearn.cluster import KMeans
+
+                kmeans = KMeans(n_clusters=k, random_state=42, n_init=10)
+                labels = kmeans.fit_predict(complex_embs)
+                sub_centroids = []
+                for i in range(k):
+                    cluster_embs = complex_embs[labels == i]
+                    if len(cluster_embs) == 0:
+                        continue
+                    c = cluster_embs.mean(axis=0)
+                    norm = np.linalg.norm(c)
+                    if norm > 0:
+                        c = c / norm
+                    sub_centroids.append(c)
+                complex_centroids_multi = np.array(sub_centroids)
+                click.echo(f"Complex tier: {len(sub_centroids)} sub-centroids via k-means")
+            except ImportError:
+                click.echo("sklearn not available -- using single complex centroid")
+                c = complex_centroid.copy()
+                complex_centroids_multi = c.reshape(1, -1)
+        else:
+            complex_centroids_multi = complex_centroid.reshape(1, -1)
+
+        ternary_path = os.path.join(pkg_dir, "ternary_centroids.npy")
+        stacked = np.array(
+            [simple_centroid.astype(np.float32),
+             medium_centroid.astype(np.float32),
+             complex_centroids_multi.astype(np.float32)],
+            dtype=object,
+        )
+        np.save(ternary_path, stacked, allow_pickle=True)
+
+        click.echo(f"Saved: {ternary_path}")
+        click.echo(f"Ternary centroids: simple(1) + medium(1) + complex({len(complex_centroids_multi)})")
+
+
+@main.command(hidden=True)
+@click.option("--data", "data_file", default=None, type=click.Path(exists=True),
+              help="JSONL file with labeled prompts ({prompt, tier})")
+@click.option("--validate-only", is_flag=True, help="Dry-run: show what would change without applying")
+@click.option("--rollback", "do_rollback", is_flag=True, help="Revert to previous centroid version")
+@click.option("--format", "fmt", default="text", type=click.Choice(["text", "json"]), help="Output format")
+def train(data_file, validate_only, do_rollback, fmt):
+    """Retrain routing centroids from production data + feedback.
+
+    \b
+    Examples:
+      nadirclaw train                    # retrain from production data
+      nadirclaw train --data prompts.jsonl  # retrain from labeled file
+      nadirclaw train --validate-only    # dry-run, show accuracy changes
+      nadirclaw train --rollback         # revert to previous version
+    """
+    import logging
+
+    logging.basicConfig(level=logging.INFO, format="%(message)s")
+
+    from nadirclaw.settings import settings
+    from nadirclaw.training import (
+        CentroidTrainer,
+        _latest_version,
+        _read_metadata,
+        list_versions,
+    )
+
+    trainer = CentroidTrainer()
+
+    # --- Rollback mode ---
+    if do_rollback:
+        current = _latest_version()
+        if current <= 1:
+            click.echo("No previous version to roll back to.")
+            raise SystemExit(1)
+
+        target = trainer.rollback()
+        if target is None:
+            click.echo("Rollback failed: no valid previous version found.")
+            raise SystemExit(1)
+
+        if fmt == "json":
+            click.echo(json.dumps({"action": "rollback", "from_version": current, "to_version": target}))
+        else:
+            click.echo(f"Rolled back from v{current} to v{target}")
+            click.echo("Classifier will use the restored centroids on next load.")
+        return
+
+    # --- Collect training data ---
+    db_path = settings.LOG_DIR / "requests.db"
+    extra_file = Path(data_file) if data_file else None
+
+    click.echo("Collecting training data...")
+    dataset = trainer.collect_training_data(db_path, extra_file=extra_file)
+
+    click.echo(f"  Total samples: {dataset.total}")
+    for source, count in sorted(dataset.sources.items()):
+        click.echo(f"    {source}: {count}")
+    click.echo(f"  Train: {len(dataset.train)}  Val: {len(dataset.val)}")
+
+    if dataset.total < 10:
+        click.echo("\nError: too few samples for training (need at least 10).")
+        raise SystemExit(1)
+
+    # --- Load current centroids for comparison ---
+    old_centroids = trainer.load_current_centroids()
+    old_version = _latest_version()
+
+    # --- Train new centroids ---
+    click.echo("\nTraining new centroids...")
+    new_centroids = trainer.train_centroids(dataset)
+
+    if not new_centroids:
+        click.echo("Error: training produced no centroids.")
+        raise SystemExit(1)
+
+    tiers = sorted(new_centroids.keys())
+    click.echo(f"  Tiers: {', '.join(tiers)}")
+
+    # --- Validate ---
+    click.echo("\nValidating on held-out data...")
+    validation = trainer.validate(new_centroids, dataset)
+
+    # Also validate old centroids for comparison
+    old_validation = None
+    if old_centroids:
+        old_validation = trainer.validate(old_centroids, dataset)
+
+    # --- Display results ---
+    if fmt == "json":
+        result = {
+            "action": "validate-only" if validate_only else "train",
+            "dataset": {
+                "total": dataset.total,
+                "train": len(dataset.train),
+                "val": len(dataset.val),
+                "sources": dataset.sources,
+            },
+            "new": {
+                "accuracy": round(validation.accuracy, 4),
+                "tier_distribution": validation.tier_distribution,
+                "tier_shift": round(validation.tier_shift, 4),
+                "passed": validation.passed,
+                "per_tier_accuracy": validation.details.get("per_tier_accuracy", {}),
+            },
+        }
+        if old_validation:
+            result["old"] = {
+                "accuracy": round(old_validation.accuracy, 4),
+                "tier_distribution": old_validation.tier_distribution,
+            }
+        if not validate_only and validation.passed:
+            result["version"] = old_version + 1
+        click.echo(json.dumps(result, indent=2))
+    else:
+        click.echo(f"\n{'='*50}")
+        click.echo("Validation Results")
+        click.echo(f"{'='*50}")
+        click.echo(f"  Accuracy:       {validation.accuracy:.1%}")
+        if old_validation:
+            delta = validation.accuracy - old_validation.accuracy
+            sign = "+" if delta >= 0 else ""
+            click.echo(f"  Previous:       {old_validation.accuracy:.1%} ({sign}{delta:.1%})")
+        click.echo(f"  Tier shift:     {validation.tier_shift:.1%}")
+        click.echo(f"  Passed gates:   {'YES' if validation.passed else 'NO'}")
+
+        click.echo(f"\n  Tier distribution:")
+        for tier, pct in sorted(validation.tier_distribution.items()):
+            baseline = validation.baseline_distribution.get(tier, 0)
+            click.echo(f"    {tier:10s}  {pct:.1%}  (train: {baseline:.1%})")
+
+        per_tier = validation.details.get("per_tier_accuracy", {})
+        if per_tier:
+            click.echo(f"\n  Per-tier accuracy:")
+            for tier, acc in sorted(per_tier.items()):
+                click.echo(f"    {tier:10s}  {acc:.1%}")
+
+    # --- Deploy or abort ---
+    if validate_only:
+        if fmt != "json":
+            click.echo("\n(validate-only mode — no changes applied)")
+        return
+
+    if not validation.passed:
+        if fmt != "json":
+            click.echo(f"\nValidation FAILED:")
+            if validation.accuracy < 0.80:
+                click.echo(f"  - Accuracy {validation.accuracy:.1%} < 80% minimum")
+            if validation.tier_shift > 0.20:
+                click.echo(f"  - Tier shift {validation.tier_shift:.1%} > 20% maximum")
+            click.echo("Keeping current centroids. No changes applied.")
+        raise SystemExit(1)
+
+    version = trainer.deploy(new_centroids, validation, dataset)
+
+    if fmt != "json":
+        click.echo(f"\nDeployed centroid version {version}")
+        click.echo(f"  Saved to: ~/.nadirclaw/models/centroids_v{version}.npz")
+        click.echo("  Classifier will use new centroids on next load.")
 
 
 @main.group()
@@ -1360,6 +1863,100 @@ def test(simple_model, complex_model, timeout):
         raise SystemExit(1)
     else:
         click.echo("All models OK. Start the router with: nadirclaw serve")
+
+
+@main.command()
+@click.argument("request_id")
+@click.option("--reason", type=click.Choice(["misrouted", "slow", "bad_quality", "good", "other"]),
+              default="misrouted", help="Reason for flagging (default: misrouted)")
+@click.option("--rating", type=click.IntRange(1, 5), default=None, help="Quality rating (1-5)")
+@click.option("--tier", type=click.Choice(["simple", "mid", "complex"]), default=None,
+              help="What tier should this have been routed to")
+@click.option("--model", default=None, help="What model should have been used")
+def flag(request_id, reason, rating, tier, model):
+    """Flag a request as misrouted or provide quality feedback.
+
+    Looks up the request in the local SQLite log and stores your feedback.
+
+    Example: nadirclaw flag abc123 --reason misrouted --tier simple
+    """
+    from nadirclaw.feedback import request_exists, store_feedback
+
+    if not request_exists(request_id):
+        click.echo(f"Error: Request '{request_id}' not found in logs.")
+        click.echo("Use 'nadirclaw report' to see recent request IDs.")
+        raise SystemExit(1)
+
+    result = store_feedback(
+        request_id=request_id,
+        rating=rating,
+        reason=reason,
+        correct_tier=tier,
+        correct_model=model,
+    )
+
+    if "error" in result:
+        click.echo(f"Error: {result['error']}")
+        raise SystemExit(1)
+
+    click.echo("Feedback recorded:")
+    click.echo(f"  Request:  {request_id}")
+    click.echo(f"  Reason:   {reason}")
+    if rating is not None:
+        click.echo(f"  Rating:   {rating}/5")
+    if tier:
+        click.echo(f"  Tier:     {tier}")
+    if model:
+        click.echo(f"  Model:    {model}")
+
+
+@main.command(name="feedback-stats")
+@click.option("--format", "fmt", default="text", type=click.Choice(["text", "json"]), help="Output format")
+def feedback_stats(fmt):
+    """Show feedback and quality scoring statistics."""
+    from nadirclaw.feedback import get_feedback_stats
+
+    stats = get_feedback_stats()
+
+    if fmt == "json":
+        click.echo(json.dumps(stats, indent=2))
+        return
+
+    click.echo("NadirClaw Feedback Stats")
+    click.echo("=" * 45)
+
+    total = stats["total_feedback"]
+    click.echo(f"  Total feedback:    {total}")
+
+    avg = stats["average_rating"]
+    click.echo(f"  Average rating:    {avg if avg is not None else 'n/a'}")
+
+    misroute = stats["misroute_rate"]
+    if misroute is not None:
+        click.echo(f"  Misroute rate:     {misroute:.1%}")
+    else:
+        click.echo("  Misroute rate:     n/a")
+
+    # Reason breakdown
+    reasons = stats.get("reason_counts", {})
+    if reasons:
+        click.echo("")
+        click.echo("Reasons:")
+        for reason, count in reasons.items():
+            click.echo(f"  {reason:15s}  {count}")
+
+    # Quality scores
+    click.echo("")
+    click.echo("Quality (last 7 days)")
+    click.echo("-" * 45)
+    avg_q = stats.get("avg_quality_7d")
+    total_7d = stats.get("total_requests_7d", 0)
+    click.echo(f"  Avg score:         {avg_q if avg_q is not None else 'n/a'}")
+    click.echo(f"  Scored requests:   {total_7d}")
+
+    if total == 0:
+        click.echo("")
+        click.echo("Tip: Use 'nadirclaw flag <request_id>' to submit feedback.")
 
 
 if __name__ == "__main__":

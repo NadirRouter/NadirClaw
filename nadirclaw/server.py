@@ -24,6 +24,7 @@ from sse_starlette.sse import EventSourceResponse
 
 from nadirclaw import __version__
 from nadirclaw.auth import UserSession, validate_local_auth
+from nadirclaw.circuit_breaker import get_circuit_breaker
 from nadirclaw.settings import settings
 
 logger = logging.getLogger("nadirclaw")
@@ -91,7 +92,10 @@ app = FastAPI(
 from nadirclaw.web_dashboard import router as dashboard_router
 app.include_router(dashboard_router)
 
-_ROUTING_HEADERS = ("X-Routed-Model", "X-Routed-Tier", "X-Complexity-Score")
+_ROUTING_HEADERS = (
+    "X-Routed-Model", "X-Routed-Tier", "X-Complexity-Score",
+    "X-Routed-Rule", "X-Pareto-Score",
+)
 
 app.add_middleware(
     CORSMiddleware,
@@ -207,6 +211,22 @@ def _log_request(entry: Dict[str, Any]) -> None:
     )
 
 
+def _check_misroute(
+    prompt: str, model: str, tier: str, strategy: str, request_id: str,
+) -> None:
+    """Run misroute detection in the background (fire-and-forget)."""
+    try:
+        from nadirclaw.training import get_misroute_detector, record_misroute
+
+        detector = get_misroute_detector()
+        misroute = detector.check(prompt, model, tier, strategy, request_id)
+        if misroute:
+            db_path = settings.LOG_DIR / "requests.db"
+            record_misroute(db_path, misroute)
+    except Exception as e:
+        logger.debug("Misroute detection error (non-fatal): %s", e)
+
+
 def _extract_request_metadata(request: ChatCompletionRequest) -> Dict[str, Any]:
     """Extract structured metadata from a ChatCompletionRequest for logging."""
     messages = request.messages
@@ -269,7 +289,7 @@ async def startup():
         try:
             from nadirclaw.classifier import warmup
             warmup()
-            logger.info("Binary classifier warmed up (background)")
+            logger.info("Classifier warmed up (background)")
         except Exception as e:
             logger.warning("Background warmup failed (will retry on first request): %s", e)
 
@@ -279,6 +299,7 @@ async def startup():
     try:
         import litellm
         litellm.set_verbose = False
+        logger.info("Classifier:    %s", settings.CLASSIFIER)
         logger.info("Simple model:  %s", settings.SIMPLE_MODEL)
         if settings.has_mid_tier:
             logger.info("Mid model:     %s", settings.MID_MODEL)
@@ -315,6 +336,16 @@ async def startup():
     except Exception as e:
         logger.warning("LiteLLM setup issue: %s", e)
 
+    # Log circuit breaker config
+    cb = get_circuit_breaker()
+    cb_cfg = cb.get_status()["config"]
+    logger.info(
+        "Circuit breaker: threshold=%d, window=%ds, cooldown=%ds",
+        cb_cfg["failure_threshold"],
+        cb_cfg["window_seconds"],
+        cb_cfg["cooldown_seconds"],
+    )
+
     logger.info("Ready! Listening for requests...")
     logger.info("=" * 60)
 
@@ -327,17 +358,17 @@ async def _smart_route_analysis(
     prompt: str, system_message: str, user: UserSession
 ) -> tuple:
     """Run classifier, return (selected_model, analysis_dict). No LLM call."""
-    from nadirclaw.classifier import get_binary_classifier
+    from nadirclaw.classifier import get_classifier
     from nadirclaw.telemetry import trace_span
 
     with trace_span("smart_route_analysis") as span:
-        analyzer = get_binary_classifier()
+        analyzer = get_classifier()
         result = await analyzer.analyze(text=prompt, system_message=system_message)
 
         tier_name = result.get("tier_name", "simple")
         if tier_name == "complex":
             selected = settings.COMPLEX_MODEL
-        elif tier_name == "mid":
+        elif tier_name in ("mid", "medium"):
             selected = settings.MID_MODEL
         else:
             selected = settings.SIMPLE_MODEL
@@ -428,6 +459,96 @@ async def classify_batch(
         "simple": simple_count,
         "complex": complex_count,
         "results": results,
+    }
+
+
+# ---------------------------------------------------------------------------
+# /v1/feedback — user feedback on routing decisions
+# ---------------------------------------------------------------------------
+
+class FeedbackRequest(BaseModel):
+    request_id: str
+    rating: Optional[int] = None
+    reason: Optional[str] = None
+    correct_tier: Optional[str] = None
+    correct_model: Optional[str] = None
+
+
+@app.post("/v1/feedback")
+async def submit_feedback(
+    request: FeedbackRequest,
+    current_user: UserSession = Depends(validate_local_auth),
+) -> Dict[str, Any]:
+    """Submit feedback on a routed request."""
+    from nadirclaw.feedback import request_exists, store_feedback
+
+    # Validate request exists
+    if not request_exists(request.request_id):
+        raise HTTPException(
+            status_code=404,
+            detail=f"Request {request.request_id} not found in logs.",
+        )
+
+    result = store_feedback(
+        request_id=request.request_id,
+        rating=request.rating,
+        reason=request.reason,
+        correct_tier=request.correct_tier,
+        correct_model=request.correct_model,
+    )
+
+    if "error" in result:
+        raise HTTPException(status_code=400, detail=result["error"])
+
+    return {"status": "ok", "feedback": result}
+
+
+# ---------------------------------------------------------------------------
+# /v1/label — store human-corrected tier labels for classifier retraining
+# ---------------------------------------------------------------------------
+
+class LabelRequest(BaseModel):
+    request_id: str
+    correct_tier: str  # "simple", "medium", or "complex"
+
+
+@app.post("/v1/label")
+async def label_prompt(
+    request: LabelRequest,
+    current_user: UserSession = Depends(validate_local_auth),
+) -> Dict[str, Any]:
+    """Label a request with the correct tier for classifier retraining."""
+    from nadirclaw.request_logger import store_label
+
+    result = store_label(
+        request_id=request.request_id,
+        correct_tier=request.correct_tier,
+    )
+
+    if "error" in result:
+        raise HTTPException(status_code=400, detail=result["error"])
+
+    return {"status": "ok", "label": result}
+
+
+# ---------------------------------------------------------------------------
+# /v1/export/training-data — export labeled prompts for retraining
+# ---------------------------------------------------------------------------
+
+@app.get("/v1/export/training-data")
+async def export_training_data(
+    since: Optional[str] = None,
+    until: Optional[str] = None,
+    current_user: UserSession = Depends(validate_local_auth),
+) -> Dict[str, Any]:
+    """Export labeled prompts as JSON for building real training datasets."""
+    from nadirclaw.request_logger import export_labeled_prompts
+
+    labels = export_labeled_prompts(since=since, until=until)
+
+    return {
+        "total": len(labels),
+        "labels": labels,
     }
 
 
@@ -832,10 +953,19 @@ async def _dispatch_model(
         )
         raise RateLimitExhausted(model=model, retry_after=retry_after)
 
+    cb = get_circuit_breaker()
+
     with trace_span("dispatch_model", {"gen_ai.request.model": model, "gen_ai.system": provider or ""}):
-        if provider == "google":
-            return await _call_gemini(model, request, provider)
-        return await _call_litellm(model, request, provider)
+        try:
+            if provider == "google":
+                result = await _call_gemini(model, request, provider)
+            else:
+                result = await _call_litellm(model, request, provider)
+            cb.record_success(provider)
+            return result
+        except Exception:
+            cb.record_failure(provider)
+            raise
 
 
 async def _call_with_fallback(
@@ -854,64 +984,88 @@ async def _call_with_fallback(
     """
     from nadirclaw.credentials import detect_provider
 
-    try:
-        response_data = await _dispatch_model(selected_model, request, provider)
-        return response_data, selected_model, analysis_info
-    except (RateLimitExhausted, Exception) as primary_error:
-        if isinstance(primary_error, HTTPException):
-            raise  # Don't fallback on validation/auth errors
+    cb = get_circuit_breaker()
 
-        # Build fallback chain: use per-tier chain if configured, else global
-        tier = analysis_info.get("tier", "")
-        full_chain = settings.get_tier_fallback_chain(tier) if tier else settings.FALLBACK_CHAIN
-        chain = [m for m in full_chain if m != selected_model]
-
-        if not chain:
-            if isinstance(primary_error, RateLimitExhausted):
-                return _rate_limit_error_response(selected_model), selected_model, analysis_info
-            raise primary_error
-
-        failed_models = [selected_model]
-        last_error = primary_error
-
-        for fallback_model in chain:
-            logger.warning(
-                "⚡ %s failed (%s) — trying fallback %s (%d/%d in chain)",
-                selected_model if len(failed_models) == 1 else failed_models[-1],
-                type(last_error).__name__,
-                fallback_model,
-                len(failed_models),
-                len(chain),
-            )
-            fallback_provider = detect_provider(fallback_model)
-
-            try:
-                response_data = await _dispatch_model(
-                    fallback_model, request, fallback_provider,
-                )
-                analysis_info = {
-                    **analysis_info,
-                    "fallback_from": selected_model,
-                    "fallback_chain_tried": failed_models,
-                    "selected_model": fallback_model,
-                    "strategy": analysis_info.get("strategy", "smart-routing") + "+fallback",
-                }
-                return response_data, fallback_model, analysis_info
-            except (RateLimitExhausted, Exception) as chain_error:
-                if isinstance(chain_error, HTTPException):
-                    raise
-                failed_models.append(fallback_model)
-                last_error = chain_error
-                continue
-
-        # All models in chain exhausted
-        logger.error(
-            "All models in fallback chain exhausted: %s",
-            failed_models,
+    # Check if primary provider's circuit is open — skip directly to fallback
+    if provider and not cb.is_available(provider):
+        logger.warning(
+            "Circuit breaker OPEN for provider=%s — skipping %s, going to fallback",
+            provider, selected_model,
         )
-        if isinstance(last_error, RateLimitExhausted):
+        primary_error: Exception = RateLimitExhausted(
+            model=selected_model, retry_after=0,
+        )
+    else:
+        try:
+            response_data = await _dispatch_model(selected_model, request, provider)
+            return response_data, selected_model, analysis_info
+        except (RateLimitExhausted, Exception) as exc:
+            primary_error = exc
+
+    if isinstance(primary_error, HTTPException):
+        raise primary_error  # Don't fallback on validation/auth errors
+
+    # Build fallback chain: use per-tier chain if configured, else global
+    tier = analysis_info.get("tier", "")
+    full_chain = settings.get_tier_fallback_chain(tier) if tier else settings.FALLBACK_CHAIN
+    chain = [m for m in full_chain if m != selected_model]
+
+    if not chain:
+        if isinstance(primary_error, RateLimitExhausted):
             return _rate_limit_error_response(selected_model), selected_model, analysis_info
-        raise last_error
+        raise primary_error
+
+    failed_models = [selected_model]
+    last_error = primary_error
+
+    for fallback_model in chain:
+        fallback_provider = detect_provider(fallback_model)
+
+        # Skip fallback models whose provider circuit is also open
+        if fallback_provider and not cb.is_available(fallback_provider):
+            logger.warning(
+                "Circuit breaker OPEN for provider=%s — skipping fallback %s",
+                fallback_provider, fallback_model,
+            )
+            failed_models.append(fallback_model)
+            continue
+
+        logger.warning(
+            "⚡ %s failed (%s) — trying fallback %s (%d/%d in chain)",
+            selected_model if len(failed_models) == 1 else failed_models[-1],
+            type(last_error).__name__,
+            fallback_model,
+            len(failed_models),
+            len(chain),
+        )
+
+        try:
+            response_data = await _dispatch_model(
+                fallback_model, request, fallback_provider,
+            )
+            analysis_info = {
+                **analysis_info,
+                "fallback_from": selected_model,
+                "fallback_chain_tried": failed_models,
+                "selected_model": fallback_model,
+                "strategy": analysis_info.get("strategy", "smart-routing") + "+fallback",
+            }
+            return response_data, fallback_model, analysis_info
+        except (RateLimitExhausted, Exception) as chain_error:
+            if isinstance(chain_error, HTTPException):
+                raise
+            failed_models.append(fallback_model)
+            last_error = chain_error
+            continue
+
+    # All models in chain exhausted
+    logger.error(
+        "All models in fallback chain exhausted: %s",
+        failed_models,
+    )
+    if isinstance(last_error, RateLimitExhausted):
+        return _rate_limit_error_response(selected_model), selected_model, analysis_info
+    raise last_error
 
 
 def _rate_limit_error_response(model: str) -> Dict[str, Any]:
@@ -934,16 +1088,22 @@ def _rate_limit_error_response(model: str) -> Dict[str, Any]:
 
 def _routing_headers(model: str, analysis_info: Dict[str, Any]) -> Dict[str, str]:
     """Build X-Routed-* headers from routing analysis."""
-    return {
+    headers = {
         "X-Routed-Model": model,
         "X-Routed-Tier": str(analysis_info.get("tier", "")),
         "X-Complexity-Score": str(analysis_info.get("complexity_score", "")),
     }
+    if analysis_info.get("rule_name"):
+        headers["X-Routed-Rule"] = str(analysis_info["rule_name"])
+    if analysis_info.get("pareto_score") is not None:
+        headers["X-Pareto-Score"] = str(analysis_info["pareto_score"])
+    return headers
 
 
 @app.post("/v1/chat/completions")
 async def chat_completions(
     request: ChatCompletionRequest,
+    raw_request: Request,
     response: Response,
     current_user: UserSession = Depends(validate_local_auth),
 ):
@@ -982,11 +1142,56 @@ async def chat_completions(
             resolve_alias,
             resolve_profile,
         )
+        from nadirclaw.optimizer import (
+            build_candidates_for_tier,
+            get_optimizer,
+            parse_routing_priority,
+        )
+        from nadirclaw.rules import get_rules_engine
+
+        # --- Parse X-Routing-Priority header for Pareto optimizer ---
+        routing_priority_header = raw_request.headers.get("x-routing-priority", "")
+        pareto_weights = parse_routing_priority(routing_priority_header)
+
+        # --- Routing rules engine (runs FIRST — can bypass classification) ---
+        rules_engine = get_rules_engine()
+        rule_result = None
+        rules_applied = False
+        system_text_for_rules = ""
+
+        if rules_engine.rule_count > 0:
+            system_text_for_rules = next(
+                (m.text_content() for m in request.messages
+                 if m.role in ("system", "developer")),
+                "",
+            )
+            req_headers_dict = dict(raw_request.headers)
+            rule_result = rules_engine.evaluate(
+                messages=request.messages,
+                system_prompt=system_text_for_rules,
+                tier="",
+                metadata={"headers": req_headers_dict, "prompt": prompt_text},
+            )
+            if rule_result.matched and rule_result.force_model:
+                selected_model = rule_result.force_model
+                analysis_info = {
+                    "strategy": f"rule:{rule_result.rule_name}",
+                    "selected_model": selected_model,
+                    "tier": rule_result.force_tier or "direct",
+                    "confidence": 1.0,
+                    "complexity_score": 0,
+                    "rule_name": rule_result.rule_name,
+                }
+                if rule_result.max_cost_per_request is not None:
+                    analysis_info["max_cost_per_request"] = rule_result.max_cost_per_request
+                rules_applied = True
 
         # --- Check routing profiles (auto/eco/premium/free/reasoning) ---
-        profile = resolve_profile(request.model)
+        profile = resolve_profile(request.model) if not rules_applied else None
 
-        if profile == "eco":
+        if rules_applied:
+            pass  # model already selected by rules engine
+        elif profile == "eco":
             selected_model = settings.SIMPLE_MODEL
             analysis_info = {
                 "strategy": "profile:eco",
@@ -1080,8 +1285,61 @@ async def chat_completions(
                 analysis_info["selected_model"] = selected_model
                 analysis_info["routing_modifiers"] = routing_info
 
+                # --- Pareto optimizer (select best model within tier) ---
+                tier_for_pareto = final_tier or "simple"
+                candidates = build_candidates_for_tier(tier_for_pareto)
+                if len(candidates) > 1:
+                    optimizer = get_optimizer()
+                    required_caps: set = set()
+                    if req_meta.get("has_tools"):
+                        required_caps.add("tools")
+                    if req_meta.get("has_images"):
+                        required_caps.add("vision")
+                    best = optimizer.select(
+                        candidates,
+                        weights=pareto_weights,
+                        required_capabilities=required_caps,
+                    )
+                    if best["model"] != selected_model:
+                        logger.info(
+                            "Pareto optimizer: %s -> %s (score=%.4f)",
+                            selected_model, best["model"], best["pareto_score"],
+                        )
+                        selected_model = best["model"]
+                        analysis_info["selected_model"] = selected_model
+                        analysis_info["pareto_score"] = best["pareto_score"]
+                        if pareto_weights:
+                            analysis_info["pareto_weights"] = (
+                                f"q={pareto_weights.quality:.2f},"
+                                f"c={pareto_weights.cost:.2f},"
+                                f"l={pareto_weights.latency:.2f}"
+                            )
+
+                # --- Re-evaluate tier-match rules post-classification ---
+                if rules_engine.rule_count > 0 and rule_result and not rule_result.matched:
+                    post_headers = dict(raw_request.headers)
+                    post_rule = rules_engine.evaluate(
+                        messages=request.messages,
+                        system_prompt=system_text_for_rules,
+                        tier=final_tier,
+                        metadata={"headers": post_headers, "prompt": prompt_text},
+                    )
+                    if post_rule.matched:
+                        if post_rule.force_model:
+                            selected_model = post_rule.force_model
+                            analysis_info["selected_model"] = selected_model
+                        if post_rule.force_tier:
+                            analysis_info["tier"] = post_rule.force_tier
+                        if post_rule.max_cost_per_request is not None:
+                            analysis_info["max_cost_per_request"] = post_rule.max_cost_per_request
+                        analysis_info["rule_name"] = post_rule.rule_name
+
                 # Cache this decision for session persistence
-                session_cache.put(request.messages, selected_model, final_tier)
+                session_cache.put(
+                    request.messages,
+                    selected_model,
+                    analysis_info.get("tier", final_tier),
+                )
 
         # ------------------------------------------------------------------
         # Context optimization — compact messages before dispatch
@@ -1185,6 +1443,24 @@ async def chat_completions(
                     **(optimization_info or {}),
                 })
 
+                # Passive quality scoring for streamed completions
+                from nadirclaw.feedback import compute_quality_score as _qs
+                _qs(
+                    request_id=request_id,
+                    status="error" if _stream_analysis.get("_stream_error") else "ok",
+                    response_content="[streamed]",
+                    fallback_used=_stream_analysis.get("fallback_from"),
+                    total_latency_ms=stream_elapsed,
+                )
+
+                # Misroute detection for streamed completions
+                _check_misroute(
+                    _stream_prompt, stream_model,
+                    _stream_analysis.get("tier", ""),
+                    _stream_analysis.get("strategy", ""),
+                    request_id,
+                )
+
             return EventSourceResponse(
                 _true_stream_wrapper(),
                 media_type="text/event-stream",
@@ -1263,6 +1539,24 @@ async def chat_completions(
 
         _log_request(log_entry)
 
+        # Passive quality scoring
+        from nadirclaw.feedback import compute_quality_score
+        compute_quality_score(
+            request_id=request_id,
+            status="ok",
+            response_content=response_data.get("content", ""),
+            fallback_used=analysis_info.get("fallback_from"),
+            total_latency_ms=elapsed_ms,
+        )
+
+        # Misroute detection (implicit negative feedback)
+        _check_misroute(
+            prompt_text, selected_model,
+            analysis_info.get("tier", ""),
+            analysis_info.get("strategy", ""),
+            request_id,
+        )
+
         # ------------------------------------------------------------------
         # Streaming response (SSE) — cached stream uses fake wrapper
         # ------------------------------------------------------------------
@@ -1321,6 +1615,15 @@ async def chat_completions(
             "error": str(e),
             "total_latency_ms": elapsed_ms,
         })
+        # Passive quality scoring for errors
+        from nadirclaw.feedback import compute_quality_score
+        compute_quality_score(
+            request_id=request_id,
+            status="error",
+            response_content="",
+            fallback_used=None,
+            total_latency_ms=elapsed_ms,
+        )
         raise HTTPException(
             status_code=500,
             detail=f"An internal error occurred. Request ID: {request_id}",
@@ -1576,22 +1879,39 @@ async def _stream_gemini(
             raise RateLimitExhausted(model=model, retry_after=60)
         raise
 
-    # Iterate the synchronous stream in executor
-    def _iter_stream():
-        chunks = []
-        for chunk in stream:
-            chunks.append(chunk)
-        return chunks
+    # Use a queue to bridge the synchronous Gemini stream (in executor) to
+    # the async generator, yielding each chunk as it arrives instead of
+    # collecting them all first.
+    _SENTINEL = object()
+    queue: asyncio.Queue = asyncio.Queue()
 
-    try:
-        all_chunks = await asyncio.wait_for(
-            loop.run_in_executor(_gemini_executor, _iter_stream),
-            timeout=180,
-        )
-    except asyncio.TimeoutError:
-        raise Exception(f"Gemini streaming iteration timed out for model={native_model}")
+    def _iter_stream_to_queue():
+        """Run in executor: iterate the sync stream, push chunks into the queue."""
+        try:
+            for chunk in stream:
+                loop.call_soon_threadsafe(queue.put_nowait, chunk)
+            loop.call_soon_threadsafe(queue.put_nowait, _SENTINEL)
+        except Exception as exc:
+            loop.call_soon_threadsafe(queue.put_nowait, exc)
 
-    for chunk in all_chunks:
+    # Start the background iteration (don't await — we consume via the queue)
+    loop.run_in_executor(_gemini_executor, _iter_stream_to_queue)
+
+    deadline = asyncio.get_event_loop().time() + 180  # 180s overall timeout
+
+    while True:
+        remaining = deadline - asyncio.get_event_loop().time()
+        if remaining <= 0:
+            raise Exception(f"Gemini streaming iteration timed out for model={native_model}")
+
+        item = await asyncio.wait_for(queue.get(), timeout=remaining)
+
+        if item is _SENTINEL:
+            break
+        if isinstance(item, Exception):
+            raise item
+
+        chunk = item
         delta_dict: dict[str, Any] = {}
         text = ""
         if hasattr(chunk, "text") and chunk.text:
@@ -1646,14 +1966,22 @@ async def _dispatch_model_stream(
         )
         raise RateLimitExhausted(model=model, retry_after=retry_after)
 
-    if provider == "google":
-        async_gen = None
-        # _stream_gemini is a sync generator; wrap it
-        for item in _stream_gemini(model, request, provider):
-            yield item
-    else:
-        async for item in _stream_litellm(model, request, provider):
-            yield item
+    cb = get_circuit_breaker()
+    success = False
+    try:
+        if provider == "google":
+            async for item in _stream_gemini(model, request, provider):
+                success = True  # at least one chunk received
+                yield item
+        else:
+            async for item in _stream_litellm(model, request, provider):
+                success = True
+                yield item
+        # Stream completed successfully
+        cb.record_success(provider)
+    except Exception:
+        cb.record_failure(provider)
+        raise
 
 
 async def _stream_with_fallback(
@@ -1671,6 +1999,7 @@ async def _stream_with_fallback(
     """
     from nadirclaw.credentials import detect_provider
 
+    cb = get_circuit_breaker()
     tier = analysis_info.get("tier", "")
     full_chain = settings.get_tier_fallback_chain(tier) if tier else settings.FALLBACK_CHAIN
     models_to_try = [selected_model] + [m for m in full_chain if m != selected_model]
@@ -1679,12 +2008,24 @@ async def _stream_with_fallback(
     last_error: Exception | None = None
 
     for i, model in enumerate(models_to_try):
+        # Determine provider for this model
+        model_provider = provider if i == 0 else detect_provider(model)
+
+        # Skip models whose provider circuit is open
+        if model_provider and not cb.is_available(model_provider):
+            logger.warning(
+                "Circuit breaker OPEN for provider=%s — skipping streaming model %s",
+                model_provider, model,
+            )
+            failed_models.append(model)
+            continue
+
         if i > 0:
             logger.warning(
                 "⚡ %s failed (%s) — trying streaming fallback %s (%d/%d)",
                 failed_models[-1], type(last_error).__name__, model, i, len(models_to_try) - 1,
             )
-            provider = detect_provider(model)
+            provider = model_provider
 
         content_started = False
         accumulated_usage = {"prompt_tokens": 0, "completion_tokens": 0}
@@ -1863,6 +2204,14 @@ async def get_rate_limits(
     """Get current per-model rate limit status."""
     from nadirclaw.rate_limit import get_model_rate_limiter
     return get_model_rate_limiter().get_status()
+
+
+@app.get("/v1/circuit-breaker/status")
+async def circuit_breaker_status(
+    current_user: UserSession = Depends(validate_local_auth),
+) -> Dict[str, Any]:
+    """Get current circuit breaker state for all providers."""
+    return get_circuit_breaker().get_status()
 
 
 @app.get("/v1/models")

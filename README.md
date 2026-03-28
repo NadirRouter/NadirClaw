@@ -1,6 +1,6 @@
 <p align="center">
   <a href="https://getnadir.com">
-    <img src="docs/images/banner.png" alt="NadirClaw — Cut LLM & Agent Costs 40-70%" width="100%" />
+    <img src="docs/images/banner.png" alt="NadirClaw - Cut LLM API Costs Up to 40%" width="100%" />
   </a>
 </p>
 
@@ -8,15 +8,15 @@
 
 <p align="center">
   <strong>Your simple prompts are burning premium tokens.</strong><br>
-  NadirClaw routes them to cheaper models automatically. Save 40-70% on AI API costs.
+  NadirClaw routes them to cheaper models automatically. Save up to 40% on AI API costs.
 </p>
 
 <p align="center">
   <a href="https://pypi.org/project/nadirclaw/"><img src="https://img.shields.io/pypi/v/nadirclaw" alt="PyPI" /></a>
-  <a href="https://github.com/doramirdor/NadirClaw/actions"><img src="https://github.com/doramirdor/NadirClaw/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
+  <a href="https://github.com/NadirRouter/NadirClaw/actions"><img src="https://github.com/NadirRouter/NadirClaw/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
   <a href="https://pypi.org/project/nadirclaw/"><img src="https://img.shields.io/pypi/pyversions/nadirclaw" alt="Python" /></a>
-  <a href="LICENSE"><img src="https://img.shields.io/github/license/doramirdor/NadirClaw" alt="License" /></a>
-  <a href="https://github.com/doramirdor/NadirClaw"><img src="https://img.shields.io/github/stars/doramirdor/NadirClaw?style=social" alt="GitHub stars" /></a>
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/NadirRouter/NadirClaw" alt="License" /></a>
+  <a href="https://github.com/NadirRouter/NadirClaw"><img src="https://img.shields.io/github/stars/NadirRouter/NadirClaw?style=social" alt="GitHub stars" /></a>
 </p>
 
 <p align="center">
@@ -24,7 +24,7 @@
 </p>
 
 <p align="center">
-  <a href="https://getnadir.com">Website</a> · <a href="#quick-start">Quick Start</a> · <a href="docs/comparison.md">Comparisons</a> · <a href="https://github.com/doramirdor/nadirclaw-action">GitHub Action</a>
+  <a href="https://getnadir.com">Website</a> · <a href="#quick-start">Quick Start</a> · <a href="docs/comparison.md">Comparisons</a> · <a href="https://github.com/NadirRouter/nadirclaw-action">GitHub Action</a>
 </p>
 
 ---
@@ -43,10 +43,10 @@ COMPLEX "Refactor auth module..."   → claude-sonnet    $0.098
 COMPLEX "Debug race condition..."   → gpt-5.2          $0.450
 SIMPLE  "Write a docstring"         → gemini-flash    $0.0002
 
-3 of 5 routed cheaper · $0.549 vs $1.37 all-premium · 60% saved
+3 of 5 routed cheaper · $0.549 vs $0.90 all-premium · ~40% saved
 ```
 
-- **Cut AI API costs 40-70%** — real savings from day one
+- **Cut AI API costs up to 40%** — real savings from day one
 - **~10ms classification overhead** — you won't notice it
 - **Drop-in proxy** — works with any OpenAI-compatible tool
 - **Runs locally** — your API keys never leave your machine
@@ -64,7 +64,7 @@ pip install nadirclaw
 Or install from source:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/doramirdor/NadirClaw/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/NadirRouter/NadirClaw/main/install.sh | sh
 ```
 
 Then run the interactive setup wizard:
@@ -108,7 +108,7 @@ That's it. NadirClaw starts on `http://localhost:8856` with sensible defaults (G
 - **Spend tracking and budgets** — real-time per-request cost tracking with daily/monthly budget limits, alerts via `nadirclaw budget`, optional webhook and stdout notifications
 - **Prompt caching** — in-memory LRU cache for identical chat completions, skipping redundant LLM calls entirely. Configurable TTL and max size via `NADIRCLAW_CACHE_TTL` and `NADIRCLAW_CACHE_MAX_SIZE`. Monitor with `nadirclaw cache` or the `/v1/cache` endpoint
 - **Live dashboard** — `nadirclaw dashboard` for terminal, or visit `http://localhost:8856/dashboard` for a web UI with real-time stats, cost tracking, and model usage
-- **GitHub Action** — [`doramirdor/nadirclaw-action`](https://github.com/doramirdor/nadirclaw-action) for CI/CD pipelines
+- **GitHub Action** — [`NadirRouter/nadirclaw-action`](https://github.com/NadirRouter/nadirclaw-action) for CI/CD pipelines
 
 ## Dashboard
 
@@ -141,7 +141,7 @@ Install the dashboard extras: `pip install nadirclaw[dashboard]`
 ### One-line install (recommended)
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/doramirdor/NadirClaw/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/NadirRouter/NadirClaw/main/install.sh | sh
 ```
 
 This clones the repo to `~/.nadirclaw`, creates a virtual environment, installs dependencies, and adds `nadirclaw` to your PATH. Run it again to update.
@@ -149,7 +149,7 @@ This clones the repo to `~/.nadirclaw`, creates a virtual environment, installs 
 ### Manual install
 
 ```bash
-git clone https://github.com/doramirdor/NadirClaw.git
+git clone https://github.com/NadirRouter/NadirClaw.git
 cd NadirClaw
 python3 -m venv venv
 source venv/bin/activate
@@ -168,7 +168,7 @@ sudo rm -f /usr/local/bin/nadirclaw
 Run NadirClaw + Ollama with zero cost, fully local:
 
 ```bash
-git clone https://github.com/doramirdor/NadirClaw.git && cd NadirClaw
+git clone https://github.com/NadirRouter/NadirClaw.git && cd NadirClaw
 docker compose up
 ```
 
@@ -505,7 +505,7 @@ Claude Code sends every request to Anthropic's API. With NadirClaw in front, eac
 - Simple prompts (reading files, quick questions, "what does this function do?") get routed to a cheap model like Gemini Flash
 - Complex prompts (refactoring, architecture, multi-file changes) stay on Claude
 
-Streaming works as expected. In typical Claude Code usage, 40-70% of prompts are simple enough to route to a cheaper model, which translates directly to cost savings.
+Streaming works as expected. In typical Claude Code usage, 60-70% of prompts are simple enough to route to a cheaper model, which translates directly to up to 40% cost savings.
 
 ## Usage with Open WebUI
 
@@ -986,7 +986,7 @@ Classification takes ~10ms on a warm encoder. The first request takes ~2-3 secon
 
 ## Cost Savings & Benchmarks — How Much Does NadirClaw Save?
 
-Real-world usage shows NadirClaw typically reduces LLM costs by 40-70% depending on your workload and model choices.
+Real-world usage shows NadirClaw typically reduces LLM costs by up to 40% depending on your workload and model choices.
 
 ### Example: Claude Code Usage
 
@@ -1059,7 +1059,7 @@ If you currently spend $100/month on Claude API:
 | Routing Setup | Simple Model | Complex Model | Monthly Cost | Savings |
 |---|---|---|---|---|
 | No routing | Claude Sonnet | Claude Sonnet | $100.00 | - |
-| Conservative | Claude Haiku | Claude Sonnet | $62.00 | 38% |
+| Conservative | Claude Haiku | Claude Sonnet | $60.00 | 40% |
 | Balanced | Gemini Flash | Claude Sonnet | $48.00 | 52% |
 | Aggressive | Ollama (free) | Claude Sonnet | $35.00 | 65% |
 

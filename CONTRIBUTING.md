@@ -5,7 +5,7 @@ Thanks for your interest in contributing! Here's how to get started.
 ## Development Setup
 
 ```bash
-git clone https://github.com/doramirdor/NadirClaw.git
+git clone https://github.com/NadirRouter/NadirClaw.git
 cd NadirClaw
 python3 -m venv venv
 source venv/bin/activate

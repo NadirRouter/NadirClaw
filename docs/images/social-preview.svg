@@ -28,7 +28,7 @@
   <text x="640" y="350" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="36" fill="#94a3b8" text-anchor="middle">LLM Router for Cost Optimization</text>
   
   <!-- Tagline -->
-  <text x="640" y="420" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="42" font-weight="600" fill="url(#textGradient)" text-anchor="middle">Save 60% on API costs without sacrificing quality</text>
+  <text x="640" y="420" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="42" font-weight="600" fill="url(#textGradient)" text-anchor="middle">Save up to 40% on API costs without sacrificing quality</text>
   
   <!-- Stats - Stat 1 -->
   <text x="750" y="580" font-family="Arial, sans-serif" font-size="24">⚡</text>
