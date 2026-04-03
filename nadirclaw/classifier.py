@@ -939,33 +939,38 @@ def _select_model_by_tier(tier_name: str) -> Tuple[str, str]:
 # ===================================================================
 _binary_singleton: Optional[BinaryComplexityClassifier] = None
 _cascade_singleton: Optional[ConfidenceAwareCascadeClassifier] = None
+_trained_singleton = None
+_classifier_init_lock = __import__("threading").Lock()
 
 
 def get_binary_classifier() -> BinaryComplexityClassifier:
-    """Return the singleton binary classifier instance."""
+    """Return the singleton binary classifier instance (thread-safe)."""
     global _binary_singleton
     if _binary_singleton is None:
-        _binary_singleton = BinaryComplexityClassifier()
+        with _classifier_init_lock:
+            if _binary_singleton is None:
+                _binary_singleton = BinaryComplexityClassifier()
     return _binary_singleton
 
 
 def get_cascade_classifier() -> ConfidenceAwareCascadeClassifier:
-    """Return the singleton cascade classifier instance."""
+    """Return the singleton cascade classifier instance (thread-safe)."""
     global _cascade_singleton
     if _cascade_singleton is None:
-        _cascade_singleton = ConfidenceAwareCascadeClassifier()
+        with _classifier_init_lock:
+            if _cascade_singleton is None:
+                _cascade_singleton = ConfidenceAwareCascadeClassifier()
     return _cascade_singleton
 
 
-_trained_singleton = None
-
-
 def get_trained_classifier():
-    """Return the singleton trained classifier instance."""
+    """Return the singleton trained classifier instance (thread-safe)."""
     global _trained_singleton
     if _trained_singleton is None:
-        from nadirclaw.trained_classifier import TrainedClassifier
-        _trained_singleton = TrainedClassifier()
+        with _classifier_init_lock:
+            if _trained_singleton is None:
+                from nadirclaw.trained_classifier import TrainedClassifier
+                _trained_singleton = TrainedClassifier()
     return _trained_singleton
 
 
@@ -976,13 +981,33 @@ def get_classifier():
     or TrainedClassifier, all of which expose a ``classify(prompt)`` method.
 
     Set NADIRCLAW_CLASSIFIER=trained for the sklearn-based classifier (95%+ accuracy).
+
+    Falls back gracefully: trained → cascade → binary if initialization fails.
     """
     from nadirclaw.settings import settings
 
     if settings.CLASSIFIER == "trained":
-        return get_trained_classifier()
+        try:
+            return get_trained_classifier()
+        except Exception as e:
+            logger.warning(
+                "TrainedClassifier init failed (%s) — falling back to cascade", e,
+            )
+            try:
+                return get_cascade_classifier()
+            except Exception as e2:
+                logger.warning(
+                    "CascadeClassifier init failed (%s) — falling back to binary", e2,
+                )
+                return get_binary_classifier()
     if settings.CLASSIFIER == "cascade":
-        return get_cascade_classifier()
+        try:
+            return get_cascade_classifier()
+        except Exception as e:
+            logger.warning(
+                "CascadeClassifier init failed (%s) — falling back to binary", e,
+            )
+            return get_binary_classifier()
     return get_binary_classifier()
 
 

@@ -1033,6 +1033,151 @@ def train(data_file, validate_only, do_rollback, fmt):
         click.echo("  Classifier will use new centroids on next load.")
 
 
+@main.command()
+@click.option("--dry-run", is_flag=True, help="Validate without deploying the new model")
+@click.option("--min-samples", default=50, type=int, help="Minimum training samples required")
+@click.option("--validation-gate", default=0.85, type=float, help="Minimum accuracy to deploy (0.0-1.0)")
+@click.option("--format", "fmt", default="text", type=click.Choice(["text", "json"]))
+def retrain(dry_run, min_samples, validation_gate, fmt):
+    """Retrain the classifier from production feedback + prototypes.
+
+    \b
+    Examples:
+      nadirclaw retrain                    # retrain and deploy if accuracy >= 85%
+      nadirclaw retrain --dry-run          # validate only, don't deploy
+      nadirclaw retrain --validation-gate 0.90  # require 90% accuracy
+      nadirclaw retrain --min-samples 200  # need at least 200 labeled samples
+    """
+    import logging
+
+    logging.basicConfig(level=logging.INFO, format="%(message)s")
+
+    from nadirclaw.retrain import retrain as run_retrain
+
+    result = run_retrain(
+        dry_run=dry_run,
+        min_samples=min_samples,
+        validation_gate=validation_gate,
+    )
+
+    if fmt == "json":
+        click.echo(json.dumps(result, indent=2, default=str))
+    else:
+        status = result["status"]
+        if status == "skipped":
+            click.echo(f"Skipped: {result['reason']}")
+        elif status == "failed":
+            click.echo(f"Failed: {result['reason']}")
+        elif status == "rejected":
+            click.echo(f"Rejected: accuracy {result['accuracy']:.1%} < gate {result['validation_gate']:.1%}")
+            metrics = result.get("metrics", {})
+            for tier, stats in metrics.get("per_class", {}).items():
+                click.echo(f"  {tier}: precision={stats['precision']:.2f} recall={stats['recall']:.2f} n={stats['support']}")
+        elif status == "dry_run":
+            click.echo(f"Dry run: accuracy {result['accuracy']:.1%} (would deploy)")
+            metrics = result.get("metrics", {})
+            for tier, stats in metrics.get("per_class", {}).items():
+                click.echo(f"  {tier}: precision={stats['precision']:.2f} recall={stats['recall']:.2f} n={stats['support']}")
+        elif status == "deployed":
+            click.echo(f"Deployed! accuracy={result['accuracy']:.1%} samples={result['total_samples']}")
+            click.echo(f"  Model: {result.get('model_path', '?')}")
+            click.echo(f"  Elapsed: {result['elapsed_seconds']:.1f}s")
+
+        click.echo(f"  Sources: {result.get('sources', {})}")
+
+
+@main.group()
+def rules():
+    """Manage routing rules."""
+    pass
+
+
+@rules.command("list")
+def rules_list():
+    """List active routing rules."""
+    from nadirclaw.rules import get_rules_engine
+
+    engine = get_rules_engine()
+    if engine.rule_count == 0:
+        click.echo("No rules configured. Create ~/.nadirclaw/rules.yaml to add rules.")
+        return
+
+    click.echo(f"Active rules ({engine.rule_count}):\n")
+    for i, rule in enumerate(engine.rules, 1):
+        name = getattr(rule, "name", f"rule_{i}")
+        conditions = []
+        if getattr(rule, "system_prompt_regex", None):
+            conditions.append(f"system_prompt~/{rule.system_prompt_regex}/")
+        if getattr(rule, "prompt_regex", None):
+            conditions.append(f"prompt~/{rule.prompt_regex}/")
+        if getattr(rule, "tier_match", None):
+            conditions.append(f"tier={rule.tier_match}")
+        if getattr(rule, "time_range", None):
+            conditions.append(f"time={rule.time_range}")
+
+        action_parts = []
+        if getattr(rule, "force_model", None):
+            action_parts.append(f"model={rule.force_model}")
+        if getattr(rule, "force_tier", None):
+            action_parts.append(f"tier={rule.force_tier}")
+        if getattr(rule, "max_cost", None):
+            action_parts.append(f"max_cost=${rule.max_cost}")
+
+        cond_str = " AND ".join(conditions) or "(always)"
+        action_str = ", ".join(action_parts) or "(no action)"
+        click.echo(f"  {i}. {name}")
+        click.echo(f"     When: {cond_str}")
+        click.echo(f"     Then: {action_str}")
+        click.echo()
+
+
+@rules.command("test")
+@click.argument("prompt", nargs=-1, required=True)
+@click.option("--system", default="", help="System message to test with")
+@click.option("--tier", default="", help="Pre-classification tier to simulate")
+def rules_test(prompt, system, tier):
+    """Test which rule would match a prompt (dry-run).
+
+    \b
+    Examples:
+      nadirclaw rules test "write a haiku about cats"
+      nadirclaw rules test "debug this code" --system "you are a coding agent"
+      nadirclaw rules test "translate this" --tier simple
+    """
+    prompt_text = " ".join(prompt)
+
+    from nadirclaw.rules import get_rules_engine
+
+    engine = get_rules_engine()
+    if engine.rule_count == 0:
+        click.echo("No rules configured.")
+        return
+
+    # Build fake messages
+    messages = []
+    if system:
+        messages.append(type("Msg", (), {"role": "system", "text_content": lambda: system, "content": system, "model_extra": {}})())
+    messages.append(type("Msg", (), {"role": "user", "text_content": lambda: prompt_text, "content": prompt_text, "model_extra": {}})())
+
+    result = engine.evaluate(
+        messages=messages,
+        system_prompt=system,
+        tier=tier,
+        metadata={"prompt": prompt_text},
+    )
+
+    if result.matched:
+        click.echo(f"Matched rule: {result.rule_name}")
+        if result.force_model:
+            click.echo(f"  Force model: {result.force_model}")
+        if result.force_tier:
+            click.echo(f"  Force tier: {result.force_tier}")
+        if result.max_cost_per_request is not None:
+            click.echo(f"  Max cost: ${result.max_cost_per_request}")
+    else:
+        click.echo("No rule matched — routing will use classifier.")
+
+
 @main.group()
 def auth():
     """Manage provider credentials (API keys and tokens)."""

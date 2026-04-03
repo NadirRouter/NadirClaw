@@ -31,8 +31,19 @@ def _cache_max_size() -> int:
     return int(os.getenv("NADIRCLAW_CACHE_MAX_SIZE", "1000"))
 
 
-def _make_cache_key(model: str, messages: list) -> str:
-    """Build a deterministic cache key from model + messages (ignoring temperature/stream)."""
+def _cache_max_memory_mb() -> int:
+    """Max memory in MB for cached responses (default 200MB)."""
+    return int(os.getenv("NADIRCLAW_CACHE_MAX_MEMORY_MB", "200"))
+
+
+def _make_cache_key(model: str, messages: list, temperature: float | None = None) -> str:
+    """Build a deterministic cache key from model + messages.
+
+    Includes temperature when it's explicitly set and != 1.0, since different
+    temperatures produce different outputs. Caching temperature=1.0 (sampling)
+    responses is still allowed but will be reused for any temperature — the
+    caller should disable caching for non-deterministic requests.
+    """
     # Normalize messages to just role + content
     normalized = []
     for m in messages:
@@ -43,27 +54,40 @@ def _make_cache_key(model: str, messages: list) -> str:
         else:
             normalized.append(str(m))
 
-    blob = json.dumps({"model": model or "", "messages": normalized}, sort_keys=True)
+    key_data: dict = {"model": model or "", "messages": normalized}
+    # Include temperature in key when explicitly set to non-default
+    if temperature is not None and temperature != 1.0:
+        key_data["temperature"] = temperature
+
+    blob = json.dumps(key_data, sort_keys=True)
     return hashlib.sha256(blob.encode()).hexdigest()
 
 
 class PromptCache:
-    """Thread-safe in-memory LRU cache with TTL for chat completions."""
+    """Thread-safe in-memory LRU cache with TTL and memory bounds for chat completions."""
 
     def __init__(self, max_size: int | None = None, ttl: int | None = None):
         self.max_size = max_size if max_size is not None else _cache_max_size()
+        self.max_memory_bytes = _cache_max_memory_mb() * 1_000_000
         self.ttl = ttl if ttl is not None else _cache_ttl()
-        self._cache: OrderedDict[str, tuple[float, Dict[str, Any]]] = OrderedDict()
+        self._cache: OrderedDict[str, tuple[float, Dict[str, Any], int]] = OrderedDict()  # key → (ts, data, size_bytes)
         self._lock = Lock()
         self._hits = 0
         self._misses = 0
+        self._estimated_memory = 0
 
-    def get(self, model: str, messages: list) -> Optional[Dict[str, Any]]:
+    @staticmethod
+    def _estimate_size(data: Dict[str, Any]) -> int:
+        """Rough byte estimate for a cached response."""
+        content = data.get("content", "") or ""
+        return len(content.encode("utf-8", errors="replace")) + 200  # overhead
+
+    def get(self, model: str, messages: list, temperature: float | None = None) -> Optional[Dict[str, Any]]:
         """Look up a cached response. Returns None on miss or expiry."""
-        key = _make_cache_key(model, messages)
+        key = _make_cache_key(model, messages, temperature)
         with self._lock:
             if key in self._cache:
-                ts, data = self._cache[key]
+                ts, data, _size = self._cache[key]
                 if time.time() - ts < self.ttl:
                     # Move to end (most recently used)
                     self._cache.move_to_end(key)
@@ -71,21 +95,36 @@ class PromptCache:
                     logger.debug("Cache HIT: %s", key[:12])
                     return data
                 else:
-                    # Expired
+                    # Expired — reclaim memory
+                    self._estimated_memory -= _size
                     del self._cache[key]
             self._misses += 1
             return None
 
-    def put(self, model: str, messages: list, response: Dict[str, Any]) -> None:
+    def put(self, model: str, messages: list, response: Dict[str, Any], temperature: float | None = None) -> None:
         """Store a response in the cache."""
-        key = _make_cache_key(model, messages)
+        key = _make_cache_key(model, messages, temperature)
+        entry_size = self._estimate_size(response)
+
         with self._lock:
+            # Remove old entry if replacing
             if key in self._cache:
+                _, _, old_size = self._cache[key]
+                self._estimated_memory -= old_size
                 self._cache.move_to_end(key)
-            self._cache[key] = (time.time(), response)
-            # Evict oldest if over max size
-            while len(self._cache) > self.max_size:
-                self._cache.popitem(last=False)
+
+            self._cache[key] = (time.time(), response, entry_size)
+            self._estimated_memory += entry_size
+
+            # Evict LRU until under both entry count AND memory limits
+            while (
+                len(self._cache) > self.max_size
+                or self._estimated_memory > self.max_memory_bytes
+            ):
+                if not self._cache:
+                    break
+                _, (_, _, evicted_size) = self._cache.popitem(last=False)
+                self._estimated_memory -= evicted_size
 
     def get_stats(self) -> Dict[str, Any]:
         """Return cache statistics."""
@@ -100,6 +139,8 @@ class PromptCache:
                 "misses": self._misses,
                 "hit_rate": round(self._hits / total, 4) if total > 0 else 0.0,
                 "total_lookups": total,
+                "estimated_memory_mb": round(self._estimated_memory / 1_000_000, 2),
+                "max_memory_mb": self.max_memory_bytes // 1_000_000,
             }
 
     def clear(self) -> None:

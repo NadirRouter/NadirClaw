@@ -130,7 +130,7 @@ class BudgetTracker:
         self._monthly_limit_sent = False
 
     def _save_state(self) -> None:
-        """Persist current budget state to disk."""
+        """Persist current budget state to disk (atomic write via rename)."""
         self._state_file.parent.mkdir(parents=True, exist_ok=True)
         data = {
             "day": self._current_day,
@@ -143,7 +143,22 @@ class BudgetTracker:
             "model_requests": dict(self._model_requests),
             "updated_at": datetime.now(timezone.utc).isoformat(),
         }
-        self._state_file.write_text(json.dumps(data, indent=2))
+        # Atomic write: write to temp file, then rename to prevent corruption
+        import os
+        import tempfile
+        tmp_fd, tmp_path = tempfile.mkstemp(
+            dir=str(self._state_file.parent), suffix=".tmp"
+        )
+        try:
+            with os.fdopen(tmp_fd, "w") as f:
+                json.dump(data, f, indent=2)
+            os.replace(tmp_path, str(self._state_file))
+        except Exception:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+            raise
 
     def record(self, model: str, prompt_tokens: int, completion_tokens: int) -> Dict[str, Any]:
         """Record a completed request's cost. Returns budget status.
@@ -171,8 +186,9 @@ class BudgetTracker:
 
             alerts = self._check_alerts()
 
-            # Save every 10 requests to avoid excessive IO
-            if self._daily_requests % 10 == 0:
+            # Save every 10 requests to avoid excessive IO,
+            # OR immediately on alerts to prevent data loss
+            if alerts or self._daily_requests % 10 == 0:
                 self._save_state()
 
             return {

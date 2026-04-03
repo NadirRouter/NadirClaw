@@ -3,14 +3,18 @@ Local bearer token authentication for NadirClaw.
 
 Supports both Authorization: Bearer <token> and X-API-Key: <token>
 so any OpenAI-compatible client works out of the box.
+
+Includes per-IP rate limiting on auth attempts to prevent brute-force attacks.
 """
 
+import collections
 import json
 import logging
 import os
+import time
 from typing import Any, Dict, List, Optional
 
-from fastapi import Header, HTTPException, status
+from fastapi import Header, HTTPException, Request, status
 
 from nadirclaw.settings import settings
 
@@ -63,8 +67,26 @@ def _load_local_users() -> Dict[str, Dict[str, Any]]:
 
 _LOCAL_USERS: Dict[str, Dict[str, Any]] = _load_local_users()
 
+# Per-IP auth rate limiter — prevents brute force token guessing
+_AUTH_RATE_WINDOW = 60  # seconds
+_AUTH_RATE_MAX = int(os.getenv("NADIRCLAW_AUTH_RATE_LIMIT", "30"))
+_auth_hits: Dict[str, collections.deque] = {}
+
+
+def _check_auth_rate(client_ip: str) -> Optional[int]:
+    """Return seconds until retry if auth-rate-limited, else None."""
+    now = time.time()
+    q = _auth_hits.setdefault(client_ip, collections.deque())
+    while q and q[0] <= now - _AUTH_RATE_WINDOW:
+        q.popleft()
+    if len(q) >= _AUTH_RATE_MAX:
+        return int(q[0] + _AUTH_RATE_WINDOW - now) + 1
+    q.append(now)
+    return None
+
 
 async def validate_local_auth(
+    request: Request,
     authorization: Optional[str] = Header(None),
     x_api_key: Optional[str] = Header(None, alias="X-API-Key"),
 ) -> UserSession:
@@ -76,7 +98,6 @@ async def validate_local_auth(
       - X-API-Key: <token>
     """
     _MAX_TOKEN_LENGTH = 1000
-
     token: Optional[str] = None
 
     if authorization:
@@ -104,6 +125,15 @@ async def validate_local_auth(
 
     user_data = _LOCAL_USERS.get(token)
     if user_data is None:
+        # Rate limit FAILED auth attempts per IP to prevent brute force
+        client_ip = request.client.host if request.client else "unknown"
+        retry_after = _check_auth_rate(client_ip)
+        if retry_after is not None:
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail=f"Too many failed auth attempts. Retry after {retry_after}s.",
+                headers={"Retry-After": str(retry_after)},
+            )
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid auth token",

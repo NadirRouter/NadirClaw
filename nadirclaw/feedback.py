@@ -26,8 +26,11 @@ _tables_initialized = False
 # Valid values
 # ---------------------------------------------------------------------------
 
-VALID_REASONS = ("misrouted", "slow", "bad_quality", "good", "other")
-VALID_TIERS = ("simple", "mid", "complex")
+VALID_REASONS = (
+    "misrouted", "slow", "bad_quality", "good", "other",
+    "hallucinated", "refused", "cost_spike", "wrong_language", "incomplete",
+)
+VALID_TIERS = ("simple", "mid", "medium", "complex", "reasoning", "direct", "free")
 
 
 # ---------------------------------------------------------------------------

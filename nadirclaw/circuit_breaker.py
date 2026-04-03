@@ -163,10 +163,33 @@ class CircuitBreaker:
                     provider, prev_state.value,
                 )
 
-    def record_failure(self, provider: str) -> None:
-        """Record a failed call. May trip the circuit to OPEN."""
+    # Error types that should NOT trip the circuit breaker
+    _NON_TRANSIENT_ERRORS = (
+        "AuthenticationError", "PermissionDeniedError", "NotFoundError",
+    )
+
+    def record_failure(self, provider: str, error: Exception | None = None) -> None:
+        """Record a failed call. May trip the circuit to OPEN.
+
+        Only transient errors (timeouts, rate limits, connection errors) count
+        towards the failure threshold. Auth errors and similar permanent failures
+        are recorded but don't trip the breaker.
+        """
         if not provider:
             return
+
+        # Don't count non-transient (permanent) errors towards circuit breaking
+        if error is not None:
+            err_type = type(error).__name__
+            if err_type in self._NON_TRANSIENT_ERRORS:
+                logger.debug(
+                    "Circuit breaker: non-transient error %s for provider=%s — not counting",
+                    err_type, provider,
+                )
+                with self._lock:
+                    ps = self._get_state(provider)
+                    ps.failure_count += 1  # Track for stats, but don't trip
+                return
 
         now = time.time()
         with self._lock:

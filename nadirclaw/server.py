@@ -9,18 +9,24 @@ import asyncio
 import collections
 import json
 import logging
+import os
+import random
 import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
-from threading import Lock
+from pathlib import Path
+from queue import Queue, Full
+from threading import Lock, Thread
 from typing import Any, Dict, List, Optional, Union
 
+import httpx
 from fastapi import Depends, FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from sse_starlette.sse import EventSourceResponse
+from starlette.middleware.base import BaseHTTPMiddleware
 
 from nadirclaw import __version__
 from nadirclaw.auth import UserSession, validate_local_auth
@@ -99,12 +105,27 @@ _ROUTING_HEADERS = (
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=os.getenv("NADIRCLAW_CORS_ORIGINS", "*").split(","),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
     expose_headers=list(_ROUTING_HEADERS),
 )
+
+
+# --- Security headers middleware ---
+class SecurityHeadersMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        response = await call_next(request)
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["X-XSS-Protection"] = "1; mode=block"
+        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+        if os.getenv("NADIRCLAW_HSTS", ""):
+            response.headers["Strict-Transport-Security"] = "max-age=63072000; includeSubDomains"
+        return response
+
+app.add_middleware(SecurityHeadersMiddleware)
 
 
 # ---------------------------------------------------------------------------
@@ -175,28 +196,87 @@ class ClassifyBatchRequest(BaseModel):
 # Logging helper
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# Async log queue — non-blocking writes from request handlers
+# ---------------------------------------------------------------------------
+
+_LOG_QUEUE: Queue = Queue(maxsize=10_000)
+_LOG_MAX_JSONL_BYTES = int(os.getenv("NADIRCLAW_LOG_MAX_JSONL_MB", "100")) * 1_000_000
 _log_lock = Lock()
 
 
-def _log_request(entry: Dict[str, Any]) -> None:
-    """Append a JSON line to the request log and print to console."""
+def _rotate_jsonl_if_needed(request_log: Path) -> None:
+    """Rotate the JSONL log file if it exceeds the size limit."""
+    try:
+        if request_log.exists() and request_log.stat().st_size > _LOG_MAX_JSONL_BYTES:
+            rotated = request_log.with_suffix(
+                f".{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}.jsonl"
+            )
+            request_log.rename(rotated)
+            logger.info("Rotated JSONL log → %s", rotated.name)
+    except OSError:
+        pass
+
+
+def _log_worker() -> None:
+    """Background thread: drain the log queue, batch-write to JSONL + SQLite."""
+    try:
+        from nadirclaw.request_logger import log_request as sqlite_log
+        from nadirclaw.metrics import record_request
+    except Exception as exc:
+        logger.error("Log worker failed to import dependencies: %s — logging disabled", exc)
+        return
+
     log_dir = settings.LOG_DIR
     log_dir.mkdir(parents=True, exist_ok=True)
     request_log = log_dir / "requests.jsonl"
 
+    while True:
+        entries: list[Dict[str, Any]] = []
+        # Block on first entry
+        try:
+            entries.append(_LOG_QUEUE.get(timeout=5.0))
+        except Exception:
+            continue
+        # Drain up to 99 more without blocking
+        for _ in range(99):
+            try:
+                entries.append(_LOG_QUEUE.get_nowait())
+            except Exception:
+                break
+
+        # Rotate if needed
+        _rotate_jsonl_if_needed(request_log)
+
+        # Batch write JSONL
+        lines = "".join(json.dumps(e, default=str) + "\n" for e in entries)
+        with _log_lock:
+            with open(request_log, "a") as f:
+                f.write(lines)
+
+        # Write each to SQLite + metrics
+        for entry in entries:
+            try:
+                sqlite_log(entry)
+            except Exception as exc:
+                logger.debug("SQLite log error: %s", exc)
+            try:
+                record_request(entry)
+            except Exception:
+                pass
+
+
+_log_thread = Thread(target=_log_worker, daemon=True, name="log-worker")
+_log_thread.start()
+
+
+def _log_request(entry: Dict[str, Any]) -> None:
+    """Enqueue a log entry (non-blocking). Drops if queue is full."""
     entry["timestamp"] = datetime.now(timezone.utc).isoformat()
-    line = json.dumps(entry, default=str) + "\n"
-    with _log_lock:
-        with open(request_log, "a") as f:
-            f.write(line)
-
-    # Also log to SQLite
-    from nadirclaw.request_logger import log_request as sqlite_log
-    sqlite_log(entry)
-
-    # Update Prometheus metrics
-    from nadirclaw.metrics import record_request
-    record_request(entry)
+    try:
+        _LOG_QUEUE.put_nowait(entry)
+    except Full:
+        logger.warning("Log queue full — dropping entry")
 
     tier = entry.get("tier", "?")
     model = entry.get("selected_model", "?")
@@ -318,7 +398,7 @@ async def startup():
             logger.info("API base:      %s", settings.API_BASE)
         token = settings.AUTH_TOKEN
         if token:
-            logger.info("Auth:          %s***", token[:6] if len(token) >= 6 else token)
+            logger.info("Auth:          configured")
         else:
             logger.info("Auth:          disabled (local-only)")
         # Log credential status
@@ -346,8 +426,47 @@ async def startup():
         cb_cfg["cooldown_seconds"],
     )
 
+    # --- Config validation ---
+    config_warnings: list[str] = []
+    try:
+        thresholds = settings.TIER_THRESHOLDS
+        if not (0 <= thresholds[0] < thresholds[1] <= 1):
+            config_warnings.append(
+                f"TIER_THRESHOLDS out of bounds: {thresholds} "
+                "(need 0 <= simple_max < complex_min <= 1)"
+            )
+    except Exception as e:
+        config_warnings.append(f"Failed to parse TIER_THRESHOLDS: {e}")
+
+    if not settings.FALLBACK_CHAIN:
+        config_warnings.append("FALLBACK_CHAIN is empty — no fallback on model failures")
+
+    fc = settings.FALLBACK_CHAIN
+    if fc and len(fc) != len(set(fc)):
+        config_warnings.append(f"FALLBACK_CHAIN has duplicates: {fc}")
+
+    for w in config_warnings:
+        logger.warning("Config: %s", w)
+
     logger.info("Ready! Listening for requests...")
     logger.info("=" * 60)
+
+
+@app.on_event("shutdown")
+async def shutdown():
+    """Clean up resources on server shutdown."""
+    _gemini_executor.shutdown(wait=False)
+    logger.info("Gemini executor shut down")
+    # Flush remaining log entries
+    try:
+        remaining = 0
+        while not _LOG_QUEUE.empty():
+            remaining += 1
+            _LOG_QUEUE.get_nowait()
+        if remaining:
+            logger.info("Drained %d remaining log entries on shutdown", remaining)
+    except Exception:
+        pass
 
 
 # ---------------------------------------------------------------------------
@@ -463,6 +582,124 @@ async def classify_batch(
 
 
 # ---------------------------------------------------------------------------
+# /v1/routing-explain — routing decision transparency
+# ---------------------------------------------------------------------------
+
+class RoutingExplainRequest(BaseModel):
+    messages: List[ChatMessage]
+    model: Optional[str] = None
+
+
+@app.post("/v1/routing-explain")
+async def routing_explain(
+    request: RoutingExplainRequest,
+    raw_request: Request,
+    current_user: UserSession = Depends(validate_local_auth),
+) -> Dict[str, Any]:
+    """Explain how a request would be routed without making an LLM call.
+
+    Returns the full decision chain: rules check, profile resolution,
+    alias resolution, classifier output, routing modifiers (agentic,
+    reasoning, vision, context window), and final model selection.
+    """
+    from nadirclaw.routing import (
+        apply_routing_modifiers,
+        detect_agentic,
+        detect_reasoning,
+        resolve_alias,
+        resolve_profile,
+    )
+    from nadirclaw.rules import get_rules_engine
+
+    req_meta = _extract_request_metadata(
+        ChatCompletionRequest(messages=request.messages, model=request.model)
+    )
+
+    explanation: Dict[str, Any] = {"steps": []}
+
+    # Step 1: Rules engine
+    rules_engine = get_rules_engine()
+    if rules_engine.rule_count > 0:
+        system_text = next(
+            (m.text_content() for m in request.messages if m.role in ("system", "developer")),
+            "",
+        )
+        rule_result = rules_engine.evaluate(
+            messages=request.messages,
+            system_prompt=system_text,
+            tier="",
+            metadata={"prompt": req_meta.get("system_prompt_text", "")},
+        )
+        explanation["steps"].append({
+            "step": "rules_engine",
+            "matched": rule_result.matched,
+            "rule_name": rule_result.rule_name if rule_result.matched else None,
+            "forced_model": rule_result.force_model if rule_result.matched else None,
+        })
+        if rule_result.matched and rule_result.force_model:
+            explanation["final_model"] = rule_result.force_model
+            explanation["final_tier"] = rule_result.force_tier or "direct"
+            explanation["strategy"] = f"rule:{rule_result.rule_name}"
+            return explanation
+
+    # Step 2: Profile check
+    profile = resolve_profile(request.model)
+    explanation["steps"].append({
+        "step": "profile_check",
+        "model_field": request.model,
+        "resolved_profile": profile,
+    })
+
+    # Step 3: Alias check
+    if request.model and not profile:
+        alias = resolve_alias(request.model)
+        explanation["steps"].append({
+            "step": "alias_check",
+            "alias_from": request.model,
+            "resolved_to": alias,
+        })
+
+    # Step 4: Classifier
+    _, analysis = await _smart_route_full(request.messages, current_user)
+    explanation["steps"].append({
+        "step": "classifier",
+        "analyzer": analysis.get("analyzer"),
+        "tier": analysis.get("tier"),
+        "confidence": analysis.get("confidence"),
+        "complexity_score": analysis.get("complexity_score"),
+        "classifier_latency_ms": analysis.get("classifier_latency_ms"),
+    })
+
+    # Step 5: Routing modifiers
+    base_model = analysis.get("selected_model", settings.SIMPLE_MODEL)
+    base_tier = analysis.get("tier", "simple")
+    final_model, final_tier, routing_info = apply_routing_modifiers(
+        base_model=base_model,
+        base_tier=base_tier,
+        request_meta=req_meta,
+        messages=request.messages,
+        simple_model=settings.SIMPLE_MODEL,
+        complex_model=settings.COMPLEX_MODEL,
+        reasoning_model=settings.REASONING_MODEL,
+        free_model=settings.FREE_MODEL,
+    )
+    explanation["steps"].append({
+        "step": "routing_modifiers",
+        "modifiers_applied": routing_info.get("modifiers_applied", []),
+        "agentic": routing_info.get("agentic"),
+        "reasoning": routing_info.get("reasoning"),
+    })
+
+    explanation["final_model"] = final_model
+    explanation["final_tier"] = final_tier
+    explanation["strategy"] = analysis.get("strategy", "smart-routing")
+    explanation["simple_model"] = settings.SIMPLE_MODEL
+    explanation["complex_model"] = settings.COMPLEX_MODEL
+
+    return explanation
+
+
+# ---------------------------------------------------------------------------
 # /v1/feedback — user feedback on routing decisions
 # ---------------------------------------------------------------------------
 
@@ -572,8 +809,18 @@ _gemini_executor = ThreadPoolExecutor(max_workers=8, thread_name_prefix="gemini"
 
 
 def _get_gemini_client(api_key: str):
-    """Get or create a thread-safe, per-key google-genai Client."""
+    """Get or create a thread-safe, per-key google-genai Client.
+
+    Uses double-checked locking so the lock is only held during creation,
+    not during the (potentially slow) network initialization.
+    """
+    # Fast path — no lock needed if client already exists
+    client = _gemini_clients.get(api_key)
+    if client is not None:
+        return client
+    # Slow path — acquire lock only for creation
     with _gemini_client_lock:
+        # Re-check after acquiring lock
         if api_key not in _gemini_clients:
             from google import genai
             _gemini_clients[api_key] = genai.Client(api_key=api_key)
@@ -684,11 +931,13 @@ async def _call_gemini(
                 retry_delay = min(int(float(delay_match.group(1))) + 2, 120)
 
             if _retry_count < MAX_RETRIES:
+                # Exponential backoff with jitter to avoid thundering herd
+                backoff = min(retry_delay * (2 ** _retry_count), 120) + random.uniform(0, 5)
                 logger.warning(
-                    "Gemini 429 rate limit for model=%s — retrying in %ds (attempt %d/%d)",
-                    native_model, retry_delay, _retry_count + 1, MAX_RETRIES,
+                    "Gemini 429 rate limit for model=%s — retrying in %.1fs (attempt %d/%d)",
+                    native_model, backoff, _retry_count + 1, MAX_RETRIES,
                 )
-                await asyncio.sleep(retry_delay)
+                await asyncio.sleep(backoff)
                 return await _call_gemini(model, request, provider, _retry_count + 1)
             else:
                 # Exhausted retries — raise so the caller can try a fallback model
@@ -823,18 +1072,26 @@ async def _call_litellm(
             # and the oauth-2025-04-20 beta header. Bypass LiteLLM and call
             # the Anthropic API directly since LiteLLM uses x-api-key.
             if cred_provider == "anthropic" and "sk-ant-oat" in api_key:
-                import httpx
                 model_id = litellm_model.removeprefix("anthropic/")
+                # Anthropic Messages API requires system as a top-level param,
+                # not as a role in the messages array
+                all_msgs = call_kwargs.get("messages", [])
+                system_parts = [
+                    m["content"] for m in all_msgs
+                    if m.get("role") in ("system", "developer") and m.get("content")
+                ]
                 anthropic_messages = [
                     {"role": m["role"], "content": m["content"]}
-                    for m in call_kwargs.get("messages", [])
-                    if m.get("content") is not None
+                    for m in all_msgs
+                    if m.get("role") not in ("system", "developer") and m.get("content") is not None
                 ]
-                anthropic_body = {
+                anthropic_body: dict[str, Any] = {
                     "model": model_id,
                     "messages": anthropic_messages,
                     "max_tokens": call_kwargs.get("max_tokens", 1024),
                 }
+                if system_parts:
+                    anthropic_body["system"] = "\n".join(system_parts)
                 if call_kwargs.get("temperature") is not None:
                     anthropic_body["temperature"] = call_kwargs["temperature"]
                 req_extra = request.model_extra or {}
@@ -842,7 +1099,7 @@ async def _call_litellm(
                     anthropic_body["tools"] = req_extra["tools"]
                 if req_extra.get("tool_choice"):
                     anthropic_body["tool_choice"] = req_extra["tool_choice"]
-                async with httpx.AsyncClient(timeout=120) as client:
+                async with httpx.AsyncClient(timeout=httpx.Timeout(120, connect=10, read=120, write=10, pool=5)) as client:
                     resp = await client.post(
                         "https://api.anthropic.com/v1/messages",
                         headers={
@@ -903,9 +1160,14 @@ async def _call_litellm(
         response = await litellm.acompletion(**call_kwargs)
     except Exception as e:
         # Catch rate limit errors from any provider through LiteLLM
+        # Check status_code attribute first (more reliable), then fall back to string matching
+        status = getattr(e, "status_code", None)
+        if status == 429:
+            logger.warning("LiteLLM 429 rate limit for model=%s: %s", litellm_model, e)
+            raise RateLimitExhausted(model=model, retry_after=60)
         err_str = str(e).lower()
         if "429" in err_str or "rate" in err_str or "quota" in err_str or "resource_exhausted" in err_str:
-            logger.warning("LiteLLM 429 rate limit for model=%s: %s", litellm_model, e)
+            logger.warning("LiteLLM rate limit (string match) for model=%s: %s", litellm_model, e)
             raise RateLimitExhausted(model=model, retry_after=60)
         raise
 
@@ -963,8 +1225,8 @@ async def _dispatch_model(
                 result = await _call_litellm(model, request, provider)
             cb.record_success(provider)
             return result
-        except Exception:
-            cb.record_failure(provider)
+        except Exception as e:
+            cb.record_failure(provider, error=e)
             raise
 
 
@@ -1165,7 +1427,15 @@ async def chat_completions(
                  if m.role in ("system", "developer")),
                 "",
             )
-            req_headers_dict = dict(raw_request.headers)
+            # Only pass safe, known headers to rules engine (not raw auth/cookie headers)
+            _SAFE_RULE_HEADERS = {
+                "x-routing-priority", "x-api-key", "user-agent",
+                "content-type", "accept", "x-request-id",
+            }
+            req_headers_dict = {
+                k: v for k, v in raw_request.headers.items()
+                if k.lower() in _SAFE_RULE_HEADERS
+            }
             rule_result = rules_engine.evaluate(
                 messages=request.messages,
                 system_prompt=system_text_for_rules,
@@ -1317,12 +1587,11 @@ async def chat_completions(
 
                 # --- Re-evaluate tier-match rules post-classification ---
                 if rules_engine.rule_count > 0 and rule_result and not rule_result.matched:
-                    post_headers = dict(raw_request.headers)
                     post_rule = rules_engine.evaluate(
                         messages=request.messages,
                         system_prompt=system_text_for_rules,
                         tier=final_tier,
-                        metadata={"headers": post_headers, "prompt": prompt_text},
+                        metadata={"headers": req_headers_dict, "prompt": prompt_text},
                     )
                     if post_rule.matched:
                         if post_rule.force_model:
@@ -1378,17 +1647,30 @@ async def chat_completions(
         provider = detect_provider(selected_model)
 
         # ------------------------------------------------------------------
-        # Prompt cache — check before calling the model
+        # Cache lookup — exact-match first, then semantic similarity
         # ------------------------------------------------------------------
         from nadirclaw.cache import _cache_enabled, get_prompt_cache
 
         prompt_cache = get_prompt_cache()
         cache_hit = False
+        cache_source = None
         if _cache_enabled() and not request.stream:
-            cached_response = prompt_cache.get(selected_model, request.messages)
+            cached_response = prompt_cache.get(selected_model, request.messages, temperature=request.temperature)
             if cached_response is not None:
                 response_data = cached_response
                 cache_hit = True
+                cache_source = "exact"
+
+        # Semantic cache fallback (higher hit rate for similar-but-not-identical prompts)
+        if not cache_hit and not request.stream:
+            from nadirclaw.semantic_cache import _sem_cache_enabled, get_semantic_cache
+            if _sem_cache_enabled():
+                sem_cache = get_semantic_cache()
+                cached_response = sem_cache.get(selected_model, request.messages)
+                if cached_response is not None:
+                    response_data = cached_response
+                    cache_hit = True
+                    cache_source = "semantic"
 
         # ------------------------------------------------------------------
         # TRUE STREAMING — bypass batch call, stream directly from provider
@@ -1406,6 +1688,11 @@ async def chat_completions(
                 async for sse_event in _stream_with_fallback(
                     selected_model, request, provider, _stream_analysis, request_id,
                 ):
+                    # Check if client disconnected to avoid wasted API calls
+                    if await raw_request.is_disconnected():
+                        logger.info("Client disconnected mid-stream (request_id=%s)", request_id)
+                        _stream_analysis["_stream_error"] = "client_disconnected"
+                        break
                     yield sse_event
 
                 # After stream completes, log the request
@@ -1491,14 +1778,17 @@ async def chat_completions(
                     latency_ms=elapsed_ms,
                 )
 
-            # Store in prompt cache
+            # Store in prompt cache + semantic cache
             if _cache_enabled():
-                prompt_cache.put(selected_model, request.messages, response_data)
+                prompt_cache.put(selected_model, request.messages, response_data, temperature=request.temperature)
+            from nadirclaw.semantic_cache import _sem_cache_enabled, get_semantic_cache
+            if _sem_cache_enabled():
+                get_semantic_cache().put(selected_model, request.messages, response_data)
         else:
             elapsed_ms = int((time.time() - start_time) * 1000)
             total_tokens = response_data["prompt_tokens"] + response_data["completion_tokens"]
-            analysis_info["strategy"] = analysis_info.get("strategy", "") + "+cache-hit"
-            logger.info("Cache HIT — skipped LLM call (elapsed=%dms)", elapsed_ms)
+            analysis_info["strategy"] = analysis_info.get("strategy", "") + f"+cache-hit({cache_source})"
+            logger.info("Cache HIT (%s) — skipped LLM call (elapsed=%dms)", cache_source, elapsed_ms)
 
         # --- Budget tracking ---
         from nadirclaw.budget import get_budget_tracker
@@ -1539,7 +1829,7 @@ async def chat_completions(
 
         _log_request(log_entry)
 
-        # Passive quality scoring
+        # Passive quality scoring (legacy)
         from nadirclaw.feedback import compute_quality_score
         compute_quality_score(
             request_id=request_id,
@@ -1547,6 +1837,19 @@ async def chat_completions(
             response_content=response_data.get("content", ""),
             fallback_used=analysis_info.get("fallback_from"),
             total_latency_ms=elapsed_ms,
+        )
+
+        # Quality scoring engine (EMA-based per-model quality tracking)
+        from nadirclaw.quality import get_quality_scorer
+        get_quality_scorer().score_response(
+            content=response_data.get("content", ""),
+            status="ok",
+            tier=analysis_info.get("tier", "simple"),
+            model=selected_model,
+            prompt_tokens=response_data.get("prompt_tokens", 0),
+            completion_tokens=response_data.get("completion_tokens", 0),
+            total_latency_ms=elapsed_ms,
+            fallback_used=analysis_info.get("fallback_from"),
         )
 
         # Misroute detection (implicit negative feedback)
@@ -1879,74 +2182,89 @@ async def _stream_gemini(
             raise RateLimitExhausted(model=model, retry_after=60)
         raise
 
-    # Use a queue to bridge the synchronous Gemini stream (in executor) to
-    # the async generator, yielding each chunk as it arrives instead of
-    # collecting them all first.
+    # Use a bounded queue to bridge the synchronous Gemini stream (in executor)
+    # to the async generator. Bounded to apply backpressure on slow consumers
+    # and prevent unbounded memory growth.
     _SENTINEL = object()
-    queue: asyncio.Queue = asyncio.Queue()
+    queue: asyncio.Queue = asyncio.Queue(maxsize=100)
+    _cancelled = asyncio.Event()
 
     def _iter_stream_to_queue():
         """Run in executor: iterate the sync stream, push chunks into the queue."""
         try:
             for chunk in stream:
+                if _cancelled.is_set():
+                    logger.debug("Gemini stream iteration cancelled by consumer")
+                    break
+                # Use call_soon_threadsafe for bounded queue; if queue is full,
+                # use a blocking put via the queue's thread-safe interface.
                 loop.call_soon_threadsafe(queue.put_nowait, chunk)
             loop.call_soon_threadsafe(queue.put_nowait, _SENTINEL)
         except Exception as exc:
             loop.call_soon_threadsafe(queue.put_nowait, exc)
 
-    # Start the background iteration (don't await — we consume via the queue)
-    loop.run_in_executor(_gemini_executor, _iter_stream_to_queue)
+    # Start the background iteration and keep the future for cleanup
+    iter_future = loop.run_in_executor(_gemini_executor, _iter_stream_to_queue)
 
     deadline = asyncio.get_event_loop().time() + 180  # 180s overall timeout
 
-    while True:
-        remaining = deadline - asyncio.get_event_loop().time()
-        if remaining <= 0:
-            raise Exception(f"Gemini streaming iteration timed out for model={native_model}")
+    try:
+        while True:
+            remaining = deadline - asyncio.get_event_loop().time()
+            if remaining <= 0:
+                _cancelled.set()
+                raise Exception(f"Gemini streaming iteration timed out for model={native_model}")
 
-        item = await asyncio.wait_for(queue.get(), timeout=remaining)
+            item = await asyncio.wait_for(queue.get(), timeout=remaining)
 
-        if item is _SENTINEL:
-            break
-        if isinstance(item, Exception):
-            raise item
+            if item is _SENTINEL:
+                break
+            if isinstance(item, Exception):
+                raise item
 
-        chunk = item
-        delta_dict: dict[str, Any] = {}
-        text = ""
-        if hasattr(chunk, "text") and chunk.text:
-            text = chunk.text
-        elif chunk.candidates:
-            candidate = chunk.candidates[0]
-            if hasattr(candidate, "content") and candidate.content and candidate.content.parts:
-                text_parts = [p.text for p in candidate.content.parts if hasattr(p, "text") and p.text]
-                text = "".join(text_parts)
+            chunk = item
+            delta_dict: dict[str, Any] = {}
+            text = ""
+            if hasattr(chunk, "text") and chunk.text:
+                text = chunk.text
+            elif chunk.candidates:
+                candidate = chunk.candidates[0]
+                if hasattr(candidate, "content") and candidate.content and candidate.content.parts:
+                    text_parts = [p.text for p in candidate.content.parts if hasattr(p, "text") and p.text]
+                    text = "".join(text_parts)
 
-        if text:
-            delta_dict["content"] = text
+            if text:
+                delta_dict["content"] = text
 
-        usage = None
-        um = getattr(chunk, "usage_metadata", None)
-        if um:
-            usage = {
-                "prompt_tokens": getattr(um, "prompt_token_count", 0) or 0,
-                "completion_tokens": getattr(um, "candidates_token_count", 0) or 0,
-            }
+            usage = None
+            um = getattr(chunk, "usage_metadata", None)
+            if um:
+                usage = {
+                    "prompt_tokens": getattr(um, "prompt_token_count", 0) or 0,
+                    "completion_tokens": getattr(um, "candidates_token_count", 0) or 0,
+                }
 
-        finish_reason = None
-        if chunk.candidates:
-            raw_reason = getattr(chunk.candidates[0], "finish_reason", None)
-            if raw_reason:
-                reason_str = str(raw_reason).lower()
-                if "safety" in reason_str:
-                    finish_reason = "content_filter"
-                elif "length" in reason_str or "max_tokens" in reason_str:
-                    finish_reason = "length"
-                elif "stop" in reason_str:
-                    finish_reason = "stop"
+            finish_reason = None
+            if chunk.candidates:
+                raw_reason = getattr(chunk.candidates[0], "finish_reason", None)
+                if raw_reason:
+                    reason_str = str(raw_reason).lower()
+                    if "safety" in reason_str:
+                        finish_reason = "content_filter"
+                    elif "length" in reason_str or "max_tokens" in reason_str:
+                        finish_reason = "length"
+                    elif "stop" in reason_str:
+                        finish_reason = "stop"
 
-        if delta_dict or finish_reason:
-            yield delta_dict, usage, finish_reason
+            if delta_dict or finish_reason:
+                yield delta_dict, usage, finish_reason
+    except (asyncio.CancelledError, GeneratorExit):
+        # Client disconnected — signal the executor thread to stop
+        _cancelled.set()
+        raise
+    finally:
+        # Ensure the executor thread is signalled to stop on any exit
+        _cancelled.set()
 
 
 async def _dispatch_model_stream(
@@ -1979,8 +2297,8 @@ async def _dispatch_model_stream(
                 yield item
         # Stream completed successfully
         cb.record_success(provider)
-    except Exception:
-        cb.record_failure(provider)
+    except Exception as e:
+        cb.record_failure(provider, error=e)
         raise
 
 
@@ -2035,7 +2353,16 @@ async def _stream_with_fallback(
             first_chunk = True
             async for delta_dict, usage, finish_reason in _dispatch_model_stream(model, request, provider):
                 if usage:
-                    accumulated_usage = usage
+                    # Use max for prompt_tokens (reported once or cumulatively),
+                    # accumulate completion_tokens across chunks
+                    accumulated_usage["prompt_tokens"] = max(
+                        accumulated_usage["prompt_tokens"],
+                        usage.get("prompt_tokens", 0),
+                    )
+                    accumulated_usage["completion_tokens"] = max(
+                        accumulated_usage["completion_tokens"],
+                        usage.get("completion_tokens", 0),
+                    )
                 if finish_reason:
                     last_finish = finish_reason
 
@@ -2183,9 +2510,14 @@ async def view_logs(
 async def get_cache_stats(
     current_user: UserSession = Depends(validate_local_auth),
 ) -> Dict[str, Any]:
-    """Get prompt cache statistics."""
+    """Get cache statistics (prompt cache + semantic cache)."""
     from nadirclaw.cache import get_prompt_cache
-    return get_prompt_cache().get_stats()
+    from nadirclaw.semantic_cache import _sem_cache_enabled, get_semantic_cache
+
+    result: Dict[str, Any] = {"prompt_cache": get_prompt_cache().get_stats()}
+    if _sem_cache_enabled():
+        result["semantic_cache"] = get_semantic_cache().get_stats()
+    return result
 
 
 @app.get("/v1/budget")
@@ -2195,6 +2527,15 @@ async def get_budget(
     """Get current spend and budget status."""
     from nadirclaw.budget import get_budget_tracker
     return get_budget_tracker().get_status()
+
+
+@app.get("/v1/quality")
+async def get_quality(
+    current_user: UserSession = Depends(validate_local_auth),
+) -> Dict[str, Any]:
+    """Get per-model quality scores and statistics."""
+    from nadirclaw.quality import get_quality_scorer
+    return get_quality_scorer().get_stats()
 
 
 @app.get("/v1/rate-limits")
@@ -2256,6 +2597,49 @@ async def health():
         "simple_model": settings.SIMPLE_MODEL,
         "complex_model": settings.COMPLEX_MODEL,
     }
+
+
+@app.get("/health/deep")
+async def health_deep():
+    """Deep health check — verifies classifier, DB, and credentials."""
+    checks: Dict[str, Any] = {"status": "ok", "version": __version__}
+    issues: list[str] = []
+
+    # 1. Classifier loaded?
+    try:
+        from nadirclaw.classifier import get_classifier
+        clf = get_classifier()
+        checks["classifier"] = "ok"
+    except Exception as e:
+        checks["classifier"] = f"error: {e}"
+        issues.append("classifier")
+
+    # 2. SQLite writable?
+    try:
+        from nadirclaw.request_logger import get_request_count
+        count = get_request_count()
+        checks["database"] = {"status": "ok", "request_count": count}
+    except Exception as e:
+        checks["database"] = f"error: {e}"
+        issues.append("database")
+
+    # 3. Credentials available for configured models?
+    from nadirclaw.credentials import detect_provider, get_credential_source
+    cred_status: Dict[str, str] = {}
+    for model_name in settings.tier_models:
+        prov = detect_provider(model_name)
+        if prov and prov != "ollama":
+            src = get_credential_source(prov)
+            cred_status[prov] = src if src else "MISSING"
+            if not src:
+                issues.append(f"credential:{prov}")
+    checks["credentials"] = cred_status
+
+    if issues:
+        checks["status"] = "degraded"
+        checks["issues"] = issues
+
+    return checks
 
 
 @app.get("/")

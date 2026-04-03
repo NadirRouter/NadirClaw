@@ -254,14 +254,14 @@ class TestContextWindow:
 
 class TestEstimateTokenCount:
     def test_basic(self):
-        messages = [_msg("user", "hello world")]  # 11 chars → ~2 tokens
+        messages = [_msg("user", "hello world")]  # 11 chars / 3.3 + 500 overhead
         count = estimate_token_count(messages)
-        assert count == 2
+        assert count == int(11 / 3.3) + 500  # 503
 
     def test_multiple_messages(self):
         messages = [_msg("user", "a" * 400), _msg("assistant", "b" * 400)]
         count = estimate_token_count(messages)
-        assert count == 200
+        assert count == int(800 / 3.3) + 500  # 742
 
 
 # ---------------------------------------------------------------------------

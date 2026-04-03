@@ -13,7 +13,8 @@ from threading import Lock
 from typing import Any, Dict, List, Optional
 
 # Histogram bucket boundaries (milliseconds for latency)
-LATENCY_BUCKETS = [10, 25, 50, 100, 250, 500, 1000, 2500, 5000, 10000, float("inf")]
+# Includes 15000/30000 for tail latency visibility
+LATENCY_BUCKETS = [10, 25, 50, 100, 250, 500, 1000, 2500, 5000, 10000, 15000, 30000, float("inf")]
 
 
 class _Counter:
@@ -75,6 +76,8 @@ fallbacks_total = _Counter()         # labels: (from_model, to_model)
 errors_total = _Counter()            # labels: (model, error_type)
 tokens_saved_total = _Counter()      # labels: (optimization_mode,)
 optimizations_total = _Counter()     # labels: (optimization_name,)
+classifier_latency_total = _Counter()  # labels: (analyzer_type,) — sum of classify ms
+classifier_calls_total = _Counter()    # labels: (analyzer_type,)
 
 # Histograms
 latency_ms = _Histogram(LATENCY_BUCKETS)  # labels: (model, tier)
@@ -126,6 +129,13 @@ def record_request(entry: Dict[str, Any]) -> None:
     # Error
     if status != "ok":
         errors_total.inc((model, status))
+
+    # Classifier latency
+    clf_lat = entry.get("classifier_latency_ms")
+    if clf_lat is not None:
+        analyzer = entry.get("analyzer", "unknown")
+        classifier_latency_total.inc((analyzer,), clf_lat)
+        classifier_calls_total.inc((analyzer,))
 
     # Optimization
     saved = entry.get("tokens_saved", 0) or 0
@@ -210,6 +220,44 @@ def render_metrics() -> str:
     lines.append("# TYPE nadirclaw_optimizations_total counter")
     for (opt_name,), val in optimizations_total.items():
         lines.append(f'nadirclaw_optimizations_total{{transform="{opt_name}"}} {int(val)}')
+
+    # -- nadirclaw_classifier_latency_ms --
+    lines.append("# HELP nadirclaw_classifier_latency_ms_total Total classifier latency in milliseconds.")
+    lines.append("# TYPE nadirclaw_classifier_latency_ms_total counter")
+    for (analyzer,), val in classifier_latency_total.items():
+        lines.append(f'nadirclaw_classifier_latency_ms_total{{analyzer="{analyzer}"}} {val:.1f}')
+
+    # -- nadirclaw_classifier_calls_total --
+    lines.append("# HELP nadirclaw_classifier_calls_total Total classifier invocations.")
+    lines.append("# TYPE nadirclaw_classifier_calls_total counter")
+    for (analyzer,), val in classifier_calls_total.items():
+        lines.append(f'nadirclaw_classifier_calls_total{{analyzer="{analyzer}"}} {int(val)}')
+
+    # -- nadirclaw_embed_cache (gauge from encoder module) --
+    try:
+        from nadirclaw.encoder import get_embed_cache_stats
+        ec = get_embed_cache_stats()
+        lines.append("# HELP nadirclaw_embed_cache_entries Current embedding cache entries.")
+        lines.append("# TYPE nadirclaw_embed_cache_entries gauge")
+        lines.append(f"nadirclaw_embed_cache_entries {ec['entries']}")
+        lines.append("# HELP nadirclaw_embed_cache_hit_rate Embedding cache hit rate.")
+        lines.append("# TYPE nadirclaw_embed_cache_hit_rate gauge")
+        lines.append(f"nadirclaw_embed_cache_hit_rate {ec['hit_rate']}")
+    except Exception:
+        pass
+
+    # -- nadirclaw_prompt_cache (gauge from cache module) --
+    try:
+        from nadirclaw.cache import get_prompt_cache
+        pc = get_prompt_cache().get_stats()
+        lines.append("# HELP nadirclaw_prompt_cache_entries Current prompt cache entries.")
+        lines.append("# TYPE nadirclaw_prompt_cache_entries gauge")
+        lines.append(f"nadirclaw_prompt_cache_entries {pc['entries']}")
+        lines.append("# HELP nadirclaw_prompt_cache_memory_bytes Estimated prompt cache memory.")
+        lines.append("# TYPE nadirclaw_prompt_cache_memory_bytes gauge")
+        lines.append(f"nadirclaw_prompt_cache_memory_bytes {pc.get('estimated_memory_mb', 0) * 1_000_000:.0f}")
+    except Exception:
+        pass
 
     # -- nadirclaw_uptime_seconds --
     lines.append("# HELP nadirclaw_uptime_seconds Seconds since NadirClaw started.")

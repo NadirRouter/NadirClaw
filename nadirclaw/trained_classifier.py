@@ -287,6 +287,11 @@ class TrainedClassifier:
 
     CLASSIFIER_VERSION = "2.0"
 
+    # Configurable via NADIRCLAW_SIMPLE_ESCALATION_THRESHOLD env var
+    SIMPLE_ESCALATION_THRESHOLD = float(
+        os.getenv("NADIRCLAW_SIMPLE_ESCALATION_THRESHOLD", "0.70")
+    )
+
     def __init__(self, model_path: Optional[str] = None):
         from nadirclaw.encoder import get_shared_encoder_sync
         from nadirclaw.features import StructuralFeatureExtractor
@@ -296,18 +301,41 @@ class TrainedClassifier:
 
         model_path = _resolve_model_path(model_path)
         if not os.path.exists(model_path):
-            logger.info("No trained model found at %s — training now...", model_path)
-            train_and_save(model_path)
+            logger.warning(
+                "No trained model found at %s — attempting to train. "
+                "This may take a few minutes on first run.",
+                model_path,
+            )
+            try:
+                train_and_save(model_path)
+            except Exception as e:
+                logger.error(
+                    "Failed to train model: %s. "
+                    "TrainedClassifier will not be available — "
+                    "falling back to cascade/binary classifier.",
+                    e,
+                )
+                raise
 
-        artifact = _load_model(model_path)
+        try:
+            artifact = _load_model(model_path)
+        except Exception as e:
+            logger.error(
+                "Failed to load trained model from %s: %s. "
+                "Re-training may be required.",
+                model_path, e,
+            )
+            raise
 
         self._model = artifact["model"]
         self._version = artifact.get("version", "unknown")
         self._accuracy = artifact.get("accuracy", 0)
 
         logger.info(
-            "TrainedClassifier v%s loaded (cv_accuracy=%.1f%%, samples=%d)",
+            "TrainedClassifier v%s loaded (cv_accuracy=%.1f%%, samples=%d, "
+            "escalation_threshold=%.2f)",
             self._version, self._accuracy * 100, artifact.get("n_samples", 0),
+            self.SIMPLE_ESCALATION_THRESHOLD,
         )
 
     def classify(self, prompt: str) -> Tuple[str, float, Dict[str, Any]]:
@@ -318,9 +346,9 @@ class TrainedClassifier:
         """
         start = time.time()
 
-        # 1. Embedding
-        emb = self._encoder.encode([prompt], show_progress_bar=False,
-                                    normalize_embeddings=True)
+        # 1. Embedding (uses LRU cache for repeated prompts)
+        from nadirclaw.encoder import encode_cached
+        emb = encode_cached(prompt, normalize=True).reshape(1, -1)
 
         # 2. Structural features
         messages = [{"role": "user", "content": prompt}]
@@ -339,7 +367,8 @@ class TrainedClassifier:
         # Safety escalation: if the model says "simple" but isn't confident,
         # bump to the next-highest tier.  It's cheaper to over-serve a simple
         # prompt on a stronger model than to under-serve a complex one on Haiku.
-        if tier == "simple" and confidence < 0.70:
+        # Threshold configurable via NADIRCLAW_SIMPLE_ESCALATION_THRESHOLD.
+        if tier == "simple" and confidence < self.SIMPLE_ESCALATION_THRESHOLD:
             # Pick whichever of medium/complex has the higher probability
             if probs[2] >= probs[1]:
                 tier, confidence = "complex", float(probs[2])

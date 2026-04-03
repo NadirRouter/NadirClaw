@@ -42,6 +42,13 @@ def _init_db() -> None:
         conn = sqlite3.connect(str(db_path))
         try:
             cursor = conn.cursor()
+
+            # Enable WAL mode for better concurrent read/write performance
+            cursor.execute("PRAGMA journal_mode=WAL")
+            cursor.execute("PRAGMA synchronous=NORMAL")
+            cursor.execute("PRAGMA busy_timeout=5000")
+            cursor.execute("PRAGMA wal_autocheckpoint=1000")
+
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS requests (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -71,19 +78,36 @@ def _init_db() -> None:
                     max_context_tokens INTEGER
                 )
             """)
-            
+
             # Create indexes for common queries
             cursor.execute("""
-                CREATE INDEX IF NOT EXISTS idx_timestamp 
+                CREATE INDEX IF NOT EXISTS idx_timestamp
                 ON requests(timestamp)
             """)
             cursor.execute("""
-                CREATE INDEX IF NOT EXISTS idx_model 
+                CREATE INDEX IF NOT EXISTS idx_model
                 ON requests(selected_model)
             """)
             cursor.execute("""
-                CREATE INDEX IF NOT EXISTS idx_status 
+                CREATE INDEX IF NOT EXISTS idx_status
                 ON requests(status)
+            """)
+            # Additional indexes for dashboard/reporting queries
+            cursor.execute("""
+                CREATE INDEX IF NOT EXISTS idx_tier
+                ON requests(tier)
+            """)
+            cursor.execute("""
+                CREATE INDEX IF NOT EXISTS idx_cost
+                ON requests(cost)
+            """)
+            cursor.execute("""
+                CREATE INDEX IF NOT EXISTS idx_timestamp_model
+                ON requests(timestamp, selected_model)
+            """)
+            cursor.execute("""
+                CREATE UNIQUE INDEX IF NOT EXISTS idx_request_id
+                ON requests(request_id)
             """)
             
             # Migrate: add optimization columns (idempotent)
@@ -183,9 +207,14 @@ def log_request(entry: Dict[str, Any]) -> None:
     with _db_lock:
         conn = sqlite3.connect(str(db_path))
         try:
+            # Ensure WAL pragmas on every connection (they persist per-database
+            # but setting them is cheap and defensive)
+            conn.execute("PRAGMA journal_mode=WAL")
+            conn.execute("PRAGMA busy_timeout=5000")
+
             cursor = conn.cursor()
             cursor.execute("""
-                INSERT INTO requests (
+                INSERT OR IGNORE INTO requests (
                     timestamp, request_id, type, status, prompt, selected_model,
                     provider, tier, confidence, complexity_score, classifier_latency_ms,
                     total_latency_ms, prompt_tokens, completion_tokens, total_tokens,
