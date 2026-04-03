@@ -255,7 +255,7 @@ class TestRoutingMetadataShape:
             assert key in routing, f"Missing routing key: {key}"
 
         # tier must be a valid value
-        assert routing["tier"] in ("simple", "complex", "free")
+        assert routing["tier"] in ("simple", "mid", "medium", "complex", "reasoning", "direct", "free")
 
         # confidence must be numeric 0–1
         assert 0.0 <= routing["confidence"] <= 1.0

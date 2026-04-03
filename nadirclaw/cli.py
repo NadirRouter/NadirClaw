@@ -871,167 +871,23 @@ def build_centroids(ternary):
         click.echo(f"Ternary centroids: simple(1) + medium(1) + complex({len(complex_centroids_multi)})")
 
 
-@main.command(hidden=True)
-@click.option("--data", "data_file", default=None, type=click.Path(exists=True),
-              help="JSONL file with labeled prompts ({prompt, tier})")
-@click.option("--validate-only", is_flag=True, help="Dry-run: show what would change without applying")
-@click.option("--rollback", "do_rollback", is_flag=True, help="Revert to previous centroid version")
-@click.option("--format", "fmt", default="text", type=click.Choice(["text", "json"]), help="Output format")
-def train(data_file, validate_only, do_rollback, fmt):
-    """Retrain routing centroids from production data + feedback.
-
-    \b
-    Examples:
-      nadirclaw train                    # retrain from production data
-      nadirclaw train --data prompts.jsonl  # retrain from labeled file
-      nadirclaw train --validate-only    # dry-run, show accuracy changes
-      nadirclaw train --rollback         # revert to previous version
-    """
-    import logging
-
-    logging.basicConfig(level=logging.INFO, format="%(message)s")
-
-    from nadirclaw.settings import settings
-    from nadirclaw.training import (
-        CentroidTrainer,
-        _latest_version,
-        _read_metadata,
-        list_versions,
-    )
-
-    trainer = CentroidTrainer()
-
-    # --- Rollback mode ---
-    if do_rollback:
-        current = _latest_version()
-        if current <= 1:
-            click.echo("No previous version to roll back to.")
-            raise SystemExit(1)
-
-        target = trainer.rollback()
-        if target is None:
-            click.echo("Rollback failed: no valid previous version found.")
-            raise SystemExit(1)
-
-        if fmt == "json":
-            click.echo(json.dumps({"action": "rollback", "from_version": current, "to_version": target}))
-        else:
-            click.echo(f"Rolled back from v{current} to v{target}")
-            click.echo("Classifier will use the restored centroids on next load.")
-        return
-
-    # --- Collect training data ---
-    db_path = settings.LOG_DIR / "requests.db"
-    extra_file = Path(data_file) if data_file else None
-
-    click.echo("Collecting training data...")
-    dataset = trainer.collect_training_data(db_path, extra_file=extra_file)
-
-    click.echo(f"  Total samples: {dataset.total}")
-    for source, count in sorted(dataset.sources.items()):
-        click.echo(f"    {source}: {count}")
-    click.echo(f"  Train: {len(dataset.train)}  Val: {len(dataset.val)}")
-
-    if dataset.total < 10:
-        click.echo("\nError: too few samples for training (need at least 10).")
+@main.command(name="train", hidden=True)
+def train():
+    """Retrain routing centroids. [Nadir Pro]"""
+    try:
+        from nadir.pro_cli import retrain_command
+        retrain_command()
+    except ImportError:
+        click.echo("Classifier training requires Nadir Pro.")
+        click.echo("Install with: pip install nadir")
         raise SystemExit(1)
 
-    # --- Load current centroids for comparison ---
-    old_centroids = trainer.load_current_centroids()
-    old_version = _latest_version()
 
-    # --- Train new centroids ---
-    click.echo("\nTraining new centroids...")
-    new_centroids = trainer.train_centroids(dataset)
-
-    if not new_centroids:
-        click.echo("Error: training produced no centroids.")
-        raise SystemExit(1)
-
-    tiers = sorted(new_centroids.keys())
-    click.echo(f"  Tiers: {', '.join(tiers)}")
-
-    # --- Validate ---
-    click.echo("\nValidating on held-out data...")
-    validation = trainer.validate(new_centroids, dataset)
-
-    # Also validate old centroids for comparison
-    old_validation = None
-    if old_centroids:
-        old_validation = trainer.validate(old_centroids, dataset)
-
-    # --- Display results ---
-    if fmt == "json":
-        result = {
-            "action": "validate-only" if validate_only else "train",
-            "dataset": {
-                "total": dataset.total,
-                "train": len(dataset.train),
-                "val": len(dataset.val),
-                "sources": dataset.sources,
-            },
-            "new": {
-                "accuracy": round(validation.accuracy, 4),
-                "tier_distribution": validation.tier_distribution,
-                "tier_shift": round(validation.tier_shift, 4),
-                "passed": validation.passed,
-                "per_tier_accuracy": validation.details.get("per_tier_accuracy", {}),
-            },
-        }
-        if old_validation:
-            result["old"] = {
-                "accuracy": round(old_validation.accuracy, 4),
-                "tier_distribution": old_validation.tier_distribution,
-            }
-        if not validate_only and validation.passed:
-            result["version"] = old_version + 1
-        click.echo(json.dumps(result, indent=2))
-    else:
-        click.echo(f"\n{'='*50}")
-        click.echo("Validation Results")
-        click.echo(f"{'='*50}")
-        click.echo(f"  Accuracy:       {validation.accuracy:.1%}")
-        if old_validation:
-            delta = validation.accuracy - old_validation.accuracy
-            sign = "+" if delta >= 0 else ""
-            click.echo(f"  Previous:       {old_validation.accuracy:.1%} ({sign}{delta:.1%})")
-        click.echo(f"  Tier shift:     {validation.tier_shift:.1%}")
-        click.echo(f"  Passed gates:   {'YES' if validation.passed else 'NO'}")
-
-        click.echo(f"\n  Tier distribution:")
-        for tier, pct in sorted(validation.tier_distribution.items()):
-            baseline = validation.baseline_distribution.get(tier, 0)
-            click.echo(f"    {tier:10s}  {pct:.1%}  (train: {baseline:.1%})")
-
-        per_tier = validation.details.get("per_tier_accuracy", {})
-        if per_tier:
-            click.echo(f"\n  Per-tier accuracy:")
-            for tier, acc in sorted(per_tier.items()):
-                click.echo(f"    {tier:10s}  {acc:.1%}")
-
-    # --- Deploy or abort ---
-    if validate_only:
-        if fmt != "json":
-            click.echo("\n(validate-only mode — no changes applied)")
-        return
-
-    if not validation.passed:
-        if fmt != "json":
-            click.echo(f"\nValidation FAILED:")
-            if validation.accuracy < 0.80:
-                click.echo(f"  - Accuracy {validation.accuracy:.1%} < 80% minimum")
-            if validation.tier_shift > 0.20:
-                click.echo(f"  - Tier shift {validation.tier_shift:.1%} > 20% maximum")
-            click.echo("Keeping current centroids. No changes applied.")
-        raise SystemExit(1)
-
-    version = trainer.deploy(new_centroids, validation, dataset)
-
-    if fmt != "json":
-        click.echo(f"\nDeployed centroid version {version}")
-        click.echo(f"  Saved to: ~/.nadirclaw/models/centroids_v{version}.npz")
-        click.echo("  Classifier will use new centroids on next load.")
-
+@main.command(name="_train_legacy", hidden=True)
+def _train_legacy():
+    """Legacy train command — requires Nadir Pro."""
+    click.echo("Classifier training requires Nadir Pro. Install with: pip install nadir")
+    raise SystemExit(1)
 
 @main.command()
 def retrain():

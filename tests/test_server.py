@@ -100,7 +100,7 @@ class TestRoutingHeaders:
         assert "X-Routed-Model" in resp.headers
         assert resp.headers["X-Routed-Model"] != ""
         assert "X-Routed-Tier" in resp.headers
-        assert resp.headers["X-Routed-Tier"] in ("simple", "mid", "complex", "reasoning", "direct", "free")
+        assert resp.headers["X-Routed-Tier"] in ("simple", "mid", "medium", "complex", "reasoning", "direct", "free")
         assert "X-Complexity-Score" in resp.headers
 
     @patch("nadirclaw.server._call_with_fallback")

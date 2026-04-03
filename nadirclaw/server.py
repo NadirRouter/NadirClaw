@@ -296,13 +296,15 @@ def _check_misroute(
 ) -> None:
     """Run misroute detection in the background (fire-and-forget)."""
     try:
-        from nadirclaw.training import get_misroute_detector, record_misroute
+        from nadir.training import get_misroute_detector, record_misroute
 
         detector = get_misroute_detector()
         misroute = detector.check(prompt, model, tier, strategy, request_id)
         if misroute:
             db_path = settings.LOG_DIR / "requests.db"
             record_misroute(db_path, misroute)
+    except ImportError:
+        pass  # Misroute detection is a Pro feature
     except Exception as e:
         logger.debug("Misroute detection error (non-fatal): %s", e)
 
@@ -1298,16 +1300,21 @@ async def chat_completions(
             resolve_alias,
             resolve_profile,
         )
-        from nadirclaw.optimizer import (
-            build_candidates_for_tier,
-            get_optimizer,
-            parse_routing_priority,
-        )
         from nadirclaw.rules import get_rules_engine
 
-        # --- Parse X-Routing-Priority header for Pareto optimizer ---
-        routing_priority_header = raw_request.headers.get("x-routing-priority", "")
-        pareto_weights = parse_routing_priority(routing_priority_header)
+        # --- Parse X-Routing-Priority header for Pareto optimizer (Pro) ---
+        pareto_weights = None
+        try:
+            from nadir.optimizer import (
+                build_candidates_for_tier,
+                get_optimizer,
+                parse_routing_priority,
+            )
+            routing_priority_header = raw_request.headers.get("x-routing-priority", "")
+            pareto_weights = parse_routing_priority(routing_priority_header)
+        except ImportError:
+            build_candidates_for_tier = None
+            get_optimizer = None
 
         # --- Routing rules engine (runs FIRST — can bypass classification) ---
         rules_engine = get_rules_engine()
@@ -1449,10 +1456,11 @@ async def chat_completions(
                 analysis_info["selected_model"] = selected_model
                 analysis_info["routing_modifiers"] = routing_info
 
-                # --- Pareto optimizer (select best model within tier) ---
-                tier_for_pareto = final_tier or "simple"
-                candidates = build_candidates_for_tier(tier_for_pareto)
-                if len(candidates) > 1:
+                # --- Pareto optimizer (Pro feature — select best model within tier) ---
+                if build_candidates_for_tier is not None:
+                  tier_for_pareto = final_tier or "simple"
+                  candidates = build_candidates_for_tier(tier_for_pareto)
+                  if len(candidates) > 1:
                     optimizer = get_optimizer()
                     required_caps: set = set()
                     if req_meta.get("has_tools"):

@@ -963,50 +963,42 @@ def get_cascade_classifier() -> ConfidenceAwareCascadeClassifier:
     return _cascade_singleton
 
 
+_trained_singleton = None  # Injected by Nadir Pro plugin
+
+
 def get_trained_classifier():
-    """Return the singleton trained classifier instance (thread-safe)."""
-    global _trained_singleton
-    if _trained_singleton is None:
-        with _classifier_init_lock:
-            if _trained_singleton is None:
-                from nadirclaw.trained_classifier import TrainedClassifier
-                _trained_singleton = TrainedClassifier()
+    """Return the trained classifier if injected by Nadir Pro, else None."""
     return _trained_singleton
 
 
 def get_classifier():
     """Return the active classifier based on NADIRCLAW_CLASSIFIER setting.
 
-    Returns a BinaryComplexityClassifier, ConfidenceAwareCascadeClassifier,
-    or TrainedClassifier, all of which expose a ``classify(prompt)`` method.
-
-    Set NADIRCLAW_CLASSIFIER=trained for the sklearn-based classifier (95%+ accuracy).
+    Free tier: BinaryComplexityClassifier or ConfidenceAwareCascadeClassifier.
+    Pro tier (Nadir installed): TrainedClassifier (95%+ accuracy) — injected
+    into _trained_singleton by nadir.plugin.register_pro_features().
 
     Falls back gracefully: trained → cascade → binary if initialization fails.
     """
     from nadirclaw.settings import settings
 
     if settings.CLASSIFIER == "trained":
+        if _trained_singleton is not None:
+            return _trained_singleton
+        logger.info(
+            "NADIRCLAW_CLASSIFIER=trained but Nadir Pro not installed — "
+            "falling back to cascade"
+        )
         try:
-            return get_trained_classifier()
+            return get_cascade_classifier()
         except Exception as e:
-            logger.warning(
-                "TrainedClassifier init failed (%s) — falling back to cascade", e,
-            )
-            try:
-                return get_cascade_classifier()
-            except Exception as e2:
-                logger.warning(
-                    "CascadeClassifier init failed (%s) — falling back to binary", e2,
-                )
-                return get_binary_classifier()
+            logger.warning("CascadeClassifier init failed (%s) — falling back to binary", e)
+            return get_binary_classifier()
     if settings.CLASSIFIER == "cascade":
         try:
             return get_cascade_classifier()
         except Exception as e:
-            logger.warning(
-                "CascadeClassifier init failed (%s) — falling back to binary", e,
-            )
+            logger.warning("CascadeClassifier init failed (%s) — falling back to binary", e)
             return get_binary_classifier()
     return get_binary_classifier()
 
@@ -1015,10 +1007,8 @@ def warmup() -> None:
     """Pre-warm the encoder and load centroids once at startup."""
     from nadirclaw.settings import settings
 
-    if settings.CLASSIFIER == "trained":
-        logger.info("Warming up TrainedClassifier ...")
-        get_trained_classifier()
-        logger.info("TrainedClassifier warmup complete")
+    if settings.CLASSIFIER == "trained" and _trained_singleton is not None:
+        logger.info("TrainedClassifier already injected by Nadir Pro")
     elif settings.CLASSIFIER == "cascade":
         logger.info("Warming up ConfidenceAwareCascadeClassifier ...")
         get_cascade_classifier()
