@@ -76,8 +76,8 @@ fallbacks_total = _Counter()         # labels: (from_model, to_model)
 errors_total = _Counter()            # labels: (model, error_type)
 tokens_saved_total = _Counter()      # labels: (optimization_mode,)
 optimizations_total = _Counter()     # labels: (optimization_name,)
-classifier_latency_total = _Counter()  # labels: (analyzer_type,) — sum of classify ms
-classifier_calls_total = _Counter()    # labels: (analyzer_type,)
+# classifier_latency_total and classifier_calls_total are Pro metrics —
+# injected by nadir.plugin.register_pro_features() when Nadir Pro is installed.
 
 # Histograms
 latency_ms = _Histogram(LATENCY_BUCKETS)  # labels: (model, tier)
@@ -130,9 +130,9 @@ def record_request(entry: Dict[str, Any]) -> None:
     if status != "ok":
         errors_total.inc((model, status))
 
-    # Classifier latency
+    # Classifier latency (Pro metric — recorded by nadir.plugin if installed)
     clf_lat = entry.get("classifier_latency_ms")
-    if clf_lat is not None:
+    if clf_lat is not None and hasattr(__import__("sys").modules[__name__], "classifier_latency_total"):
         analyzer = entry.get("analyzer", "unknown")
         classifier_latency_total.inc((analyzer,), clf_lat)
         classifier_calls_total.inc((analyzer,))
@@ -221,19 +221,19 @@ def render_metrics() -> str:
     for (opt_name,), val in optimizations_total.items():
         lines.append(f'nadirclaw_optimizations_total{{transform="{opt_name}"}} {int(val)}')
 
-    # -- nadirclaw_classifier_latency_ms --
-    lines.append("# HELP nadirclaw_classifier_latency_ms_total Total classifier latency in milliseconds.")
-    lines.append("# TYPE nadirclaw_classifier_latency_ms_total counter")
-    for (analyzer,), val in classifier_latency_total.items():
-        lines.append(f'nadirclaw_classifier_latency_ms_total{{analyzer="{analyzer}"}} {val:.1f}')
+    # -- Pro metrics (classifier latency, cache stats) — injected by nadir.plugin --
+    this_module = __import__("sys").modules[__name__]
+    if hasattr(this_module, "classifier_latency_total"):
+        lines.append("# HELP nadirclaw_classifier_latency_ms_total Total classifier latency in milliseconds.")
+        lines.append("# TYPE nadirclaw_classifier_latency_ms_total counter")
+        for (analyzer,), val in this_module.classifier_latency_total.items():
+            lines.append(f'nadirclaw_classifier_latency_ms_total{{analyzer="{analyzer}"}} {val:.1f}')
+        lines.append("# HELP nadirclaw_classifier_calls_total Total classifier invocations.")
+        lines.append("# TYPE nadirclaw_classifier_calls_total counter")
+        for (analyzer,), val in this_module.classifier_calls_total.items():
+            lines.append(f'nadirclaw_classifier_calls_total{{analyzer="{analyzer}"}} {int(val)}')
 
-    # -- nadirclaw_classifier_calls_total --
-    lines.append("# HELP nadirclaw_classifier_calls_total Total classifier invocations.")
-    lines.append("# TYPE nadirclaw_classifier_calls_total counter")
-    for (analyzer,), val in classifier_calls_total.items():
-        lines.append(f'nadirclaw_classifier_calls_total{{analyzer="{analyzer}"}} {int(val)}')
-
-    # -- nadirclaw_embed_cache (gauge from encoder module) --
+    # -- nadirclaw_embed_cache --
     try:
         from nadirclaw.encoder import get_embed_cache_stats
         ec = get_embed_cache_stats()
@@ -246,7 +246,7 @@ def render_metrics() -> str:
     except Exception:
         pass
 
-    # -- nadirclaw_prompt_cache (gauge from cache module) --
+    # -- nadirclaw_prompt_cache --
     try:
         from nadirclaw.cache import get_prompt_cache
         pc = get_prompt_cache().get_stats()

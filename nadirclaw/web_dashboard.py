@@ -41,32 +41,14 @@ def _load_recent_logs(limit: int = 200) -> List[Dict[str, Any]]:
 
 @router.get("/dashboard/api/stats")
 async def dashboard_stats(
-    model: str = "",
-    tier: str = "",
-    status_filter: str = "",
     current_user: UserSession = Depends(validate_local_auth),
 ) -> Dict[str, Any]:
-    """API endpoint for dashboard data.
-
-    Optional query params for filtering:
-      ?model=claude-sonnet-4-5-20250929  — filter by model
-      ?tier=simple                        — filter by tier
-      ?status_filter=error                — filter by status (ok/error)
-    """
+    """API endpoint for dashboard data."""
     from nadirclaw.budget import get_budget_tracker
     from nadirclaw.savings import calculate_actual_cost, get_model_cost
 
     entries = _load_recent_logs(500)
     all_completions = [e for e in entries if e.get("type") == "completion"]
-
-    # Apply filters
-    if model:
-        all_completions = [e for e in all_completions if e.get("selected_model") == model]
-    if tier:
-        all_completions = [e for e in all_completions if e.get("tier") == tier]
-    if status_filter:
-        all_completions = [e for e in all_completions if e.get("status") == status_filter]
-
     completions = [e for e in all_completions if e.get("status") == "ok"]
     errors = [e for e in all_completions if e.get("status") != "ok"]
 
@@ -132,27 +114,7 @@ async def dashboard_stats(
         err_type = err.split(":")[0].strip()[:50]
         error_by_type[err_type] = error_by_type.get(err_type, 0) + 1
 
-    # Hourly cost trend (last 24h)
-    from collections import defaultdict
-    hourly_cost: Dict[str, float] = defaultdict(float)
-    for e in completions:
-        ts = e.get("timestamp", "")
-        cost = e.get("cost", 0) or 0
-        if ts and cost:
-            hour_key = ts[:13]  # "2026-04-02T14"
-            hourly_cost[hour_key] += cost
-    cost_trend = [
-        {"hour": k, "cost": round(v, 4)}
-        for k, v in sorted(hourly_cost.items())[-24:]
-    ]
-
-    # Quality scores (if quality engine is active)
-    quality_stats = None
-    try:
-        from nadirclaw.quality import get_quality_scorer
-        quality_stats = get_quality_scorer().get_stats()
-    except Exception:
-        pass
+    # Cost trend and quality scores available with Nadir Pro
 
     # Optimization stats
     total_tokens_saved = sum(e.get("tokens_saved", 0) or 0 for e in completions)
@@ -179,48 +141,10 @@ async def dashboard_stats(
             "savings_pct": round(opt_savings_pct, 1),
             "optimized_requests": optimized_requests,
         },
-        "cost_trend": cost_trend,
-        **({"quality": quality_stats} if quality_stats else {}),
     }
 
 
-@router.get("/dashboard/api/export.csv")
-async def dashboard_export_csv(
-    limit: int = 500,
-    current_user: UserSession = Depends(validate_local_auth),
-):
-    """Export recent requests as CSV."""
-    from fastapi.responses import Response
-
-    entries = _load_recent_logs(limit)
-    completions = [e for e in entries if e.get("type") == "completion"]
-
-    if not completions:
-        return Response(content="No data", media_type="text/plain")
-
-    fields = [
-        "timestamp", "selected_model", "tier", "status", "confidence",
-        "complexity_score", "total_latency_ms", "prompt_tokens",
-        "completion_tokens", "cost", "fallback_used", "optimization_mode",
-        "tokens_saved",
-    ]
-
-    lines = [",".join(fields)]
-    for e in completions:
-        row = []
-        for f in fields:
-            val = e.get(f, "")
-            if val is None:
-                val = ""
-            row.append(str(val).replace(",", ";"))
-        lines.append(",".join(row))
-
-    csv_content = "\n".join(lines)
-    return Response(
-        content=csv_content,
-        media_type="text/csv",
-        headers={"Content-Disposition": "attachment; filename=nadirclaw_requests.csv"},
-    )
+# CSV export available with Nadir Pro — registered by nadir.plugin
 
 
 @router.get("/dashboard", response_class=HTMLResponse)

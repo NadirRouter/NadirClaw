@@ -1034,56 +1034,15 @@ def train(data_file, validate_only, do_rollback, fmt):
 
 
 @main.command()
-@click.option("--dry-run", is_flag=True, help="Validate without deploying the new model")
-@click.option("--min-samples", default=50, type=int, help="Minimum training samples required")
-@click.option("--validation-gate", default=0.85, type=float, help="Minimum accuracy to deploy (0.0-1.0)")
-@click.option("--format", "fmt", default="text", type=click.Choice(["text", "json"]))
-def retrain(dry_run, min_samples, validation_gate, fmt):
-    """Retrain the classifier from production feedback + prototypes.
-
-    \b
-    Examples:
-      nadirclaw retrain                    # retrain and deploy if accuracy >= 85%
-      nadirclaw retrain --dry-run          # validate only, don't deploy
-      nadirclaw retrain --validation-gate 0.90  # require 90% accuracy
-      nadirclaw retrain --min-samples 200  # need at least 200 labeled samples
-    """
-    import logging
-
-    logging.basicConfig(level=logging.INFO, format="%(message)s")
-
-    from nadirclaw.retrain import retrain as run_retrain
-
-    result = run_retrain(
-        dry_run=dry_run,
-        min_samples=min_samples,
-        validation_gate=validation_gate,
-    )
-
-    if fmt == "json":
-        click.echo(json.dumps(result, indent=2, default=str))
-    else:
-        status = result["status"]
-        if status == "skipped":
-            click.echo(f"Skipped: {result['reason']}")
-        elif status == "failed":
-            click.echo(f"Failed: {result['reason']}")
-        elif status == "rejected":
-            click.echo(f"Rejected: accuracy {result['accuracy']:.1%} < gate {result['validation_gate']:.1%}")
-            metrics = result.get("metrics", {})
-            for tier, stats in metrics.get("per_class", {}).items():
-                click.echo(f"  {tier}: precision={stats['precision']:.2f} recall={stats['recall']:.2f} n={stats['support']}")
-        elif status == "dry_run":
-            click.echo(f"Dry run: accuracy {result['accuracy']:.1%} (would deploy)")
-            metrics = result.get("metrics", {})
-            for tier, stats in metrics.get("per_class", {}).items():
-                click.echo(f"  {tier}: precision={stats['precision']:.2f} recall={stats['recall']:.2f} n={stats['support']}")
-        elif status == "deployed":
-            click.echo(f"Deployed! accuracy={result['accuracy']:.1%} samples={result['total_samples']}")
-            click.echo(f"  Model: {result.get('model_path', '?')}")
-            click.echo(f"  Elapsed: {result['elapsed_seconds']:.1f}s")
-
-        click.echo(f"  Sources: {result.get('sources', {})}")
+def retrain():
+    """Retrain the classifier from production feedback. [Nadir Pro]"""
+    try:
+        from nadir.pro_cli import retrain_command
+        retrain_command()
+    except ImportError:
+        click.echo("Adaptive retraining requires Nadir Pro.")
+        click.echo("Install with: pip install nadir")
+        raise SystemExit(1)
 
 
 @main.group()

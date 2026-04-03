@@ -448,6 +448,14 @@ async def startup():
     for w in config_warnings:
         logger.warning("Config: %s", w)
 
+    # --- Load Nadir Pro plugin if installed ---
+    try:
+        from nadir.plugin import register_pro_features
+        register_pro_features(app)
+        logger.info("Nadir Pro loaded")
+    except ImportError:
+        pass  # Free version — no Pro features
+
     logger.info("Ready! Listening for requests...")
     logger.info("=" * 60)
 
@@ -581,122 +589,8 @@ async def classify_batch(
     }
 
 
-# ---------------------------------------------------------------------------
-# /v1/routing-explain — routing decision transparency
-# ---------------------------------------------------------------------------
-
-class RoutingExplainRequest(BaseModel):
-    messages: List[ChatMessage]
-    model: Optional[str] = None
-
-
-@app.post("/v1/routing-explain")
-async def routing_explain(
-    request: RoutingExplainRequest,
-    raw_request: Request,
-    current_user: UserSession = Depends(validate_local_auth),
-) -> Dict[str, Any]:
-    """Explain how a request would be routed without making an LLM call.
-
-    Returns the full decision chain: rules check, profile resolution,
-    alias resolution, classifier output, routing modifiers (agentic,
-    reasoning, vision, context window), and final model selection.
-    """
-    from nadirclaw.routing import (
-        apply_routing_modifiers,
-        detect_agentic,
-        detect_reasoning,
-        resolve_alias,
-        resolve_profile,
-    )
-    from nadirclaw.rules import get_rules_engine
-
-    req_meta = _extract_request_metadata(
-        ChatCompletionRequest(messages=request.messages, model=request.model)
-    )
-
-    explanation: Dict[str, Any] = {"steps": []}
-
-    # Step 1: Rules engine
-    rules_engine = get_rules_engine()
-    if rules_engine.rule_count > 0:
-        system_text = next(
-            (m.text_content() for m in request.messages if m.role in ("system", "developer")),
-            "",
-        )
-        rule_result = rules_engine.evaluate(
-            messages=request.messages,
-            system_prompt=system_text,
-            tier="",
-            metadata={"prompt": req_meta.get("system_prompt_text", "")},
-        )
-        explanation["steps"].append({
-            "step": "rules_engine",
-            "matched": rule_result.matched,
-            "rule_name": rule_result.rule_name if rule_result.matched else None,
-            "forced_model": rule_result.force_model if rule_result.matched else None,
-        })
-        if rule_result.matched and rule_result.force_model:
-            explanation["final_model"] = rule_result.force_model
-            explanation["final_tier"] = rule_result.force_tier or "direct"
-            explanation["strategy"] = f"rule:{rule_result.rule_name}"
-            return explanation
-
-    # Step 2: Profile check
-    profile = resolve_profile(request.model)
-    explanation["steps"].append({
-        "step": "profile_check",
-        "model_field": request.model,
-        "resolved_profile": profile,
-    })
-
-    # Step 3: Alias check
-    if request.model and not profile:
-        alias = resolve_alias(request.model)
-        explanation["steps"].append({
-            "step": "alias_check",
-            "alias_from": request.model,
-            "resolved_to": alias,
-        })
-
-    # Step 4: Classifier
-    _, analysis = await _smart_route_full(request.messages, current_user)
-    explanation["steps"].append({
-        "step": "classifier",
-        "analyzer": analysis.get("analyzer"),
-        "tier": analysis.get("tier"),
-        "confidence": analysis.get("confidence"),
-        "complexity_score": analysis.get("complexity_score"),
-        "classifier_latency_ms": analysis.get("classifier_latency_ms"),
-    })
-
-    # Step 5: Routing modifiers
-    base_model = analysis.get("selected_model", settings.SIMPLE_MODEL)
-    base_tier = analysis.get("tier", "simple")
-    final_model, final_tier, routing_info = apply_routing_modifiers(
-        base_model=base_model,
-        base_tier=base_tier,
-        request_meta=req_meta,
-        messages=request.messages,
-        simple_model=settings.SIMPLE_MODEL,
-        complex_model=settings.COMPLEX_MODEL,
-        reasoning_model=settings.REASONING_MODEL,
-        free_model=settings.FREE_MODEL,
-    )
-    explanation["steps"].append({
-        "step": "routing_modifiers",
-        "modifiers_applied": routing_info.get("modifiers_applied", []),
-        "agentic": routing_info.get("agentic"),
-        "reasoning": routing_info.get("reasoning"),
-    })
-
-    explanation["final_model"] = final_model
-    explanation["final_tier"] = final_tier
-    explanation["strategy"] = analysis.get("strategy", "smart-routing")
-    explanation["simple_model"] = settings.SIMPLE_MODEL
-    explanation["complex_model"] = settings.COMPLEX_MODEL
-
-    return explanation
+# /v1/routing-explain and /v1/quality are Pro features — registered by
+# nadir.plugin.register_pro_features() when Nadir Pro is installed.
 
 
 # ---------------------------------------------------------------------------
@@ -1661,16 +1555,18 @@ async def chat_completions(
                 cache_hit = True
                 cache_source = "exact"
 
-        # Semantic cache fallback (higher hit rate for similar-but-not-identical prompts)
+        # Semantic cache (Pro feature) — loaded by nadir.plugin if installed
         if not cache_hit and not request.stream:
-            from nadirclaw.semantic_cache import _sem_cache_enabled, get_semantic_cache
-            if _sem_cache_enabled():
-                sem_cache = get_semantic_cache()
-                cached_response = sem_cache.get(selected_model, request.messages)
-                if cached_response is not None:
-                    response_data = cached_response
-                    cache_hit = True
-                    cache_source = "semantic"
+            try:
+                from nadir.semantic_cache import _sem_cache_enabled, get_semantic_cache
+                if _sem_cache_enabled():
+                    cached_response = get_semantic_cache().get(selected_model, request.messages)
+                    if cached_response is not None:
+                        response_data = cached_response
+                        cache_hit = True
+                        cache_source = "semantic"
+            except ImportError:
+                pass
 
         # ------------------------------------------------------------------
         # TRUE STREAMING — bypass batch call, stream directly from provider
@@ -1781,9 +1677,12 @@ async def chat_completions(
             # Store in prompt cache + semantic cache
             if _cache_enabled():
                 prompt_cache.put(selected_model, request.messages, response_data, temperature=request.temperature)
-            from nadirclaw.semantic_cache import _sem_cache_enabled, get_semantic_cache
-            if _sem_cache_enabled():
-                get_semantic_cache().put(selected_model, request.messages, response_data)
+            try:
+                from nadir.semantic_cache import _sem_cache_enabled, get_semantic_cache
+                if _sem_cache_enabled():
+                    get_semantic_cache().put(selected_model, request.messages, response_data)
+            except ImportError:
+                pass
         else:
             elapsed_ms = int((time.time() - start_time) * 1000)
             total_tokens = response_data["prompt_tokens"] + response_data["completion_tokens"]
@@ -1839,18 +1738,21 @@ async def chat_completions(
             total_latency_ms=elapsed_ms,
         )
 
-        # Quality scoring engine (EMA-based per-model quality tracking)
-        from nadirclaw.quality import get_quality_scorer
-        get_quality_scorer().score_response(
-            content=response_data.get("content", ""),
-            status="ok",
-            tier=analysis_info.get("tier", "simple"),
-            model=selected_model,
-            prompt_tokens=response_data.get("prompt_tokens", 0),
-            completion_tokens=response_data.get("completion_tokens", 0),
-            total_latency_ms=elapsed_ms,
-            fallback_used=analysis_info.get("fallback_from"),
-        )
+        # Quality scoring engine (Pro feature — loaded by nadir.plugin)
+        try:
+            from nadir.quality import get_quality_scorer
+            get_quality_scorer().score_response(
+                content=response_data.get("content", ""),
+                status="ok",
+                tier=analysis_info.get("tier", "simple"),
+                model=selected_model,
+                prompt_tokens=response_data.get("prompt_tokens", 0),
+                completion_tokens=response_data.get("completion_tokens", 0),
+                total_latency_ms=elapsed_ms,
+                fallback_used=analysis_info.get("fallback_from"),
+            )
+        except ImportError:
+            pass
 
         # Misroute detection (implicit negative feedback)
         _check_misroute(
@@ -2510,13 +2412,17 @@ async def view_logs(
 async def get_cache_stats(
     current_user: UserSession = Depends(validate_local_auth),
 ) -> Dict[str, Any]:
-    """Get cache statistics (prompt cache + semantic cache)."""
+    """Get cache statistics."""
     from nadirclaw.cache import get_prompt_cache
-    from nadirclaw.semantic_cache import _sem_cache_enabled, get_semantic_cache
 
     result: Dict[str, Any] = {"prompt_cache": get_prompt_cache().get_stats()}
-    if _sem_cache_enabled():
-        result["semantic_cache"] = get_semantic_cache().get_stats()
+    # Semantic cache stats added by nadir.plugin if installed
+    try:
+        from nadir.semantic_cache import _sem_cache_enabled, get_semantic_cache
+        if _sem_cache_enabled():
+            result["semantic_cache"] = get_semantic_cache().get_stats()
+    except ImportError:
+        pass
     return result
 
 
@@ -2527,15 +2433,6 @@ async def get_budget(
     """Get current spend and budget status."""
     from nadirclaw.budget import get_budget_tracker
     return get_budget_tracker().get_status()
-
-
-@app.get("/v1/quality")
-async def get_quality(
-    current_user: UserSession = Depends(validate_local_auth),
-) -> Dict[str, Any]:
-    """Get per-model quality scores and statistics."""
-    from nadirclaw.quality import get_quality_scorer
-    return get_quality_scorer().get_stats()
 
 
 @app.get("/v1/rate-limits")

@@ -21,42 +21,24 @@ _shared_encoder = None  # type: ignore[assignment]
 _encoder_lock = Lock()
 
 
-def _get_encoder_backend() -> str:
-    """Return the configured encoder backend: 'onnx' or 'torch'."""
-    return os.getenv("NADIRCLAW_ENCODER_BACKEND", "torch").lower()
-
-
 def get_shared_encoder_sync():
     """
-    Lazily initialize and return a shared encoder instance.
-
-    Supports two backends (configured via NADIRCLAW_ENCODER_BACKEND):
-      - 'torch' (default): SentenceTransformer (~80MB, ~10ms/encode)
-      - 'onnx': ONNX Runtime (~22MB, ~5ms/encode, requires onnxruntime)
-
+    Lazily initialize and return a shared SentenceTransformer instance.
+    The first call loads the model (~80 MB download on first run).
     Uses double-checked locking to avoid redundant loads.
+
     The ``sentence_transformers`` import itself is deferred so that
     ``import nadirclaw`` does not trigger a heavy torch import chain.
+
+    Note: ONNX backend (2x faster) is available via Nadir Pro.
     """
     global _shared_encoder
     if _shared_encoder is None:
         with _encoder_lock:
             if _shared_encoder is None:
-                backend = _get_encoder_backend()
-
-                if backend == "onnx":
-                    try:
-                        from nadirclaw.onnx_encoder import get_onnx_encoder
-                        _shared_encoder = get_onnx_encoder()
-                        logger.info("Using ONNX encoder backend")
-                        return _shared_encoder
-                    except ImportError:
-                        logger.warning(
-                            "ONNX backend requested but onnxruntime not installed — "
-                            "falling back to torch. Install with: pip install onnxruntime"
-                        )
-                    except Exception as e:
-                        logger.warning("ONNX encoder init failed (%s) — falling back to torch", e)
+                # Nadir Pro can inject an ONNX encoder before this runs
+                if _shared_encoder is not None:
+                    return _shared_encoder
 
                 t0 = time.time()
                 logger.info("Loading SentenceTransformer encoder: all-MiniLM-L6-v2")
