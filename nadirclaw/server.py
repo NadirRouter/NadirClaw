@@ -25,6 +25,7 @@ from sse_starlette.sse import EventSourceResponse
 
 from nadirclaw import __version__
 from nadirclaw.auth import UserSession, validate_local_auth
+from nadirclaw.openai_codex import get_openai_codex_runtime
 from nadirclaw.settings import settings
 
 logger = logging.getLogger("nadirclaw")
@@ -41,6 +42,16 @@ class RateLimitExhausted(Exception):
         self.model = model
         self.retry_after = retry_after
         super().__init__(f"Rate limit exhausted for {model} (retry in {retry_after}s)")
+
+
+class UpstreamModelError(Exception):
+    """Raised for transient upstream/provider errors that should trigger fallback."""
+
+    def __init__(self, model: str, provider: str, message: str, *, status_code: int | None = None):
+        self.model = model
+        self.provider = provider
+        self.status_code = status_code
+        super().__init__(message)
 
 
 # ---------------------------------------------------------------------------
@@ -328,6 +339,15 @@ async def startup():
 
     logger.info("Ready! Listening for requests...")
     logger.info("=" * 60)
+
+    # Warm OpenAI Codex model discovery cache at startup (best-effort).
+    try:
+        from nadirclaw.credentials import get_credential
+
+        codex_token = get_credential("openai-codex")
+        await get_openai_codex_runtime().refresh_if_stale(codex_token)
+    except Exception as e:
+        logger.warning("OpenAI Codex startup discovery skipped: %s", e)
 
 
 # ---------------------------------------------------------------------------
@@ -747,13 +767,8 @@ async def _call_litellm(
 
     from nadirclaw.credentials import get_credential
 
-    # For openai-codex provider, strip the prefix and route as OpenAI model
-    if provider == "openai-codex":
-        litellm_model = model.removeprefix("openai-codex/")
-        cred_provider = "openai-codex"
-    else:
-        litellm_model = model
-        cred_provider = provider
+    litellm_model = model
+    cred_provider = provider
 
     # LiteLLM's "ollama/" provider uses /api/generate which doesn't support
     # tool calling. Automatically upgrade to "ollama_chat/" (which uses
@@ -941,6 +956,309 @@ async def _call_litellm(
     return result
 
 
+def _build_openai_style_messages(request: "ChatCompletionRequest") -> List[Dict[str, Any]]:
+    """Build OpenAI-style messages preserving tool fields and multimodal arrays."""
+    messages: List[Dict[str, Any]] = []
+    for message in request.messages:
+        if isinstance(message.content, list):
+            content = message.content
+        else:
+            text = message.text_content()
+            content = text if text else message.content
+        msg: Dict[str, Any] = {"role": message.role, "content": content}
+        extra_fields = message.model_extra or {}
+        if "tool_calls" in extra_fields:
+            msg["tool_calls"] = extra_fields["tool_calls"]
+        if "tool_call_id" in extra_fields:
+            msg["tool_call_id"] = extra_fields["tool_call_id"]
+        if "name" in extra_fields:
+            msg["name"] = extra_fields["name"]
+        messages.append(msg)
+    return messages
+
+
+def _extract_message_content(message: Any) -> str:
+    """Extract text content from OpenAI-style response message payloads."""
+    content = message.get("content")
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts: List[str] = []
+        for item in content:
+            if isinstance(item, dict) and item.get("type") in ("text", "output_text"):
+                text = item.get("text")
+                if isinstance(text, str):
+                    parts.append(text)
+        return "".join(parts)
+    return ""
+
+
+def _to_responses_input(messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Convert OpenAI-chat style messages to Responses API input items."""
+    input_items: List[Dict[str, Any]] = []
+    for msg in messages:
+        role = msg.get("role", "user")
+        content = msg.get("content")
+        if isinstance(content, str):
+            input_items.append(
+                {
+                    "role": role,
+                    "content": [{"type": "input_text", "text": content}],
+                }
+            )
+            continue
+        if isinstance(content, list):
+            converted_parts: List[Dict[str, Any]] = []
+            for part in content:
+                if isinstance(part, str):
+                    converted_parts.append({"type": "input_text", "text": part})
+                elif isinstance(part, dict):
+                    if part.get("type") == "text" and isinstance(part.get("text"), str):
+                        converted_parts.append({"type": "input_text", "text": part["text"]})
+                    else:
+                        converted_parts.append(part)
+            input_items.append({"role": role, "content": converted_parts or content})
+            continue
+        input_items.append({"role": role, "content": []})
+    return input_items
+
+
+def _extract_responses_text(data: Dict[str, Any]) -> tuple[str, str]:
+    """Extract assistant text and reasoning text from a Responses API payload."""
+    content_parts: List[str] = []
+    reasoning_parts: List[str] = []
+
+    output = data.get("output")
+    if isinstance(output, list):
+        for item in output:
+            if not isinstance(item, dict):
+                continue
+            for part in item.get("content", []) or []:
+                if not isinstance(part, dict):
+                    continue
+                part_type = part.get("type")
+                if part_type in ("output_text", "text") and isinstance(part.get("text"), str):
+                    content_parts.append(part["text"])
+                elif part_type in ("reasoning", "reasoning_text") and isinstance(part.get("text"), str):
+                    reasoning_parts.append(part["text"])
+
+    output_text = data.get("output_text")
+    if isinstance(output_text, str) and output_text:
+        content_parts.append(output_text)
+
+    return "".join(content_parts), "".join(reasoning_parts)
+
+
+def _request_requires_chat_completions_tool_path(request: "ChatCompletionRequest") -> bool:
+    """Conservatively detect tool history or active tool usage requiring chat/completions path."""
+    extra = request.model_extra or {}
+    if extra.get("tools") or extra.get("tool_choice"):
+        return True
+
+    for message in request.messages:
+        if message.role == "tool":
+            return True
+        msg_extra = message.model_extra or {}
+        if msg_extra.get("tool_calls") or msg_extra.get("tool_call_id"):
+            return True
+        if msg_extra.get("function_call") or msg_extra.get("function_response"):
+            return True
+    return False
+
+
+def _build_codex_chat_completions_body(
+    runtime_model: str,
+    request: "ChatCompletionRequest",
+    provider_messages: List[Dict[str, Any]],
+) -> Dict[str, Any]:
+    body: Dict[str, Any] = {"model": runtime_model, "messages": provider_messages}
+    if request.temperature is not None:
+        body["temperature"] = request.temperature
+    if request.max_tokens is not None:
+        body["max_tokens"] = request.max_tokens
+    if request.top_p is not None:
+        body["top_p"] = request.top_p
+    extra = request.model_extra or {}
+    for key in ("tools", "tool_choice", "reasoning_effort", "thinking", "response_format"):
+        if extra.get(key) is not None:
+            body[key] = extra[key]
+    return body
+
+
+def _map_responses_finish_reason(payload: Dict[str, Any]) -> str:
+    status = str(payload.get("status") or "").lower()
+    if status in ("completed", "complete", "success"):
+        return "stop"
+    if status in ("incomplete",):
+        return "length"
+    if status in ("failed", "error"):
+        return "error"
+    return "stop"
+
+
+async def _call_openai_codex(
+    model: str,
+    request: "ChatCompletionRequest",
+    provider: str | None,
+) -> Dict[str, Any]:
+    """Direct OpenAI Codex OAuth transport (no LiteLLM)."""
+    import httpx
+
+    from nadirclaw.credentials import get_credential, get_credential_source
+
+    oauth_token = get_credential("openai-codex")
+    if not oauth_token:
+        raise HTTPException(
+            status_code=500,
+            detail="No OpenAI Codex OAuth/API credential configured.",
+        )
+
+    runtime = get_openai_codex_runtime()
+    await runtime.refresh_if_stale(oauth_token)
+    runtime_model, model_source = runtime.resolve_runtime_model(model)
+    token_source = get_credential_source("openai-codex") or "unknown"
+    use_chat_completions = _request_requires_chat_completions_tool_path(request)
+
+    provider_messages = _build_openai_style_messages(request)
+    body: Dict[str, Any] = {
+        "model": runtime_model,
+        "input": _to_responses_input(provider_messages),
+    }
+    if request.temperature is not None:
+        body["temperature"] = request.temperature
+    if request.max_tokens is not None:
+        body["max_output_tokens"] = request.max_tokens
+    if request.top_p is not None:
+        body["top_p"] = request.top_p
+
+    extra = request.model_extra or {}
+    if extra.get("tools") is not None:
+        body["tools"] = extra["tools"]
+    if extra.get("tool_choice") is not None:
+        body["tool_choice"] = extra["tool_choice"]
+    if extra.get("reasoning_effort") is not None:
+        body["reasoning"] = {"effort": extra["reasoning_effort"]}
+    if extra.get("response_format") is not None:
+        body["text"] = {"format": extra["response_format"]}
+
+    if use_chat_completions:
+        logger.info(
+            "OpenAI Codex request contains tool history; bypassing Responses API and using chat/completions fallback endpoint=%s requested_model=%s runtime_model=%s token_source=%s model_source=%s",
+            runtime.chat_completions_url,
+            model,
+            runtime_model,
+            token_source,
+            model_source,
+        )
+
+    try:
+        async with httpx.AsyncClient(timeout=120) as client:
+            if use_chat_completions:
+                target_url = runtime.chat_completions_url
+                payload = _build_codex_chat_completions_body(runtime_model, request, provider_messages)
+                resp = await client.post(
+                    target_url,
+                    headers={
+                        "Authorization": f"Bearer {oauth_token}",
+                        "Content-Type": "application/json",
+                    },
+                    json=payload,
+                )
+            else:
+                logger.info(
+                    "OpenAI Codex call endpoint=%s requested_model=%s runtime_model=%s token_source=%s model_source=%s",
+                    runtime.responses_url,
+                    model,
+                    runtime_model,
+                    token_source,
+                    model_source,
+                )
+                resp = await client.post(
+                    runtime.responses_url,
+                    headers={
+                        "Authorization": f"Bearer {oauth_token}",
+                        "Content-Type": "application/json",
+                    },
+                    json=body,
+                )
+                # Fallback: compatibility with older chat/completions wire format.
+                if resp.status_code in (400, 404, 422):
+                    logger.info("OpenAI Codex responses fallback -> chat/completions endpoint=%s", runtime.chat_completions_url)
+                    fallback_body = _build_codex_chat_completions_body(runtime_model, request, provider_messages)
+                    resp = await client.post(
+                        runtime.chat_completions_url,
+                        headers={
+                            "Authorization": f"Bearer {oauth_token}",
+                            "Content-Type": "application/json",
+                        },
+                        json=fallback_body,
+                    )
+    except (httpx.TimeoutException, httpx.NetworkError, httpx.TransportError) as exc:
+        raise UpstreamModelError(
+            model=model,
+            provider="openai-codex",
+            message=f"OpenAI Codex network/timeout error: {exc}",
+        ) from exc
+
+    if resp.status_code == 429:
+        raise RateLimitExhausted(model=model, retry_after=60)
+    if resp.status_code >= 400:
+        err_txt = resp.text[:1000]
+        logger.error("OpenAI Codex error (%s): %s", resp.status_code, err_txt)
+        if resp.status_code >= 500:
+            raise UpstreamModelError(
+                model=model,
+                provider="openai-codex",
+                status_code=resp.status_code,
+                message=f"OpenAI Codex upstream 5xx ({resp.status_code})",
+            )
+        if resp.status_code in (401, 403):
+            raise HTTPException(
+                status_code=401,
+                detail="OpenAI Codex authentication/authorization failed. Re-authenticate or verify token scope.",
+            )
+        # 4xx are typically request/model/auth issues and should not fall through routing fallback.
+        raise HTTPException(
+            status_code=400,
+            detail=f"OpenAI Codex request rejected ({resp.status_code}): {err_txt}",
+        )
+
+    data = resp.json()
+    usage = data.get("usage") or {}
+    prompt_tokens = int(usage.get("input_tokens") or usage.get("prompt_tokens") or 0)
+    completion_tokens = int(usage.get("output_tokens") or usage.get("completion_tokens") or 0)
+
+    if "choices" in data:
+        choice = (data.get("choices") or [{}])[0]
+        message = choice.get("message") or {}
+        result = {
+            "content": _extract_message_content(message),
+            "finish_reason": choice.get("finish_reason") or "stop",
+            "prompt_tokens": prompt_tokens,
+            "completion_tokens": completion_tokens,
+        }
+        if message.get("tool_calls"):
+            result["tool_calls"] = message["tool_calls"]
+        reasoning_content = message.get("reasoning_content")
+        if isinstance(reasoning_content, str) and reasoning_content:
+            result["reasoning_content"] = reasoning_content
+        thinking = message.get("thinking")
+        if isinstance(thinking, str) and thinking:
+            result["thinking"] = thinking
+        return result
+
+    text_content, reasoning_text = _extract_responses_text(data)
+    result = {
+        "content": text_content,
+        "finish_reason": _map_responses_finish_reason(data),
+        "prompt_tokens": prompt_tokens,
+        "completion_tokens": completion_tokens,
+    }
+    if reasoning_text:
+        result["reasoning_content"] = reasoning_text
+    return result
+
+
 # ---------------------------------------------------------------------------
 # Model dispatch + fallback on rate limit
 # ---------------------------------------------------------------------------
@@ -969,6 +1287,8 @@ async def _dispatch_model(
     with trace_span("dispatch_model", {"gen_ai.request.model": model, "gen_ai.system": provider or ""}):
         if provider == "google":
             return await _call_gemini(model, request, provider)
+        if provider == "openai-codex":
+            return await _call_openai_codex(model, request, provider)
         return await _call_litellm(model, request, provider)
 
 
@@ -991,9 +1311,17 @@ async def _call_with_fallback(
     try:
         response_data = await _dispatch_model(selected_model, request, provider)
         return response_data, selected_model, analysis_info
-    except (RateLimitExhausted, Exception) as primary_error:
-        if isinstance(primary_error, HTTPException):
-            raise  # Don't fallback on validation/auth errors
+    except HTTPException:
+        raise  # Don't fallback on validation/auth/config errors
+    except (RateLimitExhausted, UpstreamModelError) as primary_error:
+        if isinstance(primary_error, UpstreamModelError):
+            logger.warning(
+                "Upstream error on %s via %s (status=%s): %s",
+                selected_model,
+                primary_error.provider,
+                primary_error.status_code,
+                primary_error,
+            )
 
         # Build fallback chain: use per-tier chain if configured, else global
         tier = analysis_info.get("tier", "")
@@ -1031,9 +1359,17 @@ async def _call_with_fallback(
                     "strategy": analysis_info.get("strategy", "smart-routing") + "+fallback",
                 }
                 return response_data, fallback_model, analysis_info
-            except (RateLimitExhausted, Exception) as chain_error:
-                if isinstance(chain_error, HTTPException):
-                    raise
+            except HTTPException:
+                raise
+            except (RateLimitExhausted, UpstreamModelError) as chain_error:
+                if isinstance(chain_error, UpstreamModelError):
+                    logger.warning(
+                        "Fallback model %s upstream error via %s (status=%s): %s",
+                        fallback_model,
+                        chain_error.provider,
+                        chain_error.status_code,
+                        chain_error,
+                    )
                 failed_models.append(fallback_model)
                 last_error = chain_error
                 continue
@@ -1054,7 +1390,7 @@ def _rate_limit_error_response(model: str) -> Dict[str, Any]:
         "content": (
             "⚠️ All configured models are currently rate-limited. "
             "Please wait a minute and try again, or consider upgrading your API plan. "
-            "Check limits at https://ai.google.dev/gemini-api/docs/rate-limits"
+            "Check your provider quota/rate-limit dashboard for details."
         ),
         "finish_reason": "stop",
         "prompt_tokens": 0,
@@ -1565,12 +1901,8 @@ async def _stream_litellm(
 
     from nadirclaw.credentials import get_credential
 
-    if provider == "openai-codex":
-        litellm_model = model.removeprefix("openai-codex/")
-        cred_provider = "openai-codex"
-    else:
-        litellm_model = model
-        cred_provider = provider
+    litellm_model = model
+    cred_provider = provider
 
     req_extra = request.model_extra or {}
     if litellm_model.startswith("ollama/") and req_extra.get("tools"):
@@ -1669,6 +2001,211 @@ async def _stream_litellm(
             delta_dict["thinking"] = delta.thinking
 
         yield delta_dict, usage, choice.finish_reason
+
+
+async def _stream_openai_codex(
+    model: str,
+    request: "ChatCompletionRequest",
+    provider: str | None,
+):
+    """Direct OpenAI Codex OAuth streaming transport (SSE)."""
+    import httpx
+
+    from nadirclaw.credentials import get_credential, get_credential_source
+
+    oauth_token = get_credential("openai-codex")
+    if not oauth_token:
+        raise HTTPException(
+            status_code=500,
+            detail="No OpenAI Codex OAuth/API credential configured.",
+        )
+
+    runtime = get_openai_codex_runtime()
+    await runtime.refresh_if_stale(oauth_token)
+    runtime_model, model_source = runtime.resolve_runtime_model(model)
+    token_source = get_credential_source("openai-codex") or "unknown"
+    use_chat_completions = _request_requires_chat_completions_tool_path(request)
+
+    provider_messages = _build_openai_style_messages(request)
+    body: Dict[str, Any] = {
+        "model": runtime_model,
+        "input": _to_responses_input(provider_messages),
+        "stream": True,
+    }
+    if request.temperature is not None:
+        body["temperature"] = request.temperature
+    if request.max_tokens is not None:
+        body["max_output_tokens"] = request.max_tokens
+    if request.top_p is not None:
+        body["top_p"] = request.top_p
+    extra = request.model_extra or {}
+    if extra.get("tools") is not None:
+        body["tools"] = extra["tools"]
+    if extra.get("tool_choice") is not None:
+        body["tool_choice"] = extra["tool_choice"]
+    if extra.get("reasoning_effort") is not None:
+        body["reasoning"] = {"effort": extra["reasoning_effort"]}
+    if extra.get("response_format") is not None:
+        body["text"] = {"format": extra["response_format"]}
+
+    chat_stream_body: Dict[str, Any] = {
+        "model": runtime_model,
+        "messages": provider_messages,
+        "stream": True,
+        "stream_options": {"include_usage": True},
+        **({"temperature": request.temperature} if request.temperature is not None else {}),
+        **({"max_tokens": request.max_tokens} if request.max_tokens is not None else {}),
+        **({"top_p": request.top_p} if request.top_p is not None else {}),
+        **({k: extra[k] for k in ("tools", "tool_choice", "reasoning_effort", "thinking", "response_format") if extra.get(k) is not None}),
+    }
+    if use_chat_completions:
+        logger.info(
+            "OpenAI Codex request contains tool history; bypassing Responses API and using chat/completions fallback endpoint=%s requested_model=%s runtime_model=%s token_source=%s model_source=%s",
+            runtime.chat_completions_url,
+            model,
+            runtime_model,
+            token_source,
+            model_source,
+        )
+        stream_attempts: List[tuple[str, Dict[str, Any], str]] = [
+            (runtime.chat_completions_url, chat_stream_body, "chat_completions_tool_history"),
+        ]
+    else:
+        logger.info(
+            "OpenAI Codex stream endpoint=%s requested_model=%s runtime_model=%s token_source=%s model_source=%s",
+            runtime.responses_url,
+            model,
+            runtime_model,
+            token_source,
+            model_source,
+        )
+        stream_attempts = [
+            (runtime.responses_url, body, "responses"),
+            (runtime.chat_completions_url, chat_stream_body, "chat_completions_fallback"),
+        ]
+
+    async with httpx.AsyncClient(timeout=120) as client:
+        for attempt_idx, (stream_url, stream_body, attempt_label) in enumerate(stream_attempts):
+            try:
+                async with client.stream(
+                    "POST",
+                    stream_url,
+                    headers={
+                        "Authorization": f"Bearer {oauth_token}",
+                        "Content-Type": "application/json",
+                    },
+                    json=stream_body,
+                ) as resp:
+                    if resp.status_code in (400, 404, 422) and attempt_idx == 0 and not use_chat_completions:
+                        logger.info(
+                            "OpenAI Codex stream switching to fallback endpoint=%s reason=status_%s",
+                            runtime.chat_completions_url,
+                            resp.status_code,
+                        )
+                        continue
+                    if resp.status_code == 429:
+                        raise RateLimitExhausted(model=model, retry_after=60)
+                    if resp.status_code >= 500:
+                        err_txt = (await resp.aread())[:1000].decode(errors="replace")
+                        raise UpstreamModelError(
+                            model=model,
+                            provider="openai-codex",
+                            status_code=resp.status_code,
+                            message=f"OpenAI Codex streaming upstream 5xx ({resp.status_code}): {err_txt}",
+                        )
+                    if resp.status_code in (401, 403):
+                        raise HTTPException(
+                            status_code=401,
+                            detail="OpenAI Codex authentication/authorization failed. Re-authenticate or verify token scope.",
+                        )
+                    if resp.status_code >= 400:
+                        err_txt = (await resp.aread())[:1000].decode(errors="replace")
+                        raise HTTPException(
+                            status_code=400,
+                            detail=f"OpenAI Codex streaming request rejected ({resp.status_code}): {err_txt}",
+                        )
+
+                    logger.info(
+                        "OpenAI Codex streaming connected endpoint=%s attempt=%s requested_model=%s runtime_model=%s",
+                        stream_url,
+                        attempt_label,
+                        model,
+                        runtime_model,
+                    )
+
+                    async for line in resp.aiter_lines():
+                        if not line.startswith("data: "):
+                            continue
+                        payload = line[len("data: ") :].strip()
+                        if not payload:
+                            continue
+                        if payload == "[DONE]":
+                            break
+                        try:
+                            chunk = json.loads(payload)
+                        except json.JSONDecodeError:
+                            logger.debug("Skipping non-JSON OpenAI Codex stream chunk: %s", payload[:200])
+                            continue
+
+                        usage = None
+                        delta_dict: Dict[str, Any] = {}
+                        finish_reason = None
+
+                        # Chat-completions fallback chunks
+                        if "choices" in chunk:
+                            if isinstance(chunk.get("usage"), dict):
+                                usage = {
+                                    "prompt_tokens": int(chunk["usage"].get("prompt_tokens") or 0),
+                                    "completion_tokens": int(chunk["usage"].get("completion_tokens") or 0),
+                                }
+                            choices = chunk.get("choices") or []
+                            if not choices:
+                                if usage:
+                                    yield {}, usage, None
+                                continue
+                            choice = choices[0]
+                            delta = choice.get("delta") or {}
+                            for key in ("role", "content", "tool_calls", "reasoning_content", "thinking"):
+                                if key in delta and delta[key] is not None:
+                                    delta_dict[key] = delta[key]
+                            finish_reason = choice.get("finish_reason")
+                            yield delta_dict, usage, finish_reason
+                            continue
+
+                        # Responses API event chunks
+                        chunk_type = chunk.get("type")
+                        if chunk_type in ("response.output_text.delta", "response.refusal.delta"):
+                            delta = chunk.get("delta")
+                            if isinstance(delta, str) and delta:
+                                delta_dict["content"] = delta
+                        elif chunk_type in ("response.reasoning.delta",):
+                            delta = chunk.get("delta")
+                            if isinstance(delta, str) and delta:
+                                delta_dict["reasoning_content"] = delta
+                        elif chunk_type in ("response.completed", "response.failed"):
+                            response_obj = chunk.get("response") or {}
+                            usage_obj = response_obj.get("usage") or {}
+                            usage = {
+                                "prompt_tokens": int(usage_obj.get("input_tokens") or usage_obj.get("prompt_tokens") or 0),
+                                "completion_tokens": int(usage_obj.get("output_tokens") or usage_obj.get("completion_tokens") or 0),
+                            }
+                            finish_reason = _map_responses_finish_reason(response_obj)
+
+                        if delta_dict or usage or finish_reason:
+                            yield delta_dict, usage, finish_reason
+                    return
+            except HTTPException:
+                raise
+            except RateLimitExhausted:
+                raise
+            except UpstreamModelError:
+                raise
+            except (httpx.TimeoutException, httpx.NetworkError, httpx.TransportError) as exc:
+                raise UpstreamModelError(
+                    model=model,
+                    provider="openai-codex",
+                    message=f"OpenAI Codex streaming network/timeout error: {exc}",
+                ) from exc
 
 
 async def _stream_gemini(
@@ -1819,6 +2356,9 @@ async def _dispatch_model_stream(
         # _stream_gemini is a sync generator; wrap it
         for item in _stream_gemini(model, request, provider):
             yield item
+    elif provider == "openai-codex":
+        async for item in _stream_openai_codex(model, request, provider):
+            yield item
     else:
         async for item in _stream_litellm(model, request, provider):
             yield item
@@ -1910,9 +2450,17 @@ async def _stream_with_fallback(
             analysis_info["_stream_usage"] = accumulated_usage
             return  # Success
 
-        except (RateLimitExhausted, Exception) as e:
-            if isinstance(e, HTTPException):
-                raise  # Don't fallback on auth/validation errors
+        except HTTPException:
+            raise  # Don't fallback on auth/validation errors
+        except (RateLimitExhausted, UpstreamModelError) as e:
+            if isinstance(e, UpstreamModelError):
+                logger.warning(
+                    "Streaming upstream error on %s via %s (status=%s): %s",
+                    model,
+                    e.provider,
+                    e.status_code,
+                    e,
+                )
 
             if content_started:
                 # Mid-stream failure — can't restart, notify client
@@ -2037,7 +2585,12 @@ async def get_rate_limits(
 async def list_models(
     current_user: UserSession = Depends(validate_local_auth),
 ) -> Dict[str, Any]:
+    from nadirclaw.credentials import get_credential
+
     now = int(time.time())
+    runtime = get_openai_codex_runtime()
+    await runtime.refresh_if_stale(get_credential("openai-codex"))
+
     # Routing profiles first, then tier models
     profiles = [
         {"id": "auto", "object": "model", "created": now, "owned_by": "nadirclaw"},
@@ -2053,7 +2606,25 @@ async def list_models(
         }
         for m in settings.tier_models
     ]
-    return {"object": "list", "data": profiles + tier_data}
+    discovered_data = [
+        {
+            "id": m,
+            "object": "model",
+            "created": now,
+            "owned_by": "openai-codex",
+        }
+        for m in runtime.get_discovered_display_models()
+    ]
+
+    all_models: List[Dict[str, Any]] = []
+    seen: set[str] = set()
+    for item in profiles + tier_data + discovered_data:
+        model_id = item["id"]
+        if model_id in seen:
+            continue
+        seen.add(model_id)
+        all_models.append(item)
+    return {"object": "list", "data": all_models}
 
 
 @app.get("/metrics")
