@@ -234,7 +234,7 @@ def login_openai(timeout: int = 300) -> Optional[dict]:
     code_challenge = _generate_code_challenge(code_verifier)
     state = secrets.token_urlsafe(32)
 
-    redirect_uri = f"http://127.0.0.1:{_CALLBACK_PORT}{_CALLBACK_PATH}"
+    redirect_uri = f"http://localhost:{_CALLBACK_PORT}{_CALLBACK_PATH}"
 
     # Build authorization URL
     auth_params = {
