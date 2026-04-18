@@ -92,6 +92,10 @@ app = FastAPI(
 from nadirclaw.web_dashboard import router as dashboard_router
 app.include_router(dashboard_router)
 
+# Register Anthropic Messages API compatibility layer
+from nadirclaw.anthropic_api import router as anthropic_router
+app.include_router(anthropic_router)
+
 _ROUTING_HEADERS = ("X-Routed-Model", "X-Routed-Tier", "X-Complexity-Score")
 
 app.add_middleware(
