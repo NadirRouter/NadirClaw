@@ -1047,9 +1047,19 @@ async def anthropic_messages(raw_request: Request):
             stats = anthropic_response_to_stats(raw_response)
             elapsed_ms = int((time.time() - start_time) * 1000)
 
+            # Some providers (GLM, Kimi) report inaccurate input_tokens.
+            # Use our own estimate when upstream reports suspiciously low values.
+            reported_pt = stats["prompt_tokens"]
+            # Estimate from raw body: system + messages + tools
+            est_chars = len(json.dumps(body.get("system", "")))
+            est_chars += len(json.dumps(body.get("messages", [])))
+            est_chars += len(json.dumps(body.get("tools", [])))
+            estimated_pt = est_chars // 4
+            prompt_tokens = max(reported_pt, estimated_pt)
+
             record_llm_call(
                 span, model=final_model, provider=detect_provider(final_model),
-                prompt_tokens=stats["prompt_tokens"],
+                prompt_tokens=prompt_tokens,
                 completion_tokens=stats["completion_tokens"],
                 tier=tier, latency_ms=elapsed_ms,
             )
@@ -1062,7 +1072,7 @@ async def anthropic_messages(raw_request: Request):
                 "tier": tier,
                 "fallback_used": fallback_from,
                 "total_latency_ms": elapsed_ms,
-                "prompt_tokens": stats["prompt_tokens"],
+                "prompt_tokens": prompt_tokens,
                 "completion_tokens": stats["completion_tokens"],
                 "status": "ok",
                 "call_path": "direct_anthropic",
