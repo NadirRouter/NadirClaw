@@ -14,9 +14,10 @@ import time
 import uuid
 from typing import Any, Dict, List, Optional, Union
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
 
+from nadirclaw.auth import UserSession, validate_local_auth
 from nadirclaw.settings import settings
 
 logger = logging.getLogger("nadirclaw.anthropic_api")
@@ -289,26 +290,27 @@ def _extract_last_user_text(messages: List[Dict[str, Any]]) -> str:
 
 
 @router.post("/v1/messages")
-async def anthropic_messages(raw_request: Request):
+async def anthropic_messages(
+    raw_request: Request,
+    current_user: UserSession = Depends(validate_local_auth),
+):
     """Anthropic Messages API compatibility endpoint.
 
     Accepts requests in Anthropic format, routes them through NadirClaw's
     smart routing, and returns responses in Anthropic format.
+
+    Auth is handled by validate_local_auth (supports x-api-key,
+    X-API-Key, and Authorization: Bearer headers).
     """
     from nadirclaw.server import (
         _call_with_fallback,
         _extract_request_metadata,
         _log_request,
         _rate_limiter,
-        validate_local_auth,
-        UserSession,
+        ChatMessage,
+        ChatCompletionRequest,
     )
-    from fastapi import Depends
     from sse_starlette.sse import EventSourceResponse
-    from pydantic import BaseModel
-
-    # Re-import for proper DI
-    from nadirclaw.server import app
 
     start_time = time.time()
     request_id = str(uuid.uuid4())
@@ -317,12 +319,6 @@ async def anthropic_messages(raw_request: Request):
         body = await raw_request.json()
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid JSON body")
-
-    # Validate auth
-    auth_header = raw_request.headers.get("authorization", "")
-    token = auth_header.replace("Bearer ", "") if auth_header.startswith("Bearer ") else ""
-    if settings.AUTH_TOKEN and token != settings.AUTH_TOKEN:
-        raise HTTPException(status_code=401, detail="Invalid API key")
 
     # Extract Anthropic fields
     ant_model = body.get("model", "")
@@ -408,6 +404,19 @@ async def anthropic_messages(raw_request: Request):
         selected_model, request, provider, analysis_info,
     )
 
+    # Extract from LiteLLM response shape (choices[0].message)
+    # _call_with_fallback returns OpenAI-format data
+    if "choices" in response_data:
+        choice = response_data["choices"][0] if response_data["choices"] else {}
+        msg = choice.get("message", {})
+        response_data = {
+            "content": msg.get("content", ""),
+            "tool_calls": msg.get("tool_calls", []),
+            "finish_reason": choice.get("finish_reason", "stop"),
+            "prompt_tokens": response_data.get("usage", {}).get("prompt_tokens", 0),
+            "completion_tokens": response_data.get("usage", {}).get("completion_tokens", 0),
+        }
+
     elapsed_ms = int((time.time() - start_time) * 1000)
 
     _log_request({
@@ -419,7 +428,16 @@ async def anthropic_messages(raw_request: Request):
         "total_latency_ms": elapsed_ms,
         "prompt_tokens": response_data.get("prompt_tokens", 0),
         "completion_tokens": response_data.get("completion_tokens", 0),
+        "cost_usd": analysis_info.get("cost_usd"),
+        "cached_tokens": analysis_info.get("cached_tokens", 0),
         "status": "ok",
+        "message_count": len(ant_messages),
+        "has_system_prompt": ant_system is not None,
+        "system_prompt_length": len(ant_system) if isinstance(ant_system, str) else 0,
+        "tool_count": len(ant_tools),
+        "has_tools": len(ant_tools) > 0,
+        "requested_model": ant_model,
+        "stream": ant_stream,
     })
 
     if ant_stream:
