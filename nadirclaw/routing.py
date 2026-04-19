@@ -20,16 +20,24 @@ logger = logging.getLogger("nadirclaw.routing")
 # Model Pool — weighted load balancing across multiple models
 # ---------------------------------------------------------------------------
 
-def _parse_model_pools() -> Dict[str, List[Tuple[str, int]]]:
-    """Parse NADIRCLAW_MODEL_POOLS env var into pool configuration.
+# Lazy-initialized: pools are built on first access, not at import time,
+# so CLI `serve --set NADIRCLAW_MODEL_POOLS=...` works correctly.
+_MODEL_POOLS_CACHE: Optional[Dict[str, List[Tuple[str, int]]]] = None
+_MODEL_TO_POOL_CACHE: Optional[Dict[str, str]] = None
+_POOL_LOCK = Lock()
+
+
+def _parse_model_pools() -> Tuple[Dict[str, List[Tuple[str, int]]], Dict[str, str]]:
+    """Parse NADIRCLAW_MODEL_POOLS env var into pool + reverse-map.
 
     Format: "pool_name=model1,weight1+model2,weight2;pool_name2=..."
     Example: "turbo=gemini-2.5-flash,10+gpt-4.1-nano,5;reasoning=gpt-5.2,8+claude-opus-4-6-20250918,4"
     """
     raw = os.getenv("NADIRCLAW_MODEL_POOLS", "")
     if not raw:
-        return {}
+        return {}, {}
     pools: Dict[str, List[Tuple[str, int]]] = {}
+    reverse: Dict[str, str] = {}
     for pool_def in raw.split(";"):
         pool_def = pool_def.strip()
         if not pool_def or "=" not in pool_def:
@@ -55,18 +63,27 @@ def _parse_model_pools() -> Dict[str, List[Tuple[str, int]]]:
                 weight = 1
             if model_name:
                 entries.append((model_name, weight))
+                reverse[model_name] = pool_name
         if entries:
             pools[pool_name] = entries
-    return pools
+    return pools, reverse
 
 
-MODEL_POOLS: Dict[str, List[Tuple[str, int]]] = _parse_model_pools()
+def _ensure_pools_loaded() -> Tuple[Dict[str, List[Tuple[str, int]]], Dict[str, str]]:
+    """Lazily build and cache model pools on first routing call."""
+    global _MODEL_POOLS_CACHE, _MODEL_TO_POOL_CACHE
+    if _MODEL_POOLS_CACHE is None:
+        with _POOL_LOCK:
+            if _MODEL_POOLS_CACHE is None:
+                _MODEL_POOLS_CACHE, _MODEL_TO_POOL_CACHE = _parse_model_pools()
+    return _MODEL_POOLS_CACHE, _MODEL_TO_POOL_CACHE
 
-# Reverse map: model name → pool name
-_MODEL_TO_POOL: Dict[str, str] = {}
-for _pool_name, _models in MODEL_POOLS.items():
-    for _model_name, _ in _models:
-        _MODEL_TO_POOL[_model_name] = _pool_name
+
+def reload_pools() -> None:
+    """Force re-read of model pools from env (useful after serve --set)."""
+    global _MODEL_POOLS_CACHE, _MODEL_TO_POOL_CACHE
+    with _POOL_LOCK:
+        _MODEL_POOLS_CACHE, _MODEL_TO_POOL_CACHE = _parse_model_pools()
 
 
 def select_from_pool(pool_name: str) -> str:
@@ -76,14 +93,16 @@ def select_from_pool(pool_name: str) -> str:
         pool_name: Name of the pool (e.g., "turbo", "reasoning").
 
     Returns:
-        Selected model name, or the first model in the pool as fallback.
+        Selected model name.
+
+    Raises:
+        KeyError: If pool_name is not a configured pool.
     """
-    pool = MODEL_POOLS.get(pool_name)
+    pools, _ = _ensure_pools_loaded()
+    pool = pools.get(pool_name)
     if not pool:
-        logger.warning("Unknown model pool: %s", pool_name)
-        return ""
-    models, weights = zip(*pool)
-    total_weight = sum(weights)
+        raise KeyError(f"Unknown model pool: {pool_name!r}. Available: {list(pools.keys())}")
+    total_weight = sum(w for _, w in pool)
     r = random.randint(1, total_weight)
     cumulative = 0
     for model, weight in pool:
@@ -99,7 +118,8 @@ def select_from_pool(pool_name: str) -> str:
 
 def get_pool_for_model(model: str) -> Optional[str]:
     """Return the pool name for a given model, or None if not in any pool."""
-    return _MODEL_TO_POOL.get(model)
+    _, reverse = _ensure_pools_loaded()
+    return reverse.get(model)
 
 # ---------------------------------------------------------------------------
 # Model registry — context windows and capabilities
