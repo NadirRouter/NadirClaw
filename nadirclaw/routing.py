@@ -401,7 +401,7 @@ _REVIEW_MARKERS = re.compile(
 )
 
 
-def detect_code_review(prompt: str) -> Dict[str, Any]:
+def detect_code_review(prompt: str, system_message: str = "") -> Dict[str, Any]:
     """Detect code review/verification tasks.
 
     Returns {"is_review": bool, "confidence": float, "signals": list}.
@@ -409,7 +409,8 @@ def detect_code_review(prompt: str) -> Dict[str, Any]:
     confidence = 0.0
     signals: List[str] = []
 
-    if _REVIEW_MARKERS.search(prompt):
+    text = f"{system_message}\n{prompt}" if system_message else prompt
+    if _REVIEW_MARKERS.search(text):
         confidence = 0.90
         signals.append("review_keywords")
 

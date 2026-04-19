@@ -116,6 +116,20 @@ class TestDetectCodeReview:
         result = detect_code_review("Run static analysis on the PR")
         assert result["is_review"] is True
 
+    def test_review_keyword_in_system_message(self):
+        result = detect_code_review(
+            prompt="Check this file",
+            system_message="You are a code reviewer. Please review changes.",
+        )
+        assert result["is_review"] is True
+
+    def test_review_keyword_only_in_system(self):
+        result = detect_code_review(
+            prompt="Look at this code",
+            system_message="Perform a security audit on the provided code.",
+        )
+        assert result["is_review"] is True
+
 
 # --- Test helpers ---
 
