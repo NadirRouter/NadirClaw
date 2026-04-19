@@ -249,5 +249,25 @@ class Settings:
             models.append(self.SIMPLE_MODEL)
         return models
 
+    @property
+    def CONTEXT_COMPRESSION(self) -> bool:
+        """Enable context compression for long conversations."""
+        return os.getenv("NADIRCLAW_CONTEXT_COMPRESSION", "false").lower() in ("true", "1", "yes")
+
+    @property
+    def COMPRESS_MIN_MESSAGES(self) -> int:
+        """Minimum message count before compression kicks in."""
+        return int(os.getenv("NADIRCLAW_COMPRESS_MIN_MESSAGES", "30"))
+
+    @property
+    def COMPRESS_RECENT_WINDOW(self) -> int:
+        """Number of recent messages to preserve intact."""
+        return int(os.getenv("NADIRCLAW_COMPRESS_RECENT_WINDOW", "20"))
+
+    @property
+    def COMPRESS_TOOL_OUTPUT_MAX(self) -> int:
+        """Max characters for truncated tool output."""
+        return int(os.getenv("NADIRCLAW_COMPRESS_TOOL_MAX", "500"))
+
 
 settings = Settings()

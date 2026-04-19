@@ -6,53 +6,56 @@ losing active context.
 
 Designed to reduce token usage for long agentic sessions (e.g., Claude Code)
 where tool output can accumulate to hundreds of thousands of tokens.
+
+Configuration is read via Settings properties (not module-level env reads)
+so CLI ``serve --set`` overrides work correctly.
 """
 
-import json
+import hashlib
 import logging
-import os
+from threading import Lock
 from typing import Any, Dict, List, Tuple
+
+from nadirclaw.settings import settings
 
 logger = logging.getLogger("nadirclaw.compress")
 
-# Configuration via environment
-_COMPRESS_ENABLED = os.getenv("NADIRCLAW_CONTEXT_COMPRESSION", "false").lower() in ("true", "1", "yes")
-_COMPRESS_MIN_MESSAGES = int(os.getenv("NADIRCLAW_COMPRESS_MIN_MESSAGES", "30"))
-_COMPRESS_RECENT_WINDOW = int(os.getenv("NADIRCLAW_COMPRESS_RECENT_WINDOW", "20"))
-_COMPRESS_TOOL_OUTPUT_MAX = int(os.getenv("NADIRCLAW_COMPRESS_TOOL_MAX", "500"))
-
-# Cumulative statistics
+# Thread-safe cumulative statistics
+_stats_lock = Lock()
 _compression_stats: Dict[str, int] = {
     "total_requests_compressed": 0,
-    "total_tokens_before": 0,
-    "total_tokens_after": 0,
+    "total_chars_before": 0,
+    "total_chars_after": 0,
     "total_truncated": 0,
     "total_deduped": 0,
 }
 
 
 def is_compression_enabled() -> bool:
-    """Check if context compression is currently enabled."""
-    return _COMPRESS_ENABLED
+    return settings.CONTEXT_COMPRESSION
 
 
 def get_compression_stats() -> Dict[str, int]:
-    """Return cumulative compression statistics."""
-    return dict(_compression_stats)
+    with _stats_lock:
+        return dict(_compression_stats)
 
 
 def get_compression_config() -> Dict[str, Any]:
-    """Return current compression configuration."""
     return {
-        "enabled": _COMPRESS_ENABLED,
-        "min_messages": _COMPRESS_MIN_MESSAGES,
-        "recent_window": _COMPRESS_RECENT_WINDOW,
-        "tool_output_max": _COMPRESS_TOOL_OUTPUT_MAX,
+        "enabled": settings.CONTEXT_COMPRESSION,
+        "min_messages": settings.COMPRESS_MIN_MESSAGES,
+        "recent_window": settings.COMPRESS_RECENT_WINDOW,
+        "tool_output_max": settings.COMPRESS_TOOL_OUTPUT_MAX,
     }
 
 
+def _stable_hash(text: str) -> str:
+    """Deterministic hash for deduplication (stable across restarts)."""
+    return hashlib.md5(text.encode("utf-8", errors="replace")).hexdigest()
+
+
 def _is_tool_result_content(content: Any) -> bool:
-    """Check if content is a tool_result block (OpenAI or Claude Code format)."""
+    """Check if content contains tool_result blocks."""
     if isinstance(content, list):
         return any(
             isinstance(c, dict) and c.get("type") == "tool_result"
@@ -105,13 +108,9 @@ def _truncate_tool_result(content: Any, max_len: int) -> Tuple[Any, bool]:
     return new_blocks, truncated
 
 
-def _content_hash(content: Any) -> int:
-    """Generate a hash for deduplication of content."""
-    s = str(content)[:200]
-    return hash(s)
-
-
-def compress_messages(messages: List[Any]) -> Tuple[List[Any], Dict[str, Any]]:
+def compress_messages(
+    messages: List[Dict[str, Any]],
+) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
     """Compress conversation messages by truncating old tool output.
 
     Preserves:
@@ -123,26 +122,44 @@ def compress_messages(messages: List[Any]) -> Tuple[List[Any], Dict[str, Any]]:
     - Old tool_result content (truncated to max chars)
     - Consecutive duplicate tool outputs (deduplicated)
 
+    Note: Consecutive dedup means duplicates separated by a kept message
+    (e.g. a user turn between two identical tool outputs) will NOT be deduped.
+    This is intentional — the intermediate message may change interpretation.
+
     Args:
         messages: List of message dicts with role/content fields.
 
     Returns:
-        (compressed_messages, stats_dict)
+        (compressed_messages, stats_dict) where stats always contains
+        the full set of keys (compressed=False when below threshold).
     """
-    if len(messages) <= _COMPRESS_MIN_MESSAGES:
-        return messages, {"skipped": True}
+    min_messages = settings.COMPRESS_MIN_MESSAGES
+    recent_window = settings.COMPRESS_RECENT_WINDOW
+    tool_output_max = settings.COMPRESS_TOOL_OUTPUT_MAX
 
-    compressed = []
+    if len(messages) <= min_messages:
+        return messages, {
+            "compressed": False,
+            "messages_before": len(messages),
+            "messages_after": len(messages),
+            "truncated": 0,
+            "deduped": 0,
+            "chars_before": 0,
+            "chars_after": 0,
+            "compression_ratio": 1.0,
+        }
+
+    compressed: List[Dict[str, Any]] = []
     total_before = 0
     total_after = 0
     truncated_count = 0
     deduped_count = 0
-    prev_hash = None
+    last_kept_hash: str = ""
 
     for i, msg in enumerate(messages):
         role = msg.get("role", "")
         content = msg.get("content", "")
-        is_recent = i >= len(messages) - _COMPRESS_RECENT_WINDOW
+        is_recent = i >= len(messages) - recent_window
 
         # Check for tool_calls in content
         has_tool_calls = False
@@ -155,26 +172,26 @@ def compress_messages(messages: List[Any]) -> Tuple[List[Any], Dict[str, Any]]:
         # Always keep: recent, system/developer/user, messages with tool_calls
         if is_recent or role in ("system", "developer", "user") or has_tool_calls:
             compressed.append(msg)
-            total_before += len(str(content))
-            total_after += len(str(content))
+            content_str = str(content)
+            total_before += len(content_str)
+            total_after += len(content_str)
+            last_kept_hash = ""
             continue
 
         content_str = str(content)
         total_before += len(content_str)
 
-        # Dedup consecutive identical tool outputs
-        content_hash = _content_hash(content)
-        if content_hash == prev_hash and len(content_str) > 100:
+        # Dedup: skip consecutive identical old content
+        content_hash = _stable_hash(content_str[:200])
+        if last_kept_hash and content_hash == last_kept_hash and len(content_str) > 100:
             deduped_count += 1
-            prev_hash = content_hash
-            total_after += 0  # skipped
+            total_after += 0
             continue
-        prev_hash = content_hash
 
         # Truncate old tool_result content
         if _is_tool_result_content(content):
             new_content, was_truncated = _truncate_tool_result(
-                content, _COMPRESS_TOOL_OUTPUT_MAX
+                content, tool_output_max
             )
             if was_truncated:
                 truncated_count += 1
@@ -184,6 +201,7 @@ def compress_messages(messages: List[Any]) -> Tuple[List[Any], Dict[str, Any]]:
             else:
                 compressed.append(msg)
                 total_after += len(content_str)
+            last_kept_hash = content_hash
             continue
 
         # Old assistant messages with no tool calls — truncate if very long
@@ -193,12 +211,15 @@ def compress_messages(messages: List[Any]) -> Tuple[List[Any], Dict[str, Any]]:
             new_msg = {**msg, "content": f"{summary}\n... [truncated: {len(content_str)} chars]"}
             compressed.append(new_msg)
             total_after += len(new_msg["content"])
+            last_kept_hash = content_hash
             continue
 
         compressed.append(msg)
         total_after += len(content_str)
+        last_kept_hash = content_hash
 
     stats = {
+        "compressed": True,
         "messages_before": len(messages),
         "messages_after": len(compressed),
         "truncated": truncated_count,
@@ -208,11 +229,11 @@ def compress_messages(messages: List[Any]) -> Tuple[List[Any], Dict[str, Any]]:
         "compression_ratio": round(total_after / total_before, 2) if total_before > 0 else 1.0,
     }
 
-    # Update cumulative stats
-    _compression_stats["total_requests_compressed"] += 1
-    _compression_stats["total_tokens_before"] += total_before // 4
-    _compression_stats["total_tokens_after"] += total_after // 4
-    _compression_stats["total_truncated"] += truncated_count
-    _compression_stats["total_deduped"] += deduped_count
+    with _stats_lock:
+        _compression_stats["total_requests_compressed"] += 1
+        _compression_stats["total_chars_before"] += total_before
+        _compression_stats["total_chars_after"] += total_after
+        _compression_stats["total_truncated"] += truncated_count
+        _compression_stats["total_deduped"] += deduped_count
 
     return compressed, stats
