@@ -258,7 +258,22 @@ def detect_reasoning(prompt: str, system_message: str = "") -> Dict[str, Any]:
 
 # ---------------------------------------------------------------------------
 # Agent role detection — identify AI coding agent session types
+#
+# This feature is opt-in via NADIRCLAW_AGENT_ROLE_DETECTION=true.
+# It detects coding agent session types (planning, explore, subagent)
+# from system prompt markers. Currently tuned for Claude Code;
+# additional agent support welcome via PR.
+#
+# Markers are intentionally matched against system prompts only,
+# not user messages, to avoid false positives from career questions
+# or general discussion about software architecture.
 # ---------------------------------------------------------------------------
+
+# Named constants for session classification thresholds.
+# Claude Code's system prompt is ~35KB; Cursor varies.
+# Models with < MAIN_SESSION_MIN_CHARS are classified as subagents.
+MAIN_SESSION_MIN_CHARS = 15000  # chars — main session has long system prompt
+SHORT_SESSION_MAX_CHARS = 5000  # chars — likely a subagent/background task
 
 _PLANNING_MARKERS = re.compile(
     r"(plan\s*mode\s*is\s*active"
@@ -301,6 +316,8 @@ def detect_agent_role(
     Examines the system prompt for markers that indicate whether this is a
     planning session, an explore agent, a subagent, or a main execution session.
 
+    Currently tuned for Claude Code. Opt-in via NADIRCLAW_AGENT_ROLE_DETECTION=true.
+
     Returns {"role": str, "confidence": float, "signals": list[str]}.
     Role can be: "planning", "explore", "subagent", or "unknown".
     """
@@ -317,14 +334,14 @@ def detect_agent_role(
 
     # Distinguish subagents from main sessions.
     # Main sessions have long system prompts with extensive instructions.
-    is_main_session = len(system_prompt) > 15000
+    is_main_session = len(system_prompt) > MAIN_SESSION_MIN_CHARS
 
     if not is_main_session and _SUBAGENT_MARKERS.search(system_prompt):
         return {"role": "subagent", "confidence": 0.90, "signals": ["subagent_markers"]}
 
-    if not is_main_session and len(system_prompt) < 5000:
+    if not is_main_session and len(system_prompt) < SHORT_SESSION_MAX_CHARS:
         role = "subagent"
-        confidence = 0.50
+        confidence = 0.60  # Matches the routing threshold for subagent tier
         signals.append("short_system_prompt")
 
     return {"role": role, "confidence": confidence, "signals": signals}
@@ -673,12 +690,19 @@ def apply_routing_modifiers(
     tool_names = request_meta.get("tool_names", [])
     message_count = request_meta.get("message_count", 0)
 
-    agent_role = detect_agent_role(
-        system_prompt=system_text,
-        message_count=message_count,
-        tool_names=tool_names,
-    )
-    routing_info["agent_role"] = agent_role
+    # --- Agent role detection (opt-in) ---
+    # Detects coding agent session types (planning, explore, subagent).
+    # Disabled by default — enable with NADIRCLAW_AGENT_ROLE_DETECTION=true.
+    from nadirclaw.settings import settings as _settings
+    if _settings.AGENT_ROLE_DETECTION:
+        agent_role = detect_agent_role(
+            system_prompt=system_text,
+            message_count=message_count,
+            tool_names=tool_names,
+        )
+        routing_info["agent_role"] = agent_role
+    else:
+        routing_info["agent_role"] = {"role": "unknown", "confidence": 0.0, "signals": []}
 
     # --- Agentic detection ---
     agentic = detect_agentic(

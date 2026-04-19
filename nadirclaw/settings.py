@@ -249,5 +249,10 @@ class Settings:
             models.append(self.SIMPLE_MODEL)
         return models
 
+    @property
+    def AGENT_ROLE_DETECTION(self) -> bool:
+        """Enable agent role detection for coding agents (opt-in)."""
+        return os.getenv("NADIRCLAW_AGENT_ROLE_DETECTION", "false").lower() in ("true", "1", "yes")
+
 
 settings = Settings()
