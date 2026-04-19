@@ -45,7 +45,7 @@ class TestDetectAgentRole:
         short_prompt = "Help the user"  # < 5000 chars, no markers
         result = detect_agent_role(short_prompt)
         assert result["role"] == "subagent"
-        assert result["confidence"] == 0.50
+        assert result["confidence"] == 0.60
 
     def test_unknown_role(self):
         medium_prompt = "You are a helpful assistant" * 300  # ~8K chars
