@@ -53,15 +53,30 @@ _ANTHROPIC_NATIVE_PROVIDERS = set(_ANTHROPIC_COMPAT_PROVIDERS)
 def get_anthropic_compat_endpoint(
     provider: str,
 ) -> Optional[Tuple[str, str]]:
-    """Return (api_base, api_key) if the provider has an Anthropic-compatible endpoint."""
+    """Return (api_base, api_key) if the provider has an Anthropic-compatible endpoint.
+
+    Reads credentials from .env file directly to avoid override by process
+    environment variables (e.g., Claude Code injects ANTHROPIC_API_KEY=local).
+    """
     if provider not in _ANTHROPIC_COMPAT_PROVIDERS:
         return None
     base_env, key_env = _ANTHROPIC_COMPAT_PROVIDERS[provider]
-    api_base = os.getenv(base_env, "")
-    api_key = os.getenv(key_env, "")
+
+    # Read from .env file first (avoids process env overrides like "local")
+    from dotenv import dotenv_values
+    from pathlib import Path
+    _env_file = Path.home() / ".nadirclaw" / ".env"
+    file_vals = dotenv_values(_env_file) if _env_file.exists() else {}
+
+    api_base = file_vals.get(base_env, "") or os.getenv(base_env, "")
+    api_key = file_vals.get(key_env, "") or os.getenv(key_env, "")
+
+    # Sanity check: if api_key looks like a placeholder, skip direct path
+    if api_key in ("local", "dummy", "sk-placeholder", ""):
+        return None
+
     if not api_base or not api_key:
         return None
-    # Normalize: strip trailing slash to avoid double-slash issues
     api_base = api_base.rstrip("/")
     return api_base, api_key
 
@@ -113,7 +128,7 @@ async def call_anthropic_direct(
         headers["anthropic-beta"] = beta
 
     logger.debug("Direct Anthropic call: model=%s url=%s", model, url)
-    async with httpx.AsyncClient(timeout=settings.REQUEST_TIMEOUT) as client:
+    async with httpx.AsyncClient(timeout=timeout) as client:
         resp = await client.post(url, headers=headers, json=ant_body)
 
     if resp.status_code >= 400:
@@ -874,7 +889,7 @@ async def anthropic_messages(raw_request: Request):
                 reasoning_model=settings.REASONING_MODEL, free_model=settings.FREE_MODEL,
                 sonnet_model=settings.SONNET_MODEL,
                 explore_model=settings.EXPLORE_MODEL, subagent_model=settings.SUBAGENT_MODEL,
-                execution_model=settings.EXECUTION_MODEL, review_model=settings.REVIEW_MODEL,
+                review_model=settings.REVIEW_MODEL,
             )
             if final_tier != cached_tier:
                 analysis_info["tier"] = final_tier
@@ -891,7 +906,7 @@ async def anthropic_messages(raw_request: Request):
                 reasoning_model=settings.REASONING_MODEL, free_model=settings.FREE_MODEL,
                 sonnet_model=settings.SONNET_MODEL,
                 explore_model=settings.EXPLORE_MODEL, subagent_model=settings.SUBAGENT_MODEL,
-                execution_model=settings.EXECUTION_MODEL, review_model=settings.REVIEW_MODEL,
+                review_model=settings.REVIEW_MODEL,
             )
             analysis_info["tier"] = final_tier
             analysis_info["selected_model"] = selected_model
