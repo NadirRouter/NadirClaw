@@ -1256,16 +1256,31 @@ async def chat_completions(
         if settings.CONTEXT_COMPRESSION and len(request.messages) > settings.COMPRESS_MIN_MESSAGES:
             from nadirclaw.compress import compress_messages
 
-            raw_msgs = [
-                {"role": m.role, "content": m.text_content()}
-                for m in request.messages
-            ]
-            compressed_msgs, comp_stats = compress_messages(raw_msgs)
+            msg_dicts = []
+            for m in request.messages:
+                d: Dict[str, Any] = {"role": m.role, "content": m.content}
+                extra = m.model_extra or {}
+                if "tool_calls" in extra:
+                    d["tool_calls"] = extra["tool_calls"]
+                if "tool_call_id" in extra:
+                    d["tool_call_id"] = extra["tool_call_id"]
+                if "name" in extra:
+                    d["name"] = extra["name"]
+                msg_dicts.append(d)
+            compressed_msgs, comp_stats = compress_messages(msg_dicts)
             if comp_stats.get("compressed"):
-                rebuilt_msgs = [
-                    ChatMessage(role=m["role"], content=m["content"])
-                    for m in compressed_msgs
-                ]
+                rebuilt_msgs = []
+                for d in compressed_msgs:
+                    extras: Dict[str, Any] = {}
+                    if "tool_calls" in d:
+                        extras["tool_calls"] = d["tool_calls"]
+                    if "tool_call_id" in d:
+                        extras["tool_call_id"] = d["tool_call_id"]
+                    if "name" in d:
+                        extras["name"] = d["name"]
+                    rebuilt_msgs.append(
+                        ChatMessage(role=d["role"], content=d.get("content"), **extras)
+                    )
                 request = request.model_copy(update={"messages": rebuilt_msgs})
                 compression_info = comp_stats
                 logger.info(

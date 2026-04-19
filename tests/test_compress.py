@@ -6,7 +6,7 @@ from nadirclaw.compress import (
     compress_messages,
     _is_tool_result_content,
     _truncate_tool_result,
-    _content_hash,
+    _stable_hash,
 )
 
 
@@ -75,7 +75,7 @@ class TestCompressMessages:
         msgs = self._make_messages(10)
         result, stats = compress_messages(msgs)
         assert result == msgs
-        assert stats.get("skipped") is True
+        assert stats.get("compressed") is False
 
     def test_system_messages_always_preserved(self):
         msgs = [{"role": "system", "content": "system prompt"}]
@@ -105,9 +105,12 @@ class TestCompressMessages:
 
     def test_dedup_consecutive_identical(self):
         msgs = [{"role": "system", "content": "sys"}]
-        for i in range(15):
-            msgs.append({"role": "user", "content": f"q{i}"})
-            msgs.append({"role": "tool", "content": "IDENTICAL_LONG_OUTPUT" * 100})
+        long_output = "IDENTICAL_LONG_OUTPUT" * 100
+        # Consecutive identical assistant text messages get deduped
+        for i in range(10):
+            msgs.append({"role": "user", "content": "short question"})
+        for i in range(30):
+            msgs.append({"role": "assistant", "content": long_output})
         result, stats = compress_messages(msgs)
         assert stats["deduped"] > 0
 
@@ -115,11 +118,9 @@ class TestCompressMessages:
         msgs = [{"role": "system", "content": "sys"}]
         for i in range(40):
             msgs.append({"role": "user", "content": f"q{i}"})
-            msgs.append({"role": "tool", "content": "x" * 1000})
+            msgs.append({"role": "tool", "content": [{"type": "tool_result", "tool_use_id": f"call_{i}", "content": "x" * 1000}]})
         result, stats = compress_messages(msgs)
-        # Last 20 messages should be intact
         last_contents = [str(m.get("content", "")) for m in result[-20:]]
-        # None of the last 20 should have "truncated" in them
         truncated = [c for c in last_contents if "truncated" in c]
         assert len(truncated) == 0
 
@@ -127,7 +128,7 @@ class TestCompressMessages:
         msgs = [{"role": "system", "content": "sys"}]
         for i in range(25):
             msgs.append({"role": "user", "content": "question"})
-            msgs.append({"role": "tool", "content": "LARGE_OUTPUT" * 500})
+            msgs.append({"role": "tool", "content": [{"type": "tool_result", "tool_use_id": f"call_{i}", "content": "LARGE_OUTPUT" * 500}]})
         _, stats = compress_messages(msgs)
         assert "compression_ratio" in stats
         assert stats["compression_ratio"] < 1.0
