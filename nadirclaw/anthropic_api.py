@@ -169,12 +169,11 @@ _SYSTEM_REMINDER_RE = re.compile(
 )
 
 
-def _sanitize_response_text(response: Dict[str, Any]) -> Dict[str, Any]:
-    """Strip <system-reminder> blocks from text content in a response."""
-    for block in response.get("content", []):
-        if block.get("type") == "text" and block.get("text"):
-            block["text"] = _SYSTEM_REMINDER_RE.sub("", block["text"]).strip()
-    return response
+def _clean_display_text(text: str) -> str:
+    """Strip <system-reminder> blocks from text for log display."""
+    if not text:
+        return text
+    return _SYSTEM_REMINDER_RE.sub("", text).strip()
 
 
 def anthropic_response_to_stats(data: Dict[str, Any]) -> Dict[str, Any]:
@@ -606,6 +605,18 @@ def _extract_last_user_text(messages: List[Dict[str, Any]]) -> str:
             if parts:
                 return "\n".join(parts)
     return ""
+
+
+def _extract_response_text(data: Dict[str, Any]) -> str:
+    """Extract text from an Anthropic response for log display."""
+    parts = []
+    for block in data.get("content", []):
+        if block.get("type") == "text" and block.get("text"):
+            parts.append(block["text"])
+        elif block.get("type") == "tool_use":
+            parts.append(f"[tool:{block.get('name', '')}]")
+    text = "\n".join(parts)
+    return _clean_display_text(text)[:500]
 
 
 def _extract_anthropic_text(data: Dict[str, Any]) -> str:
@@ -1042,6 +1053,7 @@ async def anthropic_messages(raw_request: Request):
                         "type": "anthropic_messages",
                         "request_id": request_id,
                         "prompt": prompt_text[:2000],
+                        "response": _clean_display_text(response_data.get("content", ""))[:500],
                         "selected_model": final_model,
                         "tier": tier,
                         "fallback_used": fallback_from,
@@ -1092,6 +1104,7 @@ async def anthropic_messages(raw_request: Request):
                 "type": "anthropic_messages",
                 "request_id": request_id,
                 "prompt": prompt_text[:2000],
+                "response": _extract_response_text(raw_response),
                 "selected_model": final_model,
                 "tier": tier,
                 "fallback_used": fallback_from,
