@@ -33,6 +33,10 @@ logger = logging.getLogger("nadirclaw.anthropic_api")
 
 router = APIRouter()
 
+# Same limits as /v1/chat/completions (server.py)
+_MAX_CONTENT_LENGTH = 1_000_000  # 1 MB
+_MAX_ANTHROPIC_TOKENS = 128_000  # Cap for max_tokens parameter
+
 # Provider env-var mapping for Anthropic-compatible endpoints.
 # Format: provider_name → (api_base_env_var, api_key_env_var)
 _ANTHROPIC_COMPAT_PROVIDERS: Dict[str, Tuple[str, str]] = {
@@ -241,8 +245,14 @@ def anthropic_to_openai_messages(
 
 
 def anthropic_tools_to_openai(tools: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """Convert Anthropic tool definitions to OpenAI function format."""
+    """Convert Anthropic tool definitions to OpenAI function format.
+
+    Note: Anthropic built-in tools (bash_20250124, text_editor_20250124, etc.)
+    have no ``input_schema`` and are silently dropped. Only tools with
+    ``type="custom"`` or an explicit ``input_schema`` are forwarded.
+    """
     result = []
+    dropped = []
     for tool in tools:
         if tool.get("type") == "custom" or "input_schema" in tool:
             result.append({
@@ -253,6 +263,13 @@ def anthropic_tools_to_openai(tools: List[Dict[str, Any]]) -> List[Dict[str, Any
                     "parameters": tool.get("input_schema", {}),
                 },
             })
+        else:
+            dropped.append(tool.get("name", tool.get("type", "?")))
+    if dropped:
+        logger.warning(
+            "Dropped %d Anthropic built-in tools (no input_schema): %s",
+            len(dropped), dropped,
+        )
     return result
 
 
@@ -715,6 +732,17 @@ async def anthropic_messages(raw_request: Request):
     if settings.AUTH_TOKEN and effective_token != settings.AUTH_TOKEN:
         raise HTTPException(status_code=401, detail="Invalid API key")
 
+    # --- Rate limiting (parity with /v1/chat/completions) ---
+    from nadirclaw.server import _rate_limiter
+    user_id = effective_token or "anonymous"
+    retry_after = _rate_limiter.check(user_id)
+    if retry_after is not None:
+        raise HTTPException(
+            status_code=429,
+            detail=f"Rate limit exceeded. Retry after {retry_after}s.",
+            headers={"Retry-After": str(retry_after)},
+        )
+
     # Extract Anthropic fields
     ant_model = body.get("model", "")
     # ALL claude-* models → "auto" for smart routing (proven approach from 0.11.0)
@@ -724,6 +752,14 @@ async def anthropic_messages(raw_request: Request):
     ant_max_tokens = body.get("max_tokens", 4096)
     ant_tools = body.get("tools", [])
 
+    # Cap max_tokens to prevent abuse
+    if ant_max_tokens > _MAX_ANTHROPIC_TOKENS:
+        logger.warning(
+            "max_tokens=%d exceeds cap, clamping to %d",
+            ant_max_tokens, _MAX_ANTHROPIC_TOKENS,
+        )
+        ant_max_tokens = _MAX_ANTHROPIC_TOKENS
+
     prompt_text = _extract_last_user_text(body.get("messages", []))
 
     # Convert to OpenAI format
@@ -732,6 +768,19 @@ async def anthropic_messages(raw_request: Request):
         body.get("system"),
     )
     openai_tools = anthropic_tools_to_openai(ant_tools) if ant_tools else []
+
+    # --- Input size validation (parity with /v1/chat/completions) ---
+    total_content_len = sum(
+        len(m.get("content", "")) if isinstance(m.get("content"), str)
+        else len(json.dumps(m.get("content", "")))
+        for m in openai_messages
+    )
+    if total_content_len > _MAX_CONTENT_LENGTH:
+        raise HTTPException(
+            status_code=413,
+            detail=f"Request content too large ({total_content_len:,} chars). "
+                   f"Maximum is {_MAX_CONTENT_LENGTH:,} chars.",
+        )
 
     # Build ChatCompletionRequest
     chat_messages = []

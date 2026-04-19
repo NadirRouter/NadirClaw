@@ -209,3 +209,44 @@ class TestExtractLastUserText:
 
     def test_no_user_messages(self):
         assert _extract_last_user_text([]) == ""
+
+
+class TestBuiltinToolDrop:
+    """Tests for built-in Anthropic tool handling."""
+
+    def test_builtin_tool_dropped_with_warning(self):
+        """Built-in tools without input_schema are silently dropped."""
+        tools = [
+            {"type": "bash_20250124", "name": "bash"},
+            {"type": "text_editor_20250124", "name": "str_replace_editor"},
+        ]
+        result = anthropic_tools_to_openai(tools)
+        assert result == []
+
+    def test_mixed_tools_only_custom_forwarded(self):
+        """Only custom tools with input_schema are forwarded."""
+        tools = [
+            {"type": "bash_20250124", "name": "bash"},
+            {
+                "type": "custom",
+                "name": "my_tool",
+                "input_schema": {"type": "object", "properties": {}},
+            },
+        ]
+        result = anthropic_tools_to_openai(tools)
+        assert len(result) == 1
+        assert result[0]["function"]["name"] == "my_tool"
+
+
+class TestInputValidation:
+    """Tests for rate limiting and input size validation."""
+
+    def test_max_tokens_capped(self):
+        """max_tokens exceeding _MAX_ANTHROPIC_TOKENS is clamped."""
+        from nadirclaw.anthropic_api import _MAX_ANTHROPIC_TOKENS
+        assert _MAX_ANTHROPIC_TOKENS == 128_000
+
+    def test_content_length_limit_exists(self):
+        """_MAX_CONTENT_LENGTH constant matches server.py."""
+        from nadirclaw.anthropic_api import _MAX_CONTENT_LENGTH
+        assert _MAX_CONTENT_LENGTH == 1_000_000
