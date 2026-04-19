@@ -211,9 +211,8 @@ def _count_agentic_cycles(messages: List[Any]) -> int:
 # Reasoning detection
 # ---------------------------------------------------------------------------
 
-_REASONING_MARKERS = re.compile(
-    r"("
-    # English markers
+_REASONING_MARKERS_EN = re.compile(
+    r"\b("
     r"step[- ]by[- ]step"
     r"|think (?:through|carefully|deeply|about)"
     r"|chain[- ]of[- ]thought"
@@ -237,8 +236,13 @@ _REASONING_MARKERS = re.compile(
     r"|weigh (?:the )?(?:pros|cons|options|alternatives)"
     r"|architectural (?:decision|choice)"
     r"|design (?:a )?(?:system|architecture)"
-    # Chinese markers
-    r"|一步步"
+    r")\b",
+    re.IGNORECASE,
+)
+
+_REASONING_MARKERS_ZH = re.compile(
+    r"("
+    r"一步步"
     r"|逐步分析"
     r"|深入思考"
     r"|深入分析"
@@ -249,18 +253,33 @@ _REASONING_MARKERS = re.compile(
     r"|权衡.*优劣"
     r"|分析.*利弊"
     r"|批判性分析"
+    r"|证明以下"
+    r"|证明这个"
+    r"|推导公式"
+    r"|推导结论"
+    r"|详细解释.*原因"
+    r"|论证以下"
+    r"|论证这个"
+    r"|演绎推理"
+    r"|归纳推理"
+    r"|设计.*系统"
+    r"|设计.*方案"
     r")",
-    re.IGNORECASE,
 )
 
 
 def detect_reasoning(prompt: str, system_message: str = "") -> Dict[str, Any]:
     """Detect if a prompt requires reasoning capabilities.
 
+    Uses separate regexes for English (with \\b word boundaries) and Chinese
+    (without \\b, since CJK characters have no word boundaries).
+
     Returns {"is_reasoning": bool, "marker_count": int, "markers": list[str]}.
     """
     combined = f"{system_message} {prompt}"
-    matches = _REASONING_MARKERS.findall(combined)
+    en_matches = _REASONING_MARKERS_EN.findall(combined)
+    zh_matches = _REASONING_MARKERS_ZH.findall(combined)
+    matches = list(set(en_matches + zh_matches))
     marker_count = len(matches)
 
     # 2+ markers = high confidence reasoning (like ClawRouter)
@@ -269,7 +288,7 @@ def detect_reasoning(prompt: str, system_message: str = "") -> Dict[str, Any]:
     return {
         "is_reasoning": is_reasoning,
         "marker_count": marker_count,
-        "markers": list(set(matches)),
+        "markers": matches,
     }
 
 
