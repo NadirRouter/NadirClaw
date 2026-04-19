@@ -239,10 +239,13 @@ _REASONING_MARKERS = re.compile(
 def detect_reasoning(prompt: str, system_message: str = "") -> Dict[str, Any]:
     """Detect if a prompt requires reasoning capabilities.
 
+    Only checks the user prompt, NOT the system message.
+    System messages in Claude Code contain many reasoning-related instructions
+    that would cause false positives for every request.
+
     Returns {"is_reasoning": bool, "marker_count": int, "markers": list[str]}.
     """
-    combined = f"{system_message} {prompt}"
-    matches = _REASONING_MARKERS.findall(combined)
+    matches = _REASONING_MARKERS.findall(prompt)
     marker_count = len(matches)
 
     # 2+ markers = high confidence reasoning (like ClawRouter)
