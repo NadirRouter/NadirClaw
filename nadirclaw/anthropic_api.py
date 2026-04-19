@@ -943,7 +943,22 @@ async def anthropic_messages(raw_request: Request):
             final_model = selected_model
 
             # Build candidate list: primary + fallback chain
+            # When tools are present, prefer direct-Anthropic candidates (better
+            # tool-call schema adherence) over LiteLLM candidates like gpt-5.4
+            # which may mangle parameter names (e.g., taskId vs task_id).
+            has_tools = bool(openai_tools)
             candidates = [selected_model] + fallback_chain
+            if has_tools:
+                anthropic_candidates = []
+                litellm_candidates = []
+                for c in candidates:
+                    cp = detect_provider(c)
+                    ce = get_anthropic_compat_endpoint(cp) if cp else None
+                    if ce:
+                        anthropic_candidates.append(c)
+                    else:
+                        litellm_candidates.append(c)
+                candidates = anthropic_candidates + litellm_candidates
 
             for candidate_model in candidates:
                 candidate_provider = detect_provider(candidate_model)
