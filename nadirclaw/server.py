@@ -10,6 +10,7 @@ import collections
 import json
 import logging
 import os
+import re
 import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
@@ -179,8 +180,27 @@ class ClassifyBatchRequest(BaseModel):
 _log_lock = Lock()
 
 
+_SYSTEM_REMINDER_RE = re.compile(
+    r"<system-reminder>.*?</system-reminder>",
+    re.DOTALL,
+)
+
+
+def _clean_display_text(text: str) -> str:
+    """Strip <system-reminder> blocks from text for log display."""
+    if not text:
+        return text
+    return _SYSTEM_REMINDER_RE.sub("", text).strip()
+
+
 def _log_request(entry: Dict[str, Any]) -> None:
     """Append a JSON line to the request log and print to console."""
+    # Clean display-only fields
+    if "prompt" in entry:
+        entry["prompt"] = _clean_display_text(entry["prompt"])
+    if "system_prompt_text" in entry:
+        entry["system_prompt_text"] = _clean_display_text(entry["system_prompt_text"])
+
     log_dir = settings.LOG_DIR
     log_dir.mkdir(parents=True, exist_ok=True)
     request_log = log_dir / "requests.jsonl"
@@ -210,6 +230,72 @@ def _log_request(entry: Dict[str, Any]) -> None:
         "%-8s model=%-35s conf=%.3f score=%.2f lat=%sms total=%sms  \"%s\"",
         tier, model, conf, score, latency, total, prompt_preview,
     )
+
+
+def _extract_conversation_snippet(messages: list, max_chars: int = 300) -> str:
+    """Extract the latest conversation context for dashboard display.
+
+    Takes the last few messages (user/assistant), strips system-reminder tags,
+    and returns a snippet that shows what the conversation is about.
+    """
+    import re as _re
+
+    # Collect last N non-system messages with their roles
+    recent = []
+    for m in reversed(messages):
+        if m.role in ("system", "developer"):
+            continue
+        text = m.text_content() if hasattr(m, "text_content") else str(m.content)
+        if text:
+            recent.append((m.role, text))
+        if len(recent) >= 4:
+            break
+    recent.reverse()
+
+    # Format: "asst: ... | user: ..."
+    parts = []
+    for role, text in recent:
+        clean = _re.sub(r'<system-reminder>.*?</system-reminder>', '', text, flags=_re.DOTALL).strip()
+        if not clean:
+            continue
+        label = "u" if role == "user" else "a"
+        parts.append(f"{label}: {clean}")
+    snippet = " | ".join(parts)
+    return snippet[:max_chars]
+
+
+def _extract_conversation_snippet_from_dicts(messages: list, max_chars: int = 300) -> str:
+    """Extract conversation snippet from Anthropic-style message dicts."""
+    import re as _re
+
+    recent = []
+    for m in reversed(messages):
+        role = m.get("role", "")
+        if role in ("system", "developer"):
+            continue
+        content = m.get("content", "")
+        if isinstance(content, list):
+            text = " ".join(
+                b.get("text", "") for b in content
+                if isinstance(b, dict) and b.get("type") == "text"
+            )
+        else:
+            text = str(content)
+        if text.strip():
+            recent.append((role, text.strip()))
+        if len(recent) >= 4:
+            break
+    recent.reverse()
+
+    parts = []
+    for role, text in recent:
+        clean = _re.sub(r'<system-reminder>.*?</system-reminder>', '', text, flags=_re.DOTALL).strip()
+        if not clean:
+            continue
+        label = "u" if role == "user" else "a"
+        parts.append(f"{label}: {clean}")
+    snippet = " | ".join(parts)
+    return snippet[:max_chars]
 
 
 def _extract_request_metadata(request: ChatCompletionRequest) -> Dict[str, Any]:
@@ -338,16 +424,44 @@ async def startup():
 # Smart routing internals
 # ---------------------------------------------------------------------------
 
+_REASONING_KEYWORDS = re.compile(
+    r"step\s+by\s+step|pros?\s+and\s+cons?|一步步|优缺点|分析|推理|compare|evaluate|reason",
+    re.IGNORECASE,
+)
+
+
+def _heuristic_route(prompt: str) -> dict:
+    """Fallback routing when ML classifier is unavailable."""
+    text = prompt.lower()
+    if _REASONING_KEYWORDS.search(text):
+        return {
+            "tier_name": "complex",
+            "complexity_score": 0.8,
+            "confidence": 0.6,
+            "analyzer_type": "heuristic",
+        }
+    return {
+        "tier_name": "simple",
+        "complexity_score": 0.2,
+        "confidence": 0.6,
+        "analyzer_type": "heuristic",
+    }
+
+
 async def _smart_route_analysis(
     prompt: str, system_message: str, user: UserSession
 ) -> tuple:
     """Run classifier, return (selected_model, analysis_dict). No LLM call."""
-    from nadirclaw.classifier import get_binary_classifier
     from nadirclaw.telemetry import trace_span
 
     with trace_span("smart_route_analysis") as span:
-        analyzer = get_binary_classifier()
-        result = await analyzer.analyze(text=prompt, system_message=system_message)
+        try:
+            from nadirclaw.classifier import get_binary_classifier
+            analyzer = get_binary_classifier()
+            result = await analyzer.analyze(text=prompt, system_message=system_message)
+        except Exception as e:
+            logger.warning("Classifier unavailable, using heuristic routing: %s", e)
+            result = _heuristic_route(prompt)
 
         tier_name = result.get("tier_name", "simple")
         if tier_name == "complex":
@@ -767,9 +881,16 @@ async def _call_litellm(
         litellm_model = "ollama_chat/" + litellm_model.removeprefix("ollama/")
         logger.debug("Upgraded ollama → ollama_chat for tool support: %s", litellm_model)
 
+    # vLLM does not support tool_choice="auto" — strip tools when routing to vLLM
+    if litellm_model.startswith("hosted_vllm/") and req_extra.get("tools"):
+        req_extra = {k: v for k, v in req_extra.items() if k not in ("tools", "tool_choice")}
+        logger.debug("Stripped tools for vLLM fallback: %s", litellm_model)
+
     # Preserve full message structure (tool_calls, tool_call_id, name, etc.)
+    # Ensure tool-role messages always have tool_call_id (LiteLLM's Anthropic
+    # converter crashes with KeyError if missing).
     messages = []
-    for message in request.messages:
+    for idx, message in enumerate(request.messages):
         # Preserve multimodal content arrays (image_url parts) as-is.
         if isinstance(message.content, list):
             content = message.content
@@ -780,7 +901,9 @@ async def _call_litellm(
         extra_fields = message.model_extra or {}
         if "tool_calls" in extra_fields:
             msg["tool_calls"] = extra_fields["tool_calls"]
-        if "tool_call_id" in extra_fields:
+        if message.role == "tool":
+            msg["tool_call_id"] = extra_fields.get("tool_call_id", f"call_{idx}")
+        elif "tool_call_id" in extra_fields:
             msg["tool_call_id"] = extra_fields["tool_call_id"]
         if "name" in extra_fields:
             msg["name"] = extra_fields["name"]
@@ -795,7 +918,8 @@ async def _call_litellm(
         call_kwargs["top_p"] = request.top_p
 
     # Pass through tool definitions, tool_choice, and thinking/reasoning params
-    extra = request.model_extra or {}
+    # Use req_extra (which may have tools stripped for vLLM) instead of raw model_extra
+    extra = req_extra
     if extra.get("tools"):
         call_kwargs["tools"] = extra["tools"]
     if extra.get("tool_choice"):
@@ -807,9 +931,59 @@ async def _call_litellm(
     if extra.get("response_format"):
         call_kwargs["response_format"] = extra["response_format"]
 
+    # vLLM enable_thinking: enable reasoning mode for tool-use or reasoning prompts
+    if litellm_model.startswith("hosted_vllm/"):
+        has_tools = bool(extra.get("tools"))
+        enable_thinking = has_tools
+        if not has_tools:
+            last_user_text = ""
+            for m in reversed(messages):
+                if m.get("role") == "user":
+                    last_user_text = str(m.get("content", ""))
+                    break
+            reasoning_keywords = [
+                "step by step", "think through", "analyze", "reasoning",
+                "一步步", "分析", "推理", "为什么", "how to", "explain",
+                "calculate", "solve", "math", "code", "function", "algorithm",
+            ]
+            if any(kw in last_user_text.lower() for kw in reasoning_keywords):
+                enable_thinking = True
+        call_kwargs["extra_body"] = {
+            "chat_template_kwargs": {"enable_thinking": enable_thinking}
+        }
+
     if cred_provider and cred_provider != "ollama":
         api_key = get_credential(cred_provider)
+        # OpenAI models via PPChat proxy: set api_base and reuse Anthropic key if needed
+        if cred_provider == "openai":
+            openai_base = os.getenv("OPENAI_API_BASE", "")
+            if openai_base:
+                call_kwargs["api_base"] = openai_base
+            if not api_key:
+                api_key = get_credential("anthropic")
         if api_key:
+            # Set api_base for providers that need it
+            if cred_provider == "zai":
+                zai_base = os.getenv("ZAI_API_BASE", "")
+                if zai_base:
+                    call_kwargs["api_base"] = zai_base
+                    if not litellm_model.startswith("anthropic/"):
+                        litellm_model = f"anthropic/{litellm_model}"
+                        call_kwargs["model"] = litellm_model
+            elif cred_provider == "minimax":
+                minimax_base = os.getenv("MINIMAX_API_BASE", "")
+                if minimax_base:
+                    call_kwargs["api_base"] = minimax_base
+                    if not litellm_model.startswith("anthropic/"):
+                        litellm_model = f"anthropic/{litellm_model}"
+                        call_kwargs["model"] = litellm_model
+            elif cred_provider == "kimi":
+                kimi_base = os.getenv("KIMI_API_BASE", "")
+                if kimi_base:
+                    call_kwargs["api_base"] = kimi_base
+                    if not litellm_model.startswith("anthropic/"):
+                        litellm_model = f"anthropic/{litellm_model}"
+                        call_kwargs["model"] = litellm_model
             # Anthropic OAuth/setup-tokens (sk-ant-oat*) require Bearer auth
             # and the oauth-2025-04-20 beta header. Bypass LiteLLM and call
             # the Anthropic API directly since LiteLLM uses x-api-key.
@@ -897,14 +1071,77 @@ async def _call_litellm(
     elif settings.API_BASE and "api_base" not in call_kwargs:
         call_kwargs["api_base"] = settings.API_BASE
 
-    logger.debug("Calling LiteLLM: model=%s (provider=%s)", litellm_model, provider)
+    logger.debug("Calling LiteLLM: model=%s (provider=%s) api_base=%s", litellm_model, provider, call_kwargs.get("api_base", "none"))
     try:
         response = await litellm.acompletion(**call_kwargs)
     except Exception as e:
-        # Catch rate limit errors from any provider through LiteLLM
-        err_str = str(e).lower()
-        if "429" in err_str or "rate" in err_str or "quota" in err_str or "resource_exhausted" in err_str:
-            logger.warning("LiteLLM 429 rate limit for model=%s: %s", litellm_model, e)
+        # PPChat temporary overload: "负载已饱和" is transient, retry once after short delay
+        err_str_full = str(e)
+        if "负载已饱和" in err_str_full or "upstream load" in err_str_full.lower():
+            logger.warning("PPChat temporary overload for model=%s, retrying in 3s...", litellm_model)
+            await asyncio.sleep(3)
+            try:
+                response = await litellm.acompletion(**call_kwargs)
+            except Exception as e2:
+                e = e2  # Use second error for classification below
+            else:
+                # Retry succeeded
+                msg = response.choices[0].message
+                result: dict[str, Any] = {
+                    "content": msg.content,
+                    "finish_reason": response.choices[0].finish_reason or "stop",
+                    "prompt_tokens": response.usage.prompt_tokens if response.usage else 0,
+                    "completion_tokens": response.usage.completion_tokens if response.usage else 0,
+                }
+                tool_calls = getattr(msg, "tool_calls", None)
+                if tool_calls:
+                    result["tool_calls"] = [
+                        tc.model_dump() if hasattr(tc, "model_dump") else tc
+                        for tc in tool_calls
+                    ]
+                reasoning_content = getattr(msg, "reasoning_content", None)
+                if isinstance(reasoning_content, str) and reasoning_content:
+                    result["reasoning_content"] = reasoning_content
+                thinking = getattr(msg, "thinking", None)
+                if isinstance(thinking, str) and thinking:
+                    result["thinking"] = thinking
+                result["model"] = getattr(response, "model", litellm_model)
+                return result
+        # Catch rate limit errors from any provider through LiteLLM.
+        # Only check the exception type/message, NOT the full message dump
+        # (LiteLLM appends "Received Messages=..." which may contain "rate"
+        # from the system prompt, causing false positives).
+        err_class = type(e).__name__.lower()
+        err_msg = str(e).split("\n")[0].lower() if str(e) else ""
+        err_str_full = str(e)
+
+        # PPChat quota exhaustion detection (Chinese error patterns from proxy)
+        is_ppchat_quota = (
+            ("quota" in err_msg and ("exceeded" in err_msg or "exhausted" in err_msg or "insufficient" in err_msg))
+            or ("配额" in err_str_full and ("耗尽" in err_str_full or "不足" in err_str_full))
+            or ("令牌" in err_str_full and "额度" in err_str_full and "用尽" in err_str_full)
+            or "额度已用尽" in err_str_full
+            or "insufficient_quota" in err_msg
+            or "billing_not_active" in err_msg
+            or ("shell_api_error" in err_str_full and "额度" in err_str_full)
+        )
+        if is_ppchat_quota and provider in ("anthropic", "openai"):
+            from nadirclaw.quota import get_quota_tracker
+            quota = get_quota_tracker()
+            quota.suspend_provider("ppchat")
+            logger.warning("PPChat quota exhausted, suspending provider: %s", str(e)[:200])
+            raise RateLimitExhausted(model=model, retry_after=3600)
+
+        is_rate_limit = (
+            "429" in err_msg
+            or "rate_limit" in err_msg
+            or "rate limit" in err_msg
+            or "resource_exhausted" in err_msg
+            or "insufficient_quota" in err_msg
+            or ("quota" in err_msg and ("exceeded" in err_msg or "exhausted" in err_msg))
+        )
+        if is_rate_limit:
+            logger.warning("LiteLLM rate limit for model=%s: %s", litellm_model, str(e)[:200])
             raise RateLimitExhausted(model=model, retry_after=60)
         raise
 
@@ -1107,9 +1344,9 @@ async def chat_completions(
     request_id = str(uuid.uuid4())
 
     try:
-        # Extract prompt for logging
-        user_msgs = [m.text_content() for m in request.messages if m.role == "user"]
-        prompt_text = user_msgs[-1] if user_msgs else ""
+        # Extract prompt for logging — show latest conversation context
+        import re as _re
+        prompt_text = _extract_conversation_snippet(request.messages)
 
         # Extract request metadata for enhanced logging
         req_meta = _extract_request_metadata(request)
@@ -1222,6 +1459,57 @@ async def chat_completions(
                 session_cache.put(request.messages, selected_model, final_tier)
 
         # ------------------------------------------------------------------
+        # Model pool selection — weighted random for non-critical tiers
+        # Skip pool when user explicitly specifies a model (not "auto")
+        # ------------------------------------------------------------------
+        _pool_tier = analysis_info.get("tier", "")
+        _is_explicit_model = request.model and request.model not in ("auto", "eco", "premium", "free", "reasoning")
+        if not _is_explicit_model and _pool_tier not in ("sonnet", "reasoning", "reasoning_sonnet", "review", "long_context"):
+            from nadirclaw.routing import get_pool_for_model, select_from_pool
+            pool_name = get_pool_for_model(selected_model)
+            if pool_name:
+                pool_model = select_from_pool(pool_name)
+                if pool_model:
+                    logger.info("Pool %s: %s → %s", pool_name, selected_model, pool_model)
+                    selected_model = pool_model
+
+        # ------------------------------------------------------------------
+        # Context compression — truncate old tool output for long sessions
+        # ------------------------------------------------------------------
+        if getattr(settings, 'CONTEXT_COMPRESSION', False):
+            from nadirclaw.compress import compress_messages
+            if len(request.messages) > 30:
+                # Preserve tool_calls, tool_call_id, name from model_extra
+                msg_dicts = []
+                for m in request.messages:
+                    d = {"role": m.role, "content": m.content}
+                    extra = m.model_extra or {}
+                    if "tool_calls" in extra:
+                        d["tool_calls"] = extra["tool_calls"]
+                    if "tool_call_id" in extra:
+                        d["tool_call_id"] = extra["tool_call_id"]
+                    if "name" in extra:
+                        d["name"] = extra["name"]
+                    msg_dicts.append(d)
+                compressed, comp_stats = compress_messages(msg_dicts)
+                if comp_stats.get("compressed", False):
+                    logger.info("Context compression: %d→%d msgs, ratio=%.2f",
+                               comp_stats["messages_before"], comp_stats["messages_after"],
+                               comp_stats["compression_ratio"])
+                    new_msgs = []
+                    for d in compressed:
+                        extras = {}
+                        if "tool_calls" in d:
+                            extras["tool_calls"] = d["tool_calls"]
+                        if "tool_call_id" in d:
+                            extras["tool_call_id"] = d["tool_call_id"]
+                        if "name" in d:
+                            extras["name"] = d["name"]
+                        cm = ChatMessage(role=d["role"], content=d.get("content"), **extras)
+                        new_msgs.append(cm)
+                    request.messages = new_msgs
+
+        # ------------------------------------------------------------------
         # Context optimization — compact messages before dispatch
         # ------------------------------------------------------------------
         optimize_mode = (request.model_extra or {}).get("optimize") or settings.OPTIMIZE
@@ -1315,7 +1603,7 @@ async def chat_completions(
                     "total_tokens": stream_usage["prompt_tokens"] + stream_usage["completion_tokens"],
                     "cost": budget_status["cost"],
                     "daily_spend": budget_status["daily_spend"],
-                    "response_preview": "[streamed]",
+                    "response_preview": _stream_analysis.get("_stream_content_preview", "[streamed]")[:200],
                     "fallback_used": _stream_analysis.get("fallback_from"),
                     "streaming": True,
                     "status": "error" if _stream_analysis.get("_stream_error") else "ok",
@@ -1580,8 +1868,12 @@ async def _stream_litellm(
     if litellm_model.startswith("ollama/") and req_extra.get("tools"):
         litellm_model = "ollama_chat/" + litellm_model.removeprefix("ollama/")
 
+    # vLLM does not support tool_choice="auto" — strip tools
+    if litellm_model.startswith("hosted_vllm/") and req_extra.get("tools"):
+        req_extra = {k: v for k, v in req_extra.items() if k not in ("tools", "tool_choice")}
+
     messages = []
-    for message in request.messages:
+    for idx, message in enumerate(request.messages):
         if isinstance(message.content, list):
             content = message.content
         else:
@@ -1591,7 +1883,9 @@ async def _stream_litellm(
         extra_fields = message.model_extra or {}
         if "tool_calls" in extra_fields:
             msg["tool_calls"] = extra_fields["tool_calls"]
-        if "tool_call_id" in extra_fields:
+        if message.role == "tool":
+            msg["tool_call_id"] = extra_fields.get("tool_call_id", f"call_{idx}")
+        elif "tool_call_id" in extra_fields:
             msg["tool_call_id"] = extra_fields["tool_call_id"]
         if "name" in extra_fields:
             msg["name"] = extra_fields["name"]
@@ -1610,7 +1904,7 @@ async def _stream_litellm(
     if request.top_p is not None:
         call_kwargs["top_p"] = request.top_p
 
-    extra = request.model_extra or {}
+    extra = req_extra
     if extra.get("tools"):
         call_kwargs["tools"] = extra["tools"]
     if extra.get("tool_choice"):
@@ -1622,9 +1916,57 @@ async def _stream_litellm(
     if extra.get("response_format"):
         call_kwargs["response_format"] = extra["response_format"]
 
+    # vLLM enable_thinking: enable reasoning mode for tool-use or reasoning prompts
+    if litellm_model.startswith("hosted_vllm/"):
+        has_tools = bool(extra.get("tools"))
+        enable_thinking = has_tools
+        if not has_tools:
+            last_user_text = ""
+            for m in reversed(messages):
+                if m.get("role") == "user":
+                    last_user_text = str(m.get("content", ""))
+                    break
+            reasoning_keywords = [
+                "step by step", "think through", "analyze", "reasoning",
+                "一步步", "分析", "推理", "为什么", "how to", "explain",
+                "calculate", "solve", "math", "code", "function", "algorithm",
+            ]
+            if any(kw in last_user_text.lower() for kw in reasoning_keywords):
+                enable_thinking = True
+        call_kwargs["extra_body"] = {
+            "chat_template_kwargs": {"enable_thinking": enable_thinking}
+        }
+
     if cred_provider and cred_provider != "ollama":
         api_key = get_credential(cred_provider)
+        if cred_provider == "openai":
+            openai_base = os.getenv("OPENAI_API_BASE", "")
+            if openai_base:
+                call_kwargs["api_base"] = openai_base
+            if not api_key:
+                api_key = get_credential("anthropic")
         if api_key:
+            if cred_provider == "zai":
+                zai_base = os.getenv("ZAI_API_BASE", "")
+                if zai_base:
+                    call_kwargs["api_base"] = zai_base
+                    if not litellm_model.startswith("anthropic/"):
+                        litellm_model = f"anthropic/{litellm_model}"
+                        call_kwargs["model"] = litellm_model
+            elif cred_provider == "minimax":
+                minimax_base = os.getenv("MINIMAX_API_BASE", "")
+                if minimax_base:
+                    call_kwargs["api_base"] = minimax_base
+                    if not litellm_model.startswith("anthropic/"):
+                        litellm_model = f"anthropic/{litellm_model}"
+                        call_kwargs["model"] = litellm_model
+            elif cred_provider == "kimi":
+                kimi_base = os.getenv("KIMI_API_BASE", "")
+                if kimi_base:
+                    call_kwargs["api_base"] = kimi_base
+                    if not litellm_model.startswith("anthropic/"):
+                        litellm_model = f"anthropic/{litellm_model}"
+                        call_kwargs["model"] = litellm_model
             call_kwargs["api_key"] = api_key
 
     if litellm_model.startswith("ollama/") or litellm_model.startswith("ollama_chat/"):
@@ -1635,10 +1977,49 @@ async def _stream_litellm(
     try:
         response = await litellm.acompletion(**call_kwargs)
     except Exception as e:
-        err_str = str(e).lower()
-        if "429" in err_str or "rate" in err_str or "quota" in err_str or "resource_exhausted" in err_str:
-            raise RateLimitExhausted(model=model, retry_after=60)
-        raise
+        # PPChat temporary overload: retry once
+        err_str_full = str(e)
+        if "负载已饱和" in err_str_full or "upstream load" in err_str_full.lower():
+            logger.warning("PPChat temporary overload (stream) for model=%s, retrying in 3s...", litellm_model)
+            await asyncio.sleep(3)
+            try:
+                response = await litellm.acompletion(**call_kwargs)
+            except Exception as e2:
+                e = e2
+            else:
+                # Retry succeeded — fall through to normal streaming
+                pass
+        else:
+            # Not a temporary overload — classify the error
+            err_msg = err_str_full.split("\n")[0].lower() if err_str_full else ""
+
+            # PPChat quota exhaustion detection
+            is_ppchat_quota = (
+                ("quota" in err_msg and ("exceeded" in err_msg or "exhausted" in err_msg or "insufficient" in err_msg))
+                or ("配额" in err_str_full and ("耗尽" in err_str_full or "不足" in err_str_full))
+                or ("令牌" in err_str_full and "额度" in err_str_full and "用尽" in err_str_full)
+                or "额度已用尽" in err_str_full
+                or "insufficient_quota" in err_msg
+                or "billing_not_active" in err_msg
+                or ("shell_api_error" in err_str_full and "额度" in err_str_full)
+            )
+            if is_ppchat_quota and provider in ("anthropic", "openai"):
+                from nadirclaw.quota import get_quota_tracker
+                quota = get_quota_tracker()
+                quota.suspend_provider("ppchat")
+                raise RateLimitExhausted(model=model, retry_after=3600)
+
+            is_rate_limit = (
+                "429" in err_msg
+                or "rate_limit" in err_msg
+                or "rate limit" in err_msg
+                or "resource_exhausted" in err_msg
+                or "insufficient_quota" in err_msg
+                or ("quota" in err_msg and ("exceeded" in err_msg or "exhausted" in err_msg))
+            )
+            if is_rate_limit:
+                raise RateLimitExhausted(model=model, retry_after=60)
+            raise
 
     async for chunk in response:
         usage = None
@@ -1861,6 +2242,7 @@ async def _stream_with_fallback(
         content_started = False
         accumulated_usage = {"prompt_tokens": 0, "completion_tokens": 0}
         last_finish = None
+        stream_content_parts: list[str] = []
 
         try:
             first_chunk = True
@@ -1872,6 +2254,10 @@ async def _stream_with_fallback(
 
                 if not delta_dict:
                     continue
+
+                # Collect content for preview
+                if "content" in delta_dict and delta_dict["content"]:
+                    stream_content_parts.append(delta_dict["content"])
 
                 # Add role on first content chunk
                 if first_chunk and "role" not in delta_dict:
@@ -1912,6 +2298,7 @@ async def _stream_with_fallback(
                 analysis_info["strategy"] = analysis_info.get("strategy", "smart-routing") + "+fallback"
             analysis_info["_stream_model"] = model
             analysis_info["_stream_usage"] = accumulated_usage
+            analysis_info["_stream_content_preview"] = "".join(stream_content_parts)[:500]
             return  # Success
 
         except (RateLimitExhausted, Exception) as e:
@@ -2089,3 +2476,783 @@ async def root():
         "description": "Open-source LLM router",
         "status": "ok",
     }
+
+
+# ---------------------------------------------------------------------------
+# /v1/messages — Anthropic Messages API compatibility layer
+# ---------------------------------------------------------------------------
+
+def _anthropic_to_openai_messages(
+    messages: List[Dict[str, Any]],
+    system: Optional[Union[str, List[Dict[str, Any]]]] = None,
+) -> List[ChatMessage]:
+    """Convert Anthropic Messages API format to OpenAI ChatMessage format."""
+    result = []
+
+    if system:
+        if isinstance(system, str):
+            result.append(ChatMessage(role="system", content=system))
+        elif isinstance(system, list):
+            text_parts = []
+            for block in system:
+                if isinstance(block, dict) and block.get("type") == "text":
+                    text_parts.append(block.get("text", ""))
+            if text_parts:
+                result.append(ChatMessage(role="system", content="\n".join(text_parts)))
+
+    for msg in messages:
+        role = msg.get("role", "user")
+        content = msg.get("content", "")
+
+        if role == "assistant":
+            if isinstance(content, list):
+                text_parts = []
+                tool_calls = []
+                for i, block in enumerate(content):
+                    if isinstance(block, dict):
+                        if block.get("type") == "text":
+                            text_parts.append(block.get("text", ""))
+                        elif block.get("type") == "tool_use":
+                            tool_calls.append({
+                                "id": block.get("id", f"call_{i}"),
+                                "type": "function",
+                                "function": {
+                                    "name": block.get("name", ""),
+                                    "arguments": json.dumps(block.get("input", {})),
+                                },
+                            })
+                text = "\n".join(text_parts) if text_parts else None
+                if tool_calls:
+                    result.append(ChatMessage(role="assistant", content=text, tool_calls=tool_calls))
+                else:
+                    result.append(ChatMessage(role="assistant", content=text))
+            else:
+                result.append(ChatMessage(role="assistant", content=content))
+
+        elif role == "user":
+            if isinstance(content, list):
+                text_parts = []
+                for block in content:
+                    if isinstance(block, dict):
+                        if block.get("type") == "text":
+                            text_parts.append(block.get("text", ""))
+                        elif block.get("type") == "tool_result":
+                            tool_content = block.get("content", "")
+                            if isinstance(tool_content, list):
+                                tc_texts = [
+                                    tc.get("text", "")
+                                    for tc in tool_content
+                                    if isinstance(tc, dict) and tc.get("type") == "text"
+                                ]
+                                tool_content = "\n".join(tc_texts)
+                            result.append(ChatMessage(
+                                role="tool",
+                                content=str(tool_content),
+                                tool_call_id=block.get("tool_use_id", ""),
+                            ))
+                if text_parts:
+                    result.append(ChatMessage(role="user", content="\n".join(text_parts)))
+            else:
+                result.append(ChatMessage(role="user", content=content))
+        else:
+            result.append(ChatMessage(role=role, content=str(content) if content else ""))
+
+    return result
+
+
+def _anthropic_tools_to_openai(tools: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Convert Anthropic tool definitions to OpenAI format."""
+    result = []
+    for tool in tools:
+        if tool.get("type") == "custom" or "input_schema" in tool:
+            result.append({
+                "type": "function",
+                "function": {
+                    "name": tool.get("name", ""),
+                    "description": tool.get("description", ""),
+                    "parameters": tool.get("input_schema", {}),
+                },
+            })
+    return result
+
+
+def _openai_response_to_anthropic(
+    response_data: Dict[str, Any],
+    model: str,
+    request_id: str,
+) -> Dict[str, Any]:
+    """Convert internal OpenAI-style response to Anthropic Messages API format."""
+    content_blocks = []
+
+    text = response_data.get("content")
+    if text:
+        content_blocks.append({"type": "text", "text": text})
+
+    for tc in response_data.get("tool_calls", []):
+        func = tc.get("function", {})
+        try:
+            input_data = json.loads(func.get("arguments", "{}"))
+        except (json.JSONDecodeError, TypeError):
+            input_data = {}
+        content_blocks.append({
+            "type": "tool_use",
+            "id": tc.get("id", str(uuid.uuid4())),
+            "name": func.get("name", ""),
+            "input": input_data,
+        })
+
+    if not content_blocks:
+        content_blocks.append({"type": "text", "text": ""})
+
+    finish = response_data.get("finish_reason", "stop")
+    if finish == "tool_calls":
+        stop_reason = "tool_use"
+    elif finish == "length":
+        stop_reason = "max_tokens"
+    else:
+        stop_reason = "end_turn"
+
+    return {
+        "id": f"msg_{request_id}",
+        "type": "message",
+        "role": "assistant",
+        "model": model,
+        "content": content_blocks,
+        "stop_reason": stop_reason,
+        "stop_sequence": None,
+        "usage": {
+            "input_tokens": response_data.get("prompt_tokens", 0),
+            "output_tokens": response_data.get("completion_tokens", 0),
+        },
+    }
+
+
+def _build_anthropic_streaming_response(
+    request_id: str,
+    model: str,
+    response_data: Dict[str, Any],
+) -> EventSourceResponse:
+    """Build an Anthropic-compatible SSE stream from a completed response (fake streaming)."""
+
+    async def event_generator():
+        content = response_data.get("content", "") or ""
+        tool_calls = response_data.get("tool_calls", [])
+        input_tokens = response_data.get("prompt_tokens", 0)
+        output_tokens = response_data.get("completion_tokens", 0)
+        finish = response_data.get("finish_reason", "stop")
+
+        if finish == "tool_calls":
+            stop_reason = "tool_use"
+        elif finish == "length":
+            stop_reason = "max_tokens"
+        else:
+            stop_reason = "end_turn"
+
+        msg_id = f"msg_{request_id}"
+
+        # Event: message_start
+        yield {
+            "event": "message_start",
+            "data": json.dumps({
+                "type": "message_start",
+                "message": {
+                    "id": msg_id,
+                    "type": "message",
+                    "role": "assistant",
+                    "model": model,
+                    "content": [],
+                    "stop_reason": None,
+                    "stop_sequence": None,
+                    "usage": {"input_tokens": input_tokens, "output_tokens": 0},
+                },
+            }),
+        }
+
+        block_index = 0
+
+        if content:
+            yield {
+                "event": "content_block_start",
+                "data": json.dumps({
+                    "type": "content_block_start",
+                    "index": block_index,
+                    "content_block": {"type": "text", "text": ""},
+                }),
+            }
+            yield {
+                "event": "content_block_delta",
+                "data": json.dumps({
+                    "type": "content_block_delta",
+                    "index": block_index,
+                    "delta": {"type": "text_delta", "text": content},
+                }),
+            }
+            yield {
+                "event": "content_block_stop",
+                "data": json.dumps({
+                    "type": "content_block_stop",
+                    "index": block_index,
+                }),
+            }
+            block_index += 1
+
+        for tc in tool_calls:
+            func = tc.get("function", {})
+            try:
+                input_data = json.loads(func.get("arguments", "{}"))
+            except (json.JSONDecodeError, TypeError):
+                input_data = {}
+
+            yield {
+                "event": "content_block_start",
+                "data": json.dumps({
+                    "type": "content_block_start",
+                    "index": block_index,
+                    "content_block": {
+                        "type": "tool_use",
+                        "id": tc.get("id", str(uuid.uuid4())),
+                        "name": func.get("name", ""),
+                        "input": {},
+                    },
+                }),
+            }
+            yield {
+                "event": "content_block_delta",
+                "data": json.dumps({
+                    "type": "content_block_delta",
+                    "index": block_index,
+                    "delta": {
+                        "type": "input_json_delta",
+                        "partial_json": json.dumps(input_data),
+                    },
+                }),
+            }
+            yield {
+                "event": "content_block_stop",
+                "data": json.dumps({
+                    "type": "content_block_stop",
+                    "index": block_index,
+                }),
+            }
+            block_index += 1
+
+        yield {
+            "event": "message_delta",
+            "data": json.dumps({
+                "type": "message_delta",
+                "delta": {"stop_reason": stop_reason, "stop_sequence": None},
+                "usage": {"output_tokens": output_tokens},
+            }),
+        }
+
+        yield {
+            "event": "message_stop",
+            "data": json.dumps({"type": "message_stop"}),
+        }
+
+    return EventSourceResponse(event_generator(), media_type="text/event-stream")
+
+
+def _build_anthropic_streaming_response_from_raw(
+    request_id: str, model: str, raw_response: dict,
+) -> EventSourceResponse:
+    """Build SSE stream from a raw Anthropic response (direct call path)."""
+
+    async def event_generator():
+        usage = raw_response.get("usage", {})
+        input_tokens = usage.get("input_tokens", 0)
+        output_tokens = usage.get("output_tokens", 0)
+        msg_id = raw_response.get("id", f"msg_{request_id}")
+
+        yield {
+            "event": "message_start",
+            "data": json.dumps({
+                "type": "message_start",
+                "message": {
+                    "id": msg_id, "type": "message", "role": "assistant",
+                    "model": model, "content": [],
+                    "stop_reason": None, "stop_sequence": None,
+                    "usage": {"input_tokens": input_tokens, "output_tokens": 0},
+                },
+            }),
+        }
+
+        block_index = 0
+        for block in raw_response.get("content", []):
+            block_type = block.get("type", "text")
+            yield {
+                "event": "content_block_start",
+                "data": json.dumps({
+                    "type": "content_block_start",
+                    "index": block_index,
+                    "content_block": block,
+                }),
+            }
+            if block_type == "text":
+                yield {
+                    "event": "content_block_delta",
+                    "data": json.dumps({
+                        "type": "content_block_delta", "index": block_index,
+                        "delta": {"type": "text_delta", "text": block.get("text", "")},
+                    }),
+                }
+            elif block_type == "tool_use":
+                yield {
+                    "event": "content_block_delta",
+                    "data": json.dumps({
+                        "type": "content_block_delta", "index": block_index,
+                        "delta": {
+                            "type": "input_json_delta",
+                            "partial_json": json.dumps(block.get("input", {})),
+                        },
+                    }),
+                }
+            yield {
+                "event": "content_block_stop",
+                "data": json.dumps({"type": "content_block_stop", "index": block_index}),
+            }
+            block_index += 1
+
+        yield {
+            "event": "message_delta",
+            "data": json.dumps({
+                "type": "message_delta",
+                "delta": {
+                    "stop_reason": raw_response.get("stop_reason", "end_turn"),
+                    "stop_sequence": raw_response.get("stop_sequence"),
+                },
+                "usage": {"output_tokens": output_tokens},
+            }),
+        }
+        yield {
+            "event": "message_stop",
+            "data": json.dumps({"type": "message_stop"}),
+        }
+
+    return EventSourceResponse(event_generator(), media_type="text/event-stream")
+
+
+def _extract_last_user_text(messages: List[Dict[str, Any]]) -> str:
+    """Extract text from the last user message in Anthropic format."""
+    for msg in reversed(messages):
+        if msg.get("role") != "user":
+            continue
+        content = msg.get("content", "")
+        if isinstance(content, str) and content.strip():
+            return content
+        if isinstance(content, list):
+            parts = [
+                b.get("text", "")
+                for b in content
+                if isinstance(b, dict) and b.get("type") == "text" and b.get("text", "").strip()
+            ]
+            if parts:
+                return "\n".join(parts)
+    return ""
+
+
+# ---------------------------------------------------------------------------
+# Direct Anthropic API call (bypass LiteLLM format conversion)
+# ---------------------------------------------------------------------------
+
+_ANTHROPIC_COMPAT_PROVIDERS = {
+    "zai": ("ZAI_API_BASE", "ZAI_API_KEY"),
+    "kimi": ("KIMI_API_BASE", "KIMI_API_KEY"),
+    "minimax": ("MINIMAX_API_BASE", "MINIMAX_API_KEY"),
+    "anthropic": ("ANTHROPIC_API_BASE", "ANTHROPIC_API_KEY"),
+}
+
+
+def _get_anthropic_compat_endpoint(provider: str):
+    """Return (api_base, api_key) if provider has an Anthropic-compatible endpoint."""
+    if provider not in _ANTHROPIC_COMPAT_PROVIDERS:
+        return None
+    base_env, key_env = _ANTHROPIC_COMPAT_PROVIDERS[provider]
+    api_base = os.getenv(base_env, "")
+    api_key = os.getenv(key_env, "")
+    if not api_base or not api_key:
+        return None
+    return api_base.rstrip("/"), api_key
+
+
+def _sanitize_anthropic_messages(messages: list) -> list:
+    """Sanitize Anthropic messages for compatible endpoints.
+
+    Fixes known provider quirks:
+    - ZAI requires 'id' on tool_result blocks (non-standard)
+    - MiniMax requires tool_use.input to be a dict
+    """
+    import copy
+    msgs = copy.deepcopy(messages)
+    for msg in msgs:
+        content = msg.get("content")
+        if not isinstance(content, list):
+            continue
+        for block in content:
+            if not isinstance(block, dict):
+                continue
+            # ZAI bug: tool_result needs an 'id' field
+            if block.get("type") == "tool_result" and "id" not in block:
+                block["id"] = f"toolr_{block.get('tool_use_id', 'unknown')}"
+            # Ensure tool_use.input is a dict
+            if block.get("type") == "tool_use":
+                inp = block.get("input")
+                if not isinstance(inp, dict):
+                    block["input"] = {"value": inp} if inp is not None else {}
+    return msgs
+
+
+async def _call_anthropic_direct(api_base: str, api_key: str, model: str,
+                                  body: dict, timeout: float = 600.0) -> dict:
+    """Call Anthropic-compatible endpoint directly, no format conversion."""
+    import httpx
+    url = f"{api_base}/v1/messages"
+
+    ant_body = {"model": model, "max_tokens": body.get("max_tokens", 4096)}
+    for key in ("system", "tools", "tool_choice", "thinking",
+                "temperature", "top_p", "stop_sequences", "metadata"):
+        if key in body and body[key]:
+            ant_body[key] = body[key]
+    # Sanitize messages for provider quirks
+    if "messages" in body:
+        ant_body["messages"] = _sanitize_anthropic_messages(body["messages"])
+
+    headers = {
+        "x-api-key": api_key,
+        "anthropic-version": "2023-06-01",
+        "content-type": "application/json",
+    }
+    logger.debug("Direct Anthropic call: model=%s url=%s", model, url)
+
+    async with httpx.AsyncClient(timeout=timeout) as client:
+        resp = await client.post(url, headers=headers, json=ant_body)
+
+    if resp.status_code >= 400:
+        error_text = resp.text[:500]
+        logger.warning("Direct Anthropic call failed (%s): %s", resp.status_code, error_text)
+        from litellm.exceptions import (
+            BadRequestError, AuthenticationError,
+            RateLimitError, InternalServerError,
+        )
+        exc_map = {400: BadRequestError, 401: AuthenticationError,
+                   429: RateLimitError}
+        exc_cls = exc_map.get(resp.status_code, InternalServerError)
+        raise exc_cls(message=error_text, model=model, llm_provider="anthropic")
+
+    return resp.json()
+
+
+@app.post("/v1/messages")
+async def anthropic_messages(
+    raw_request: Request,
+    current_user: UserSession = Depends(validate_local_auth),
+):
+    """Anthropic Messages API compatibility endpoint.
+
+    Uses fake streaming: wait for complete response, then emit SSE events.
+    All claude-* models are treated as "auto" for smart routing.
+    """
+    start_time = time.time()
+    request_id = str(uuid.uuid4())
+
+    try:
+        body = await raw_request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid JSON body")
+
+    ant_model = body.get("model", "")
+    if ant_model.startswith("claude-"):
+        ant_model = "auto"
+    ant_messages = body.get("messages", [])
+    ant_system = body.get("system")
+    ant_max_tokens = body.get("max_tokens", 4096)
+    ant_stream = body.get("stream", False)
+    ant_tools = body.get("tools", [])
+
+    prompt_text = _extract_conversation_snippet_from_dicts(ant_messages)
+
+    # Convert to internal OpenAI format
+    openai_messages = _anthropic_to_openai_messages(ant_messages, ant_system)
+    openai_tools = _anthropic_tools_to_openai(ant_tools) if ant_tools else []
+
+    # Build ChatCompletionRequest
+    req_data: Dict[str, Any] = {
+        "messages": [
+            {"role": m.role, "content": m.content, **(m.model_extra or {})}
+            for m in openai_messages
+        ],
+        "model": ant_model,
+        "max_tokens": ant_max_tokens,
+        "stream": False,
+    }
+    if openai_tools:
+        req_data["tools"] = openai_tools
+
+    request = ChatCompletionRequest(**req_data)
+
+    # --- Rate limiting ---
+    retry_after = _rate_limiter.check(current_user.id)
+    if retry_after is not None:
+        raise HTTPException(
+            status_code=429,
+            detail=f"Rate limit exceeded. Retry after {retry_after}s.",
+            headers={"Retry-After": str(retry_after)},
+        )
+
+    try:
+        req_meta = _extract_request_metadata(request)
+
+        from nadirclaw.routing import (
+            apply_routing_modifiers,
+            get_session_cache,
+            resolve_alias,
+            resolve_profile,
+        )
+
+        profile = resolve_profile(request.model)
+
+        if profile == "eco":
+            selected_model = settings.SIMPLE_MODEL
+            analysis_info = {
+                "strategy": "profile:eco", "selected_model": selected_model,
+                "tier": "simple", "confidence": 1.0, "complexity_score": 0,
+            }
+        elif profile == "premium":
+            selected_model = settings.COMPLEX_MODEL
+            analysis_info = {
+                "strategy": "profile:premium", "selected_model": selected_model,
+                "tier": "complex", "confidence": 1.0, "complexity_score": 0,
+            }
+        elif profile == "free":
+            selected_model = settings.FREE_MODEL
+            analysis_info = {
+                "strategy": "profile:free", "selected_model": selected_model,
+                "tier": "free", "confidence": 1.0, "complexity_score": 0,
+            }
+        elif profile == "reasoning":
+            selected_model = settings.REASONING_MODEL
+            analysis_info = {
+                "strategy": "profile:reasoning", "selected_model": selected_model,
+                "tier": "reasoning", "confidence": 1.0, "complexity_score": 0,
+            }
+        elif request.model and request.model != "auto" and profile is None:
+            resolved = resolve_alias(request.model)
+            if resolved:
+                selected_model = resolved
+                analysis_info = {
+                    "strategy": "alias", "selected_model": selected_model,
+                    "alias_from": request.model, "tier": "direct",
+                    "confidence": 1.0, "complexity_score": 0,
+                }
+            else:
+                selected_model = request.model
+                analysis_info = {
+                    "strategy": "direct", "selected_model": selected_model,
+                    "tier": "direct", "confidence": 1.0, "complexity_score": 0,
+                }
+        else:
+            session_cache = get_session_cache()
+            cached = session_cache.get(request.messages)
+            if cached:
+                cached_model, cached_tier = cached
+                selected_model = cached_model
+                analysis_info = {
+                    "strategy": "session-cache", "selected_model": selected_model,
+                    "tier": cached_tier, "confidence": 1.0, "complexity_score": 0,
+                }
+                selected_model, final_tier, routing_info = apply_routing_modifiers(
+                    base_model=selected_model, base_tier=cached_tier,
+                    request_meta=req_meta, messages=request.messages,
+                    simple_model=settings.SIMPLE_MODEL, complex_model=settings.COMPLEX_MODEL,
+                    reasoning_model=settings.REASONING_MODEL, free_model=settings.FREE_MODEL,
+                )
+                if final_tier != cached_tier:
+                    analysis_info["tier"] = final_tier
+                    analysis_info["selected_model"] = selected_model
+                    analysis_info["routing_modifiers"] = routing_info
+            else:
+                selected_model, analysis_info = await _smart_route_full(
+                    request.messages, current_user
+                )
+                selected_model, final_tier, routing_info = apply_routing_modifiers(
+                    base_model=selected_model,
+                    base_tier=analysis_info.get("tier", "simple"),
+                    request_meta=req_meta, messages=request.messages,
+                    simple_model=settings.SIMPLE_MODEL, complex_model=settings.COMPLEX_MODEL,
+                    reasoning_model=settings.REASONING_MODEL, free_model=settings.FREE_MODEL,
+                )
+                analysis_info["tier"] = final_tier
+                analysis_info["selected_model"] = selected_model
+                analysis_info["routing_modifiers"] = routing_info
+                session_cache.put(request.messages, selected_model, final_tier)
+
+        # Model pool selection for /v1/messages — skip for explicit model
+        _pool_tier = analysis_info.get("tier", "")
+        _ant_model = body.get("model", "auto")
+        _is_explicit_model = _ant_model and _ant_model not in ("auto", "eco", "premium", "free", "reasoning")
+        if not _is_explicit_model and _pool_tier not in ("sonnet", "reasoning", "reasoning_sonnet", "review", "long_context"):
+            from nadirclaw.routing import get_pool_for_model, select_from_pool
+            pool_name = get_pool_for_model(selected_model)
+            if pool_name:
+                pool_model = select_from_pool(pool_name)
+                if pool_model:
+                    logger.info("Pool %s: %s → %s", pool_name, selected_model, pool_model)
+                    selected_model = pool_model
+
+        # Context compression for /v1/messages
+        if getattr(settings, 'CONTEXT_COMPRESSION', False):
+            from nadirclaw.compress import compress_messages
+            if len(request.messages) > 30:
+                msg_dicts = []
+                for m in request.messages:
+                    d = {"role": m.role, "content": m.content}
+                    extra = m.model_extra or {}
+                    if "tool_calls" in extra:
+                        d["tool_calls"] = extra["tool_calls"]
+                    if "tool_call_id" in extra:
+                        d["tool_call_id"] = extra["tool_call_id"]
+                    if "name" in extra:
+                        d["name"] = extra["name"]
+                    msg_dicts.append(d)
+                compressed, comp_stats = compress_messages(msg_dicts)
+                if comp_stats.get("compressed", False):
+                    logger.info("Context compression: %d→%d msgs, ratio=%.2f",
+                               comp_stats["messages_before"], comp_stats["messages_after"],
+                               comp_stats["compression_ratio"])
+                    new_msgs = []
+                    for d in compressed:
+                        extras = {}
+                        if "tool_calls" in d:
+                            extras["tool_calls"] = d["tool_calls"]
+                        if "tool_call_id" in d:
+                            extras["tool_call_id"] = d["tool_call_id"]
+                        if "name" in d:
+                            extras["name"] = d["name"]
+                        cm = ChatMessage(role=d["role"], content=d.get("content"), **extras)
+                        new_msgs.append(cm)
+                    request.messages = new_msgs
+
+        from nadirclaw.credentials import detect_provider
+        provider = detect_provider(selected_model)
+
+        # Build fallback chain
+        _tier = analysis_info.get("tier", "simple")
+        fallback_chain = settings.get_tier_fallback_chain(_tier)
+        fallback_chain = [m for m in fallback_chain if m != selected_model]
+
+        from nadirclaw.telemetry import record_llm_call, trace_span
+
+        with trace_span("anthropic_messages", {"nadirclaw.tier": _tier}) as span:
+            # Try direct Anthropic call for compatible providers,
+            # then fallback chain (direct or LiteLLM as needed)
+            raw_response = None
+            response_data = None
+            fallback_from = None
+            final_model = selected_model
+            call_path = "unknown"
+
+            for candidate in [selected_model] + fallback_chain:
+                cand_provider = detect_provider(candidate)
+                cand_endpoint = _get_anthropic_compat_endpoint(cand_provider) if cand_provider else None
+
+                if cand_endpoint:
+                    # Path A: Direct Anthropic call (no format conversion)
+                    try:
+                        api_base, api_key = cand_endpoint
+                        raw_response = await _call_anthropic_direct(
+                            api_base, api_key, candidate, body,
+                        )
+                        final_model = candidate
+                        call_path = "direct_anthropic"
+                        if candidate != selected_model:
+                            fallback_from = selected_model
+                        break
+                    except Exception as e:
+                        logger.warning("Direct Anthropic %s failed: %s", candidate, str(e)[:200])
+                        continue
+                else:
+                    # Path B: LiteLLM (for vLLM, Ollama, etc.)
+                    # Use _dispatch_model directly — one try per candidate.
+                    # Do NOT use _call_with_fallback here; it has its own
+                    # internal chain that would consume all LiteLLM candidates
+                    # and bypass the outer loop's direct-Anthropic path.
+                    try:
+                        logger.info("LiteLLM call for %s (provider=%s)", candidate, cand_provider)
+                        response_data = await _dispatch_model(
+                            candidate, request, cand_provider,
+                        )
+                        final_model = candidate
+                        call_path = "litellm"
+                        if candidate != selected_model:
+                            fallback_from = selected_model
+                        break
+                    except Exception as e:
+                        logger.warning("LiteLLM %s failed: %s", candidate, str(e)[:200])
+                        continue
+
+            if raw_response is None and response_data is None:
+                raise RuntimeError(f"All models failed in fallback chain for tier={_tier}")
+
+            elapsed_ms = int((time.time() - start_time) * 1000)
+
+            # Handle direct Anthropic response
+            if raw_response is not None:
+                usage = raw_response.get("usage", {})
+                _pt = usage.get("input_tokens", 0)
+                _ct = usage.get("output_tokens", 0)
+                record_llm_call(span, model=final_model, provider=detect_provider(final_model),
+                                prompt_tokens=_pt, completion_tokens=_ct,
+                                tier=_tier, latency_ms=elapsed_ms)
+                _log_request({
+                    "type": "anthropic_messages", "request_id": request_id,
+                    "prompt": prompt_text[:200], "selected_model": final_model,
+                    "tier": _tier, "fallback_used": fallback_from,
+                    "total_latency_ms": elapsed_ms,
+                    "prompt_tokens": _pt, "completion_tokens": _ct,
+                    "status": "ok", "call_path": call_path, **req_meta,
+                })
+                display_model = body.get("model", "") or final_model
+                if ant_stream:
+                    return _build_anthropic_streaming_response_from_raw(
+                        request_id, display_model, raw_response,
+                    )
+                return JSONResponse(content=raw_response, headers={"content-type": "application/json"})
+
+            # Handle LiteLLM response (OpenAI format → Anthropic)
+            record_llm_call(span, model=final_model, provider=detect_provider(final_model),
+                            prompt_tokens=response_data.get("prompt_tokens", 0),
+                            completion_tokens=response_data.get("completion_tokens", 0),
+                            tier=_tier, latency_ms=elapsed_ms)
+            _log_request({
+                "type": "anthropic_messages", "request_id": request_id,
+                "prompt": prompt_text[:200], "selected_model": final_model,
+                "tier": _tier, "fallback_used": fallback_from,
+                "total_latency_ms": elapsed_ms,
+                "prompt_tokens": response_data.get("prompt_tokens", 0),
+                "completion_tokens": response_data.get("completion_tokens", 0),
+                "status": "ok", "call_path": call_path, **req_meta,
+            })
+            display_model = body.get("model", "") or final_model
+            if ant_stream:
+                return _build_anthropic_streaming_response(request_id, display_model, response_data)
+            return JSONResponse(
+                content=_openai_response_to_anthropic(response_data, display_model, request_id),
+                headers={"content-type": "application/json"},
+            )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        elapsed_ms = int((time.time() - start_time) * 1000)
+        logger.error("Anthropic messages error: %s", e, exc_info=True)
+        _log_request({
+            "type": "anthropic_messages",
+            "request_id": request_id,
+            "status": "error",
+            "error": str(e),
+            "total_latency_ms": elapsed_ms,
+        })
+        raise HTTPException(
+            status_code=500,
+            detail=f"Internal error. Request ID: {request_id}",
+        )

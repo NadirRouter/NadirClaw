@@ -19,6 +19,7 @@ the upstream model, then emits Anthropic SSE events.
 import json
 import logging
 import os
+import re
 import time
 import uuid
 from typing import Any, Dict, List, Optional, Tuple, Union
@@ -159,6 +160,21 @@ async def call_anthropic_direct(
         )
 
     return resp.json()
+
+
+# Pattern to strip system-reminder tags from model responses
+_SYSTEM_REMINDER_RE = re.compile(
+    r"<system-reminder>.*?</system-reminder>",
+    re.DOTALL,
+)
+
+
+def _sanitize_response_text(response: Dict[str, Any]) -> Dict[str, Any]:
+    """Strip <system-reminder> blocks from text content in a response."""
+    for block in response.get("content", []):
+        if block.get("type") == "text" and block.get("text"):
+            block["text"] = _SYSTEM_REMINDER_RE.sub("", block["text"]).strip()
+    return response
 
 
 def anthropic_response_to_stats(data: Dict[str, Any]) -> Dict[str, Any]:
@@ -940,6 +956,7 @@ async def anthropic_messages(raw_request: Request):
             # Try direct Anthropic call first, then fallback chain
             raw_response = None
             fallback_from = None
+            fallback_reasons: list[dict[str, str]] = []
             final_model = selected_model
 
             # Build candidate list: primary + fallback chain
@@ -982,10 +999,16 @@ async def anthropic_messages(raw_request: Request):
                             fallback_from = selected_model
                         break
                     except Exception as e:
+                        err_msg = str(e)[:200]
                         logger.warning(
                             "Direct Anthropic call failed for %s: %s — trying next",
-                            candidate_model, str(e)[:200],
+                            candidate_model, err_msg,
                         )
+                        fallback_reasons.append({
+                            "model": candidate_model,
+                            "reason": err_msg,
+                            "path": "direct_anthropic",
+                        })
                         continue
                 else:
                     # Path B: Convert to OpenAI and use LiteLLM (single try).
@@ -1022,6 +1045,7 @@ async def anthropic_messages(raw_request: Request):
                         "selected_model": final_model,
                         "tier": tier,
                         "fallback_used": fallback_from,
+                        "fallback_reasons": fallback_reasons or None,
                         "total_latency_ms": elapsed_ms,
                         **stats,
                         "status": "ok",
@@ -1071,6 +1095,7 @@ async def anthropic_messages(raw_request: Request):
                 "selected_model": final_model,
                 "tier": tier,
                 "fallback_used": fallback_from,
+                "fallback_reasons": fallback_reasons or None,
                 "total_latency_ms": elapsed_ms,
                 "prompt_tokens": prompt_tokens,
                 "completion_tokens": stats["completion_tokens"],
