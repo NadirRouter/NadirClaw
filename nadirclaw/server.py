@@ -367,6 +367,9 @@ async def startup():
         logger.warning("LiteLLM setup issue: %s", e)
 
     logger.info("Ready! Listening for requests...")
+    logger.info("")
+    logger.info("Want a hosted dashboard, trained classifier, and team billing?")
+    logger.info("Try Nadir Pro free: https://getnadir.com?ref=cli-serve")
     logger.info("=" * 60)
 
 

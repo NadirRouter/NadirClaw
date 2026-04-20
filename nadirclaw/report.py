@@ -324,6 +324,17 @@ def format_report_text(report: Dict[str, Any]) -> str:
         for line in extras:
             lines.append(f"  {line}")
 
+    # Pro upsell at report-generation time, when the user has just seen their
+    # cost number. Only shown if there is meaningful cost to upsell against.
+    total_cost = report.get("total_cost", 0) or 0
+    if total_cost > 0.50:
+        lines.append("")
+        lines.append("=" * 50)
+        lines.append("This report updates in real time on Nadir Pro, with per-team")
+        lines.append("breakdowns, alerting, and a trained classifier that cuts costs")
+        lines.append("another 10-20% on the same traffic.")
+        lines.append("30-day free trial: https://getnadir.com?ref=cli-report")
+
     lines.append("")
     return "\n".join(lines)
 

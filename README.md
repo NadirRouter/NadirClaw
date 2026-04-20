@@ -24,7 +24,11 @@
 </p>
 
 <p align="center">
-  <a href="https://getnadir.com">Website</a> · <a href="#quick-start">Quick Start</a> · <a href="docs/comparison.md">Comparisons</a> · <a href="https://github.com/doramirdor/nadirclaw-action">GitHub Action</a>
+  <a href="https://getnadir.com?ref=readme-nav"><strong>Nadir Pro (hosted)</strong></a> · <a href="#quick-start">Quick Start</a> · <a href="#nadirclaw-vs-nadir-pro">OSS vs Pro</a> · <a href="docs/comparison.md">Comparisons</a> · <a href="https://github.com/doramirdor/nadirclaw-action">GitHub Action</a>
+</p>
+
+<p align="center">
+  <sub>Running real traffic or a team? <a href="https://getnadir.com?ref=readme-hero">Nadir Pro</a> adds a trained classifier (10-20% more savings), a live dashboard, team billing, and SSO. <strong>30-day free trial.</strong></sub>
 </p>
 
 ---
@@ -80,6 +84,25 @@ nadirclaw serve --verbose
 ```
 
 That's it. NadirClaw starts on `http://localhost:8856` with sensible defaults (Gemini 3 Flash for simple, OpenAI Codex for complex). If you skip `nadirclaw setup`, the `serve` command will offer to run it on first launch.
+
+## NadirClaw vs Nadir Pro
+
+NadirClaw is the free, open-source core. If you are routing production traffic or running a team, [**Nadir Pro**](https://getnadir.com) is the hosted version with more accurate routing, team features, and analytics. Same routing philosophy, zero vendor lock-in (Pro lets you BYOK and you can always fall back to NadirClaw self-hosted).
+
+|  | NadirClaw (Free, OSS) | [Nadir Pro](https://getnadir.com) (Hosted) |
+|---|---|---|
+| **License** | MIT | Proprietary |
+| **Deploy** | Self-hosted, localhost | `api.getnadir.com` or self-host via Docker |
+| **Classifier** | Binary centroid, ~10ms | Trained classifier + 3-tier routing, higher accuracy |
+| **Storage** | Local JSONL + SQLite | Postgres (Supabase), multi-tenant |
+| **Dashboard** | Terminal + local web | Hosted web dashboard, per-team analytics |
+| **Cost tracking** | `nadirclaw savings` CLI | Live dashboard, monthly invoices, projected savings |
+| **Extras** | Context optimize, fallback chains | Everything in Free, plus semantic cache, response healing, prompt caching passthrough |
+| **Team** | None | SSO, audit logs, API key management, priority support |
+| **Billing** | N/A | Pay only on savings: 25% of first $2K, 10% above, plus $9/mo base |
+| **Best for** | Solo devs, self-hosters, anyone who wants the router running locally | Teams routing real traffic who want a hosted dashboard and want someone else to maintain the classifier |
+
+**Start free at [getnadir.com](https://getnadir.com/auth?mode=signup)** (15 requests/day on our keys, unlimited with BYOK). If Nadir is not saving you money, you do not pay us.
 
 ## Features
 
