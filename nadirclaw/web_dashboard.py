@@ -97,6 +97,32 @@ async def dashboard_stats(
     # Fallback stats
     fallbacks = sum(1 for e in completions if e.get("fallback_used"))
 
+    # Model success/failure tracking from fallback_reasons
+    model_stats: Dict[str, Dict[str, Any]] = {}
+    for e in completions:
+        # Count successful request
+        model = e.get("selected_model", "unknown")
+        if model not in model_stats:
+            model_stats[model] = {"success": 0, "fail": 0, "fail_reasons": {}}
+        model_stats[model]["success"] += 1
+        # Count failed attempts from fallback_reasons
+        for fr in e.get("fallback_reasons") or []:
+            fm = fr.get("model", "unknown")
+            if fm not in model_stats:
+                model_stats[fm] = {"success": 0, "fail": 0, "fail_reasons": {}}
+            model_stats[fm]["fail"] += 1
+            reason_raw = fr.get("reason", "")
+            reason_type = "other"
+            if "rate" in reason_raw.lower() and "limit" in reason_raw.lower():
+                reason_type = "rate_limit"
+            elif "disconnect" in reason_raw.lower() or "endofstream" in reason_raw.lower():
+                reason_type = "disconnected"
+            elif "connection" in reason_raw.lower() or "connecterror" in reason_raw.lower():
+                reason_type = "connection_error"
+            elif "timeout" in reason_raw.lower():
+                reason_type = "timeout"
+            model_stats[fm]["fail_reasons"][reason_type] = model_stats[fm]["fail_reasons"].get(reason_type, 0) + 1
+
     # Optimization stats
     total_tokens_saved = sum(e.get("tokens_saved", 0) or 0 for e in completions)
     total_original_tokens = sum(e.get("original_tokens", 0) or 0 for e in completions if e.get("original_tokens"))
@@ -117,6 +143,7 @@ async def dashboard_stats(
             "savings_pct": round(opt_savings_pct, 1),
             "optimized_requests": optimized_requests,
         },
+        "model_stats": model_stats,
     }
 
 
@@ -246,16 +273,29 @@ async function refresh() {
       legend.innerHTML += '<span style="color:' + (TIER_COLORS[tier]||'#4b5563') + '">' + tier + ' ' + count + ' (' + pct.toFixed(0) + '%)</span>  ';
     }
 
-    // Model cards
+    // Model cards (with success rate from model_stats)
+    const ms = d.model_stats || {};
     const mg = document.getElementById('model-grid');
     mg.innerHTML = '';
     for (const [name, info] of Object.entries(d.model_usage)) {
-      mg.innerHTML += '<div class="model-card"><div class="model-name">' + name + '</div><div class="model-stats">' +
-        '<div>Requests <span>' + info.requests + '</span></div>' +
-        '<div>Tokens <span>' + info.tokens.toLocaleString() + '</span></div>' +
+      const msEntry = ms[name];
+      const success = msEntry ? msEntry.success : info.requests;
+      const fail = msEntry ? msEntry.fail : 0;
+      const total = success + fail;
+      const rate = total > 0 ? (success / total * 100) : 100;
+      const rateColor = rate >= 95 ? '#34d399' : rate >= 80 ? '#fbbf24' : '#ef4444';
+      let card = '<div class="model-card"><div class="model-name">' + name + '</div><div class="model-stats">' +
+        '<div>Requests <span>' + info.requests + '</span></div>';
+      if (fail > 0) {
+        card += '<div>Success <span style="color:' + rateColor + '">' + success + '/' + total + ' (' + rate.toFixed(0) + '%)</span></div>';
+        const reasons = Object.entries(msEntry.fail_reasons || {}).map(([r,c]) => r+':'+c).join(', ');
+        if (reasons) card += '<div style="color:#6b7280;font-size:0.7rem;grid-column:span 2">' + reasons + '</div>';
+      }
+      card += '<div>Tokens <span>' + info.tokens.toLocaleString() + '</span></div>' +
         '<div>Cost <span>$' + info.cost.toFixed(4) + '</span></div>' +
         '<div>Avg latency <span>' + info.avg_latency_ms + 'ms</span></div>' +
         '</div></div>';
+      mg.innerHTML += card;
     }
 
     // Recent
