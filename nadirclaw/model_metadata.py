@@ -1,0 +1,83 @@
+"""Local model metadata helpers.
+
+Model metadata is stored separately from code so users can refresh or override
+model context windows, pricing, and capabilities without editing routing.py.
+"""
+
+import json
+import os
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any, Dict, Iterable
+
+
+CONFIG_DIR = Path.home() / ".nadirclaw"
+MODEL_METADATA_FILE = "models.json"
+LOCAL_MODEL_METADATA_FILE = "models.local.json"
+
+
+def default_metadata_path() -> Path:
+    """Return the generated model metadata path."""
+    override = os.getenv("NADIRCLAW_MODEL_METADATA_FILE", "")
+    if override:
+        return Path(override).expanduser()
+    return CONFIG_DIR / MODEL_METADATA_FILE
+
+
+def local_metadata_path() -> Path:
+    """Return the user-managed model metadata override path."""
+    override = os.getenv("NADIRCLAW_LOCAL_MODEL_METADATA_FILE", "")
+    if override:
+        return Path(override).expanduser()
+    return CONFIG_DIR / LOCAL_MODEL_METADATA_FILE
+
+
+def metadata_paths() -> Iterable[Path]:
+    """Return metadata files in merge order."""
+    return (default_metadata_path(), local_metadata_path())
+
+
+def _extract_models(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Support both {"models": {...}} and direct {model_id: info} formats."""
+    models = payload.get("models", payload)
+    if not isinstance(models, dict):
+        raise ValueError("model metadata must be a JSON object or contain a 'models' object")
+    return models
+
+
+def parse_model_metadata(data: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
+    """Normalize model metadata from a decoded JSON object."""
+    models = _extract_models(data)
+    normalized: Dict[str, Dict[str, Any]] = {}
+    for model_id, info in models.items():
+        if not isinstance(model_id, str) or not model_id.strip():
+            continue
+        if not isinstance(info, dict):
+            raise ValueError(f"metadata for {model_id!r} must be a JSON object")
+        normalized[model_id.strip()] = dict(info)
+    return normalized
+
+
+def load_model_metadata(path: Path) -> Dict[str, Dict[str, Any]]:
+    """Load model metadata from a JSON file."""
+    data = json.loads(path.read_text())
+    if not isinstance(data, dict):
+        raise ValueError("model metadata root must be a JSON object")
+    return parse_model_metadata(data)
+
+
+def write_model_metadata(
+    models: Dict[str, Dict[str, Any]],
+    path: Path,
+    *,
+    source: str = "builtin",
+) -> None:
+    """Write model metadata in the generated file format."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "version": 1,
+        "source": source,
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+        "models": models,
+    }
+    path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")

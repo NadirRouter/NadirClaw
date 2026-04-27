@@ -233,6 +233,68 @@ def status():
         click.echo("\nServer:        NOT RUNNING")
 
 
+@main.command("update-models")
+@click.option("--output", type=click.Path(path_type=Path), default=None,
+              help="Metadata file to write (default: ~/.nadirclaw/models.json)")
+@click.option("--source-url", default=None,
+              help="Optional registry JSON URL to merge before writing")
+@click.option("--dry-run", is_flag=True, help="Show what would be written without saving")
+@click.option("--format", "fmt", default="text", type=click.Choice(["text", "json"]),
+              help="Output format")
+def update_models(output, source_url, dry_run, fmt):
+    """Refresh local model metadata used by the router."""
+    import urllib.request
+
+    from nadirclaw.model_metadata import (
+        default_metadata_path,
+        local_metadata_path,
+        parse_model_metadata,
+        write_model_metadata,
+    )
+    from nadirclaw.routing import BUILTIN_MODEL_REGISTRY
+
+    output_path = output or default_metadata_path()
+    models = {
+        model: dict(info)
+        for model, info in sorted(BUILTIN_MODEL_REGISTRY.items())
+    }
+    source = source_url or os.getenv("NADIRCLAW_MODEL_REGISTRY_URL", "")
+
+    if source:
+        with urllib.request.urlopen(source, timeout=15) as resp:
+            remote_payload = json.loads(resp.read())
+        remote_models = parse_model_metadata(remote_payload)
+        for model, info in remote_models.items():
+            models[model] = {**models.get(model, {}), **info}
+
+    if not dry_run:
+        write_model_metadata(models, output_path, source=source or "builtin")
+
+    result = {
+        "path": str(output_path),
+        "local_override_path": str(local_metadata_path()),
+        "model_count": len(models),
+        "dry_run": dry_run,
+        "source": source or "builtin",
+        "models": list(models.keys()),
+    }
+
+    if fmt == "json":
+        click.echo(json.dumps(result, indent=2))
+        return
+
+    action = "Would write" if dry_run else "Updated"
+    plural = "entry" if len(models) == 1 else "entries"
+    click.echo(f"{action} {len(models)} model metadata {plural}")
+    click.echo(f"Path: {output_path}")
+    click.echo(f"Source: {source or 'builtin'}")
+    click.echo(f"Local overrides: {local_metadata_path()}")
+    if models:
+        click.echo("Sample models:")
+        for model in list(models.keys())[:5]:
+            click.echo(f"  - {model}")
+
+
 @main.command()
 @click.option("--since", default=None, help="Time filter: '24h', '7d', '2025-02-01'")
 @click.option("--model", default=None, help="Filter by model name (substring match)")

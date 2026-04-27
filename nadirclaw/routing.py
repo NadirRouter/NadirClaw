@@ -154,12 +154,38 @@ MODEL_REGISTRY: Dict[str, Dict[str, Any]] = {
     "claude-sonnet-4-20250514": {"context_window": 200_000, "cost_per_m_input": 3.00, "cost_per_m_output": 15.00, "has_vision": True},
     "claude-haiku-4-20250514": {"context_window": 200_000, "cost_per_m_input": 1.00, "cost_per_m_output": 5.00, "has_vision": True},
     # DeepSeek
+    "deepseek/deepseek-v4-flash": {"context_window": 1_000_000, "cost_per_m_input": 0.14, "cost_per_m_output": 0.28, "has_vision": False},
+    "deepseek/deepseek-v4-pro": {"context_window": 1_000_000, "cost_per_m_input": 1.74, "cost_per_m_output": 3.48, "has_vision": False},
     "deepseek/deepseek-chat": {"context_window": 128_000, "cost_per_m_input": 0.28, "cost_per_m_output": 0.42, "has_vision": False},
     "deepseek/deepseek-reasoner": {"context_window": 128_000, "cost_per_m_input": 0.28, "cost_per_m_output": 0.42, "has_vision": False},
     # Ollama (local, no cost, context varies by model)
     "ollama/llama3.1:8b": {"context_window": 128_000, "cost_per_m_input": 0, "cost_per_m_output": 0, "has_vision": False},
     "ollama/qwen3:32b": {"context_window": 128_000, "cost_per_m_input": 0, "cost_per_m_output": 0, "has_vision": False},
 }
+
+BUILTIN_MODEL_REGISTRY: Dict[str, Dict[str, Any]] = {
+    model: dict(info) for model, info in MODEL_REGISTRY.items()
+}
+
+
+def _merge_external_model_metadata() -> None:
+    """Merge generated and user-local model metadata into MODEL_REGISTRY."""
+    from nadirclaw.model_metadata import load_model_metadata, metadata_paths
+
+    for path in metadata_paths():
+        if not path.exists():
+            continue
+        try:
+            models = load_model_metadata(path)
+        except Exception as e:
+            logger.warning("Skipping invalid model metadata file %s: %s", path, e)
+            continue
+        for model_id, info in models.items():
+            current = MODEL_REGISTRY.get(model_id, {})
+            MODEL_REGISTRY[model_id] = {**current, **info}
+
+
+_merge_external_model_metadata()
 
 # ---------------------------------------------------------------------------
 # Model aliases — short names to full model IDs
@@ -181,7 +207,10 @@ MODEL_ALIASES: Dict[str, str] = {
     "flash": "gemini-2.5-flash",
     "gemini-flash": "gemini-2.5-flash",
     "gemini-pro": "gemini-2.5-pro",
-    "deepseek": "deepseek/deepseek-chat",
+    "deepseek": "deepseek/deepseek-v4-flash",
+    "deepseek-v4": "deepseek/deepseek-v4-flash",
+    "deepseek-v4-flash": "deepseek/deepseek-v4-flash",
+    "deepseek-v4-pro": "deepseek/deepseek-v4-pro",
     "deepseek-r1": "deepseek/deepseek-reasoner",
     "llama": "ollama/llama3.1:8b",
 }
@@ -550,14 +579,20 @@ def check_context_window(model: str, messages: List[Any]) -> bool:
     info = MODEL_REGISTRY.get(model)
     if not info:
         return True
+    window = info.get("context_window")
+    if not window:
+        return True
     estimated = estimate_token_count(messages)
-    return estimated < info["context_window"]
+    return estimated < window
 
 
 def get_context_window(model: str) -> Optional[int]:
     """Return context window for a model, or None if unknown."""
     info = MODEL_REGISTRY.get(model)
-    return info["context_window"] if info else None
+    if not info:
+        return None
+    window = info.get("context_window")
+    return int(window) if window else None
 
 
 def has_vision(model: str) -> bool:
@@ -701,8 +736,12 @@ def estimate_cost(model: str, prompt_tokens: int, completion_tokens: int) -> Opt
     info = MODEL_REGISTRY.get(model)
     if not info:
         return None
-    input_cost = (prompt_tokens / 1_000_000) * info["cost_per_m_input"]
-    output_cost = (completion_tokens / 1_000_000) * info["cost_per_m_output"]
+    input_rate = info.get("cost_per_m_input")
+    output_rate = info.get("cost_per_m_output")
+    if input_rate is None or output_rate is None:
+        return None
+    input_cost = (prompt_tokens / 1_000_000) * input_rate
+    output_cost = (completion_tokens / 1_000_000) * output_rate
     return input_cost + output_cost
 
 

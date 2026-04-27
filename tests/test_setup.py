@@ -26,6 +26,7 @@ from nadirclaw.setup import (
     select_default_model,
     write_env_file,
 )
+from nadirclaw.model_metadata import load_model_metadata
 
 
 @pytest.fixture(autouse=True)
@@ -96,6 +97,10 @@ class TestClassifyModelTier:
 
     def test_reasoner_is_reasoning(self):
         assert classify_model_tier("deepseek/deepseek-reasoner") == "reasoning"
+
+    def test_deepseek_v4_tiers(self):
+        assert classify_model_tier("deepseek/deepseek-v4-flash") == "simple"
+        assert classify_model_tier("deepseek/deepseek-v4-pro") == "complex"
 
     def test_ollama_is_free(self):
         assert classify_model_tier("ollama/llama3.1:8b") == "free"
@@ -170,7 +175,12 @@ class TestFilterTopModels:
         assert result == models
 
     def test_deepseek_no_filter(self):
-        models = ["deepseek/deepseek-chat", "deepseek/deepseek-reasoner"]
+        models = [
+            "deepseek/deepseek-chat",
+            "deepseek/deepseek-reasoner",
+            "deepseek/deepseek-v4-flash",
+            "deepseek/deepseek-v4-pro",
+        ]
         result = _filter_top_models("deepseek", models)
         assert result == models
 
@@ -251,6 +261,11 @@ class TestSelectDefaultModel:
     def test_ollama_free(self):
         result = select_default_model("free", ["ollama"])
         assert result == "ollama/llama3.1:8b"
+
+    def test_deepseek_defaults(self):
+        assert select_default_model("simple", ["deepseek"]) == "deepseek/deepseek-v4-flash"
+        assert select_default_model("complex", ["deepseek"]) == "deepseek/deepseek-v4-pro"
+        assert select_default_model("reasoning", ["deepseek"]) == "deepseek/deepseek-v4-pro"
 
     def test_no_matching_provider(self):
         result = select_default_model("simple", ["nonexistent"])
@@ -509,6 +524,56 @@ class TestSetupCLI:
         runner = CliRunner()
         result = runner.invoke(main, ["setup"], input="n\n")
         assert result.exit_code == 0
+
+    def test_update_models_writes_metadata(self, tmp_path):
+        from nadirclaw.cli import main
+
+        output = tmp_path / "models.json"
+        runner = CliRunner()
+        result = runner.invoke(main, ["update-models", "--output", str(output)])
+
+        assert result.exit_code == 0
+        assert output.exists()
+        models = load_model_metadata(output)
+        assert "deepseek/deepseek-v4-pro" in models
+        assert "Updated" in result.output
+
+    def test_update_models_dry_run(self, tmp_path):
+        from nadirclaw.cli import main
+
+        output = tmp_path / "models.json"
+        runner = CliRunner()
+        result = runner.invoke(main, ["update-models", "--output", str(output), "--dry-run"])
+
+        assert result.exit_code == 0
+        assert not output.exists()
+        assert "Would write" in result.output
+
+    def test_update_models_source_url(self, tmp_path):
+        from nadirclaw.cli import main
+
+        source = tmp_path / "source.json"
+        output = tmp_path / "models.json"
+        source.write_text(json.dumps({
+            "models": {
+                "custom/source-model": {
+                    "context_window": 12345,
+                    "cost_per_m_input": 0,
+                    "cost_per_m_output": 0,
+                    "has_vision": False,
+                }
+            }
+        }))
+
+        runner = CliRunner()
+        result = runner.invoke(
+            main,
+            ["update-models", "--output", str(output), "--source-url", source.as_uri()],
+        )
+
+        assert result.exit_code == 0
+        models = load_model_metadata(output)
+        assert models["custom/source-model"]["context_window"] == 12345
 
 
 # ---------------------------------------------------------------------------

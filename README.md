@@ -283,6 +283,7 @@ NADIRCLAW_FALLBACK_CHAIN=gpt-4.1,claude-sonnet-4-5-20250929,gemini-2.5-flash  # 
 | **Claude + Claude** | `claude-haiku-4-5-20251001` | `claude-sonnet-4-5-20250929` | `ANTHROPIC_API_KEY` |
 | **OpenAI + Ollama** | `ollama/llama3.1:8b` | `gpt-4.1` | `OPENAI_API_KEY` |
 | **OpenAI + OpenAI** | `gpt-4.1-mini` | `gpt-4.1` | `OPENAI_API_KEY` |
+| **DeepSeek + DeepSeek** | `deepseek/deepseek-v4-flash` | `deepseek/deepseek-v4-pro` | `DEEPSEEK_API_KEY` |
 | **OpenAI Codex** | `gemini-2.5-flash` | `openai-codex/gpt-5.3-codex` | `GEMINI_API_KEY` + OAuth login |
 | **Fully local** | `ollama/llama3.1:8b` | `ollama/qwen3:32b` | None |
 
@@ -634,7 +635,10 @@ Use short names instead of full model IDs:
 | `gpt5` | `gpt-5.2` |
 | `flash` | `gemini-2.5-flash` |
 | `gemini-pro` | `gemini-2.5-pro` |
-| `deepseek` | `deepseek/deepseek-chat` |
+| `deepseek` | `deepseek/deepseek-v4-flash` |
+| `deepseek-v4` | `deepseek/deepseek-v4-flash` |
+| `deepseek-v4-flash` | `deepseek/deepseek-v4-flash` |
+| `deepseek-v4-pro` | `deepseek/deepseek-v4-pro` |
 | `deepseek-r1` | `deepseek/deepseek-reasoner` |
 | `llama` | `ollama/llama3.1:8b` |
 
@@ -693,6 +697,7 @@ If the estimated token count of a request exceeds a model's context window, Nadi
 nadirclaw setup              # Interactive setup wizard (providers, keys, models)
 nadirclaw serve              # Start the router server
 nadirclaw serve --log-raw    # Start with full request/response logging
+nadirclaw update-models      # Refresh local model metadata
 nadirclaw test               # Probe each configured model and verify it responds
 nadirclaw optimize <file>    # Test context compaction on a file (dry-run)
 nadirclaw classify <prompt>  # Classify a prompt (no server needed)
@@ -726,6 +731,29 @@ nadirclaw openwebui onboard  # Show Open WebUI setup instructions
 nadirclaw continue onboard   # Configure Continue (continue.dev) integration
 nadirclaw cursor onboard     # Show Cursor editor setup instructions
 nadirclaw build-centroids    # Regenerate centroid vectors from prototypes
+```
+
+### Model Metadata Updates
+
+`nadirclaw update-models` writes model metadata to `~/.nadirclaw/models.json`.
+Without options it exports the built-in registry. Pass `--source-url` or set
+`NADIRCLAW_MODEL_REGISTRY_URL` to merge a published registry JSON before saving. The
+router merges the saved file at startup, then applies any user-managed overrides from
+`~/.nadirclaw/models.local.json`.
+
+Use `models.local.json` for private models or custom pricing:
+
+```json
+{
+  "models": {
+    "openai/my-local-model": {
+      "context_window": 32768,
+      "cost_per_m_input": 0,
+      "cost_per_m_output": 0,
+      "has_vision": false
+    }
+  }
+}
 ```
 
 ### `nadirclaw serve`
@@ -1112,6 +1140,9 @@ Auth is disabled by default (local-only). Set `NADIRCLAW_AUTH_TOKEN` to require 
 | `NADIRCLAW_BUDGET_STDOUT_ALERTS` | `false` | Print alerts to stdout (`true`/`1`/`yes` to enable) |
 | `NADIRCLAW_MODEL_RATE_LIMITS` | *(none)* | Per-model RPM limits, e.g. `gemini-3-flash-preview=30,gpt-4.1=60` |
 | `NADIRCLAW_DEFAULT_MODEL_RPM` | `0` (unlimited) | Default max requests/minute for any model not in `MODEL_RATE_LIMITS` |
+| `NADIRCLAW_MODEL_REGISTRY_URL` | *(empty — disabled)* | Optional registry JSON URL for `nadirclaw update-models` |
+| `NADIRCLAW_MODEL_METADATA_FILE` | `~/.nadirclaw/models.json` | Generated model metadata file loaded at startup |
+| `NADIRCLAW_LOCAL_MODEL_METADATA_FILE` | `~/.nadirclaw/models.local.json` | User-managed model metadata overrides loaded after generated metadata |
 | `NADIRCLAW_AUTH_TOKEN` | *(empty — auth disabled)* | Set to require a bearer token |
 | `GEMINI_API_KEY` | -- | Google Gemini API key (also accepts `GOOGLE_API_KEY`) |
 | `ANTHROPIC_API_KEY` | -- | Anthropic API key |

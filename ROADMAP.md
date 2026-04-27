@@ -15,8 +15,8 @@ has already shipped.
 - [ ] **Provider health-aware routing** — track rolling error rates per provider (429 / 5xx /
       timeout) and downgrade to the next healthy option automatically; expose health scores in
       `nadirclaw status`
-- [ ] **`nadirclaw update-models` command** — pull the latest model list, context windows, and
-      pricing from a published registry JSON; removes the need for manual constant updates
+- [x] **`nadirclaw update-models` command** — writes local model metadata to
+      `~/.nadirclaw/models.json`, with `models.local.json` support for user overrides
 
 ---
 

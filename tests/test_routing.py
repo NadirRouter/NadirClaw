@@ -1,12 +1,15 @@
 """Tests for nadirclaw.routing — routing intelligence."""
 
+import json
 from types import SimpleNamespace
 
 import pytest
 
 from nadirclaw.routing import (
+    MODEL_REGISTRY,
     MODEL_ALIASES,
     SessionCache,
+    _merge_external_model_metadata,
     apply_routing_modifiers,
     check_context_window,
     detect_agentic,
@@ -15,6 +18,7 @@ from nadirclaw.routing import (
     estimate_cost,
     estimate_token_count,
     has_vision,
+    get_context_window,
     resolve_alias,
     resolve_profile,
 )
@@ -91,7 +95,10 @@ class TestResolveAlias:
         assert resolve_alias("unknown-model") is None
 
     def test_deepseek(self):
-        assert resolve_alias("deepseek") == "deepseek/deepseek-chat"
+        assert resolve_alias("deepseek") == "deepseek/deepseek-v4-flash"
+        assert resolve_alias("deepseek-v4") == "deepseek/deepseek-v4-flash"
+        assert resolve_alias("deepseek-v4-flash") == "deepseek/deepseek-v4-flash"
+        assert resolve_alias("deepseek-v4-pro") == "deepseek/deepseek-v4-pro"
         assert resolve_alias("deepseek-r1") == "deepseek/deepseek-reasoner"
 
 
@@ -318,12 +325,45 @@ class TestEstimateCost:
         assert cost is not None
         assert cost > 0
 
+    def test_deepseek_v4_cost(self):
+        cost = estimate_cost("deepseek/deepseek-v4-pro", 1_000_000, 1_000_000)
+        assert cost == pytest.approx(5.22)
+
     def test_unknown_model(self):
         assert estimate_cost("unknown-xyz", 1000, 500) is None
 
     def test_free_model(self):
         cost = estimate_cost("ollama/llama3.1:8b", 1000, 500)
         assert cost == 0.0
+
+
+# ---------------------------------------------------------------------------
+# local model metadata
+# ---------------------------------------------------------------------------
+
+class TestLocalModelMetadata:
+    def test_external_metadata_adds_model(self, tmp_path, monkeypatch):
+        path = tmp_path / "models.json"
+        model = "custom/custom-fast"
+        path.write_text(json.dumps({
+            "models": {
+                model: {
+                    "context_window": 32768,
+                    "cost_per_m_input": 0,
+                    "cost_per_m_output": 0,
+                    "has_vision": False,
+                }
+            }
+        }))
+        monkeypatch.setenv("NADIRCLAW_MODEL_METADATA_FILE", str(path))
+        monkeypatch.setenv("NADIRCLAW_LOCAL_MODEL_METADATA_FILE", str(tmp_path / "missing.json"))
+
+        try:
+            _merge_external_model_metadata()
+            assert get_context_window(model) == 32768
+            assert estimate_cost(model, 1000, 1000) == 0.0
+        finally:
+            MODEL_REGISTRY.pop(model, None)
 
 
 # ---------------------------------------------------------------------------

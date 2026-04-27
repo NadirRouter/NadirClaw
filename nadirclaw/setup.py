@@ -49,7 +49,7 @@ PROVIDER_INFO: Dict[str, Dict] = {
     },
     "deepseek": {
         "display": "DeepSeek",
-        "description": "DeepSeek V3, Reasoner",
+        "description": "DeepSeek V4 Flash, V4 Pro, Reasoner",
         "env_var": "DEEPSEEK_API_KEY",
         "key_prefix": "sk-",
         "oauth": False,
@@ -74,7 +74,7 @@ _TIER_DEFAULTS = {
     "simple": {
         "google": "gemini-2.5-flash",
         "openai": "gpt-4.1-mini",
-        "deepseek": "deepseek/deepseek-chat",
+        "deepseek": "deepseek/deepseek-v4-flash",
         "ollama": "ollama/llama3.1:8b",
         "anthropic": "claude-haiku-4-5-20251001",
     },
@@ -82,12 +82,12 @@ _TIER_DEFAULTS = {
         "anthropic": "claude-sonnet-4-5-20250929",
         "openai": "gpt-4.1",
         "google": "gemini-2.5-pro",
-        "deepseek": "deepseek/deepseek-reasoner",
+        "deepseek": "deepseek/deepseek-v4-pro",
         "ollama": "ollama/qwen3:32b",
     },
     "reasoning": {
         "openai": "o3",
-        "deepseek": "deepseek/deepseek-reasoner",
+        "deepseek": "deepseek/deepseek-v4-pro",
         "anthropic": "claude-sonnet-4-5-20250929",
         "google": "gemini-2.5-pro",
     },
