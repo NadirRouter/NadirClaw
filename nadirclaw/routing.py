@@ -177,7 +177,7 @@ def _merge_external_model_metadata() -> None:
             continue
         try:
             models = load_model_metadata(path)
-        except Exception as e:
+        except (OSError, ValueError) as e:
             logger.warning("Skipping invalid model metadata file %s: %s", path, e)
             continue
         for model_id, info in models.items():

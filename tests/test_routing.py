@@ -491,6 +491,43 @@ class TestLocalModelMetadata:
         finally:
             MODEL_REGISTRY.pop(model, None)
 
+    def test_local_overrides_generated(self, tmp_path, monkeypatch):
+        generated = tmp_path / "models.json"
+        local = tmp_path / "models.local.json"
+        model = "custom/override-me"
+        generated.write_text(json.dumps({
+            "models": {
+                model: {"context_window": 1000, "cost_per_m_input": 1.0,
+                        "cost_per_m_output": 2.0, "has_vision": False},
+            }
+        }))
+        local.write_text(json.dumps({
+            "models": {
+                model: {"context_window": 5000, "cost_per_m_input": 0.5},
+            }
+        }))
+        monkeypatch.setenv("NADIRCLAW_MODEL_METADATA_FILE", str(generated))
+        monkeypatch.setenv("NADIRCLAW_LOCAL_MODEL_METADATA_FILE", str(local))
+
+        try:
+            _merge_external_model_metadata()
+            assert get_context_window(model) == 5000
+            info = MODEL_REGISTRY[model]
+            assert info["cost_per_m_input"] == 0.5
+            assert info["cost_per_m_output"] == 2.0
+        finally:
+            MODEL_REGISTRY.pop(model, None)
+
+    def test_invalid_metadata_file_is_skipped(self, tmp_path, monkeypatch, caplog):
+        path = tmp_path / "models.json"
+        path.write_text("{not valid json")
+        monkeypatch.setenv("NADIRCLAW_MODEL_METADATA_FILE", str(path))
+        monkeypatch.setenv("NADIRCLAW_LOCAL_MODEL_METADATA_FILE", str(tmp_path / "missing.json"))
+
+        with caplog.at_level("WARNING", logger="nadirclaw.routing"):
+            _merge_external_model_metadata()
+        assert any("Skipping invalid model metadata file" in r.message for r in caplog.records)
+
 
 # ---------------------------------------------------------------------------
 # apply_routing_modifiers

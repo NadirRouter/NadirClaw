@@ -260,14 +260,20 @@ def update_models(output, source_url, dry_run, fmt):
         for model, info in sorted(BUILTIN_MODEL_REGISTRY.items())
     }
     env_source = os.getenv("NADIRCLAW_MODEL_REGISTRY_URL", "")
-    if env_source and not env_source.startswith(("http://", "https://")):
-        raise click.ClickException(f"Source URL must use http(s): {env_source}")
     source = source_url or env_source
+    if source and not source.startswith(("http://", "https://")):
+        raise click.ClickException(f"Source URL must use http(s): {source}")
 
     if source:
+        max_bytes = 10 * 1024 * 1024  # 10 MiB cap on registry payload
         try:
             with urllib.request.urlopen(source, timeout=15) as resp:
-                remote_payload = json.loads(resp.read())
+                raw = resp.read(max_bytes + 1)
+            if len(raw) > max_bytes:
+                raise click.ClickException(
+                    f"Registry payload exceeds {max_bytes} bytes: {source}"
+                )
+            remote_payload = json.loads(raw)
             remote_models = parse_model_metadata(remote_payload)
         except (OSError, ValueError, urllib.error.URLError) as e:
             raise click.ClickException(str(e)) from e

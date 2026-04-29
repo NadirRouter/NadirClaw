@@ -549,12 +549,11 @@ class TestSetupCLI:
         assert not output.exists()
         assert "Would write" in result.output
 
-    def test_update_models_source_url(self, tmp_path):
+    def test_update_models_source_url(self, tmp_path, monkeypatch):
         from nadirclaw.cli import main
 
-        source = tmp_path / "source.json"
         output = tmp_path / "models.json"
-        source.write_text(json.dumps({
+        payload = json.dumps({
             "models": {
                 "custom/source-model": {
                     "context_window": 12345,
@@ -563,17 +562,50 @@ class TestSetupCLI:
                     "has_vision": False,
                 }
             }
-        }))
+        }).encode()
 
+        class _FakeResponse:
+            def __init__(self, body):
+                self._body = body
+            def read(self, size=-1):
+                if size is None or size < 0:
+                    body, self._body = self._body, b""
+                    return body
+                body, self._body = self._body[:size], self._body[size:]
+                return body
+            def __enter__(self):
+                return self
+            def __exit__(self, *_):
+                return False
+
+        def fake_urlopen(url, timeout=None):
+            assert url == "https://example.test/models.json"
+            return _FakeResponse(payload)
+
+        monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
         runner = CliRunner()
         result = runner.invoke(
             main,
-            ["update-models", "--output", str(output), "--source-url", source.as_uri()],
+            ["update-models", "--output", str(output), "--source-url", "https://example.test/models.json"],
         )
 
-        assert result.exit_code == 0
+        assert result.exit_code == 0, result.output
         models = load_model_metadata(output)
         assert models["custom/source-model"]["context_window"] == 12345
+
+    def test_update_models_cli_source_requires_http(self, tmp_path):
+        from nadirclaw.cli import main
+
+        output = tmp_path / "models.json"
+        runner = CliRunner()
+        result = runner.invoke(
+            main,
+            ["update-models", "--output", str(output), "--source-url", "file:///etc/passwd"],
+        )
+
+        assert result.exit_code != 0
+        assert "Source URL must use http(s)" in result.output
+        assert not output.exists()
 
     def test_update_models_env_source_requires_http(self, tmp_path, monkeypatch):
         from nadirclaw.cli import main
@@ -587,6 +619,28 @@ class TestSetupCLI:
         assert result.exit_code != 0
         assert "Source URL must use http(s)" in result.output
         assert not output.exists()
+
+    def test_update_models_rejects_oversized_payload(self, tmp_path, monkeypatch):
+        from nadirclaw.cli import main
+
+        class _BigResponse:
+            def read(self, size=-1):
+                return b"x" * (size if size and size > 0 else 1)
+            def __enter__(self):
+                return self
+            def __exit__(self, *_):
+                return False
+
+        monkeypatch.setattr("urllib.request.urlopen", lambda *a, **k: _BigResponse())
+        runner = CliRunner()
+        result = runner.invoke(
+            main,
+            ["update-models", "--output", str(tmp_path / "models.json"),
+             "--source-url", "https://example.test/big.json"],
+        )
+
+        assert result.exit_code != 0
+        assert "exceeds" in result.output
 
     def test_update_models_source_failure_is_click_error(self, tmp_path, monkeypatch):
         import urllib.error
