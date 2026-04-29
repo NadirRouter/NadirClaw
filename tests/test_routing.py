@@ -95,7 +95,7 @@ class TestResolveAlias:
         assert resolve_alias("unknown-model") is None
 
     def test_deepseek(self):
-        assert resolve_alias("deepseek") == "deepseek/deepseek-v4-flash"
+        assert resolve_alias("deepseek") == "deepseek/deepseek-chat"
         assert resolve_alias("deepseek-v4") == "deepseek/deepseek-v4-flash"
         assert resolve_alias("deepseek-v4-flash") == "deepseek/deepseek-v4-flash"
         assert resolve_alias("deepseek-v4-pro") == "deepseek/deepseek-v4-pro"

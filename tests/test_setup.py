@@ -26,7 +26,7 @@ from nadirclaw.setup import (
     select_default_model,
     write_env_file,
 )
-from nadirclaw.model_metadata import load_model_metadata
+from nadirclaw.model_metadata import load_model_metadata, parse_model_metadata
 
 
 @pytest.fixture(autouse=True)
@@ -263,9 +263,9 @@ class TestSelectDefaultModel:
         assert result == "ollama/llama3.1:8b"
 
     def test_deepseek_defaults(self):
-        assert select_default_model("simple", ["deepseek"]) == "deepseek/deepseek-v4-flash"
-        assert select_default_model("complex", ["deepseek"]) == "deepseek/deepseek-v4-pro"
-        assert select_default_model("reasoning", ["deepseek"]) == "deepseek/deepseek-v4-pro"
+        assert select_default_model("simple", ["deepseek"]) == "deepseek/deepseek-chat"
+        assert select_default_model("complex", ["deepseek"]) == "deepseek/deepseek-reasoner"
+        assert select_default_model("reasoning", ["deepseek"]) == "deepseek/deepseek-reasoner"
 
     def test_no_matching_provider(self):
         result = select_default_model("simple", ["nonexistent"])
@@ -574,6 +574,45 @@ class TestSetupCLI:
         assert result.exit_code == 0
         models = load_model_metadata(output)
         assert models["custom/source-model"]["context_window"] == 12345
+
+    def test_update_models_env_source_requires_http(self, tmp_path, monkeypatch):
+        from nadirclaw.cli import main
+
+        output = tmp_path / "models.json"
+        monkeypatch.setenv("NADIRCLAW_MODEL_REGISTRY_URL", "file:///etc/passwd")
+
+        runner = CliRunner()
+        result = runner.invoke(main, ["update-models", "--output", str(output)])
+
+        assert result.exit_code != 0
+        assert "Source URL must use http(s)" in result.output
+        assert not output.exists()
+
+    def test_update_models_source_failure_is_click_error(self, tmp_path, monkeypatch):
+        import urllib.error
+
+        from nadirclaw.cli import main
+
+        def fail_urlopen(*args, **kwargs):
+            raise urllib.error.URLError("network down")
+
+        monkeypatch.setattr("urllib.request.urlopen", fail_urlopen)
+        runner = CliRunner()
+        result = runner.invoke(
+            main,
+            ["update-models", "--output", str(tmp_path / "models.json"), "--source-url", "https://example.test/models.json"],
+        )
+
+        assert result.exit_code != 0
+        assert "network down" in result.output
+
+    def test_model_metadata_rejects_invalid_values(self):
+        with pytest.raises(ValueError, match="context_window"):
+            parse_model_metadata({"models": {"bad/model": {"context_window": "lots"}}})
+        with pytest.raises(ValueError, match="cost_per_m_input"):
+            parse_model_metadata({"models": {"bad/model": {"cost_per_m_input": -5}}})
+        with pytest.raises(ValueError, match="has_vision"):
+            parse_model_metadata({"models": {"bad/model": {"has_vision": "no"}}})
 
 
 # ---------------------------------------------------------------------------

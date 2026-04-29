@@ -243,6 +243,7 @@ def status():
               help="Output format")
 def update_models(output, source_url, dry_run, fmt):
     """Refresh local model metadata used by the router."""
+    import urllib.error
     import urllib.request
 
     from nadirclaw.model_metadata import (
@@ -258,12 +259,18 @@ def update_models(output, source_url, dry_run, fmt):
         model: dict(info)
         for model, info in sorted(BUILTIN_MODEL_REGISTRY.items())
     }
-    source = source_url or os.getenv("NADIRCLAW_MODEL_REGISTRY_URL", "")
+    env_source = os.getenv("NADIRCLAW_MODEL_REGISTRY_URL", "")
+    if env_source and not env_source.startswith(("http://", "https://")):
+        raise click.ClickException(f"Source URL must use http(s): {env_source}")
+    source = source_url or env_source
 
     if source:
-        with urllib.request.urlopen(source, timeout=15) as resp:
-            remote_payload = json.loads(resp.read())
-        remote_models = parse_model_metadata(remote_payload)
+        try:
+            with urllib.request.urlopen(source, timeout=15) as resp:
+                remote_payload = json.loads(resp.read())
+            remote_models = parse_model_metadata(remote_payload)
+        except (OSError, ValueError, urllib.error.URLError) as e:
+            raise click.ClickException(str(e)) from e
         for model, info in remote_models.items():
             models[model] = {**models.get(model, {}), **info}
 

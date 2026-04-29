@@ -54,8 +54,33 @@ def parse_model_metadata(data: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
             continue
         if not isinstance(info, dict):
             raise ValueError(f"metadata for {model_id!r} must be a JSON object")
-        normalized[model_id.strip()] = dict(info)
+        normalized[model_id.strip()] = _validate_model_info(model_id.strip(), info)
     return normalized
+
+
+def _validate_model_info(model_id: str, info: Dict[str, Any]) -> Dict[str, Any]:
+    """Validate known metadata fields while preserving unknown fields."""
+    normalized = dict(info)
+    if "context_window" in normalized:
+        value = normalized["context_window"]
+        if type(value) is not int or value < 0:
+            raise ValueError(f"{model_id}.context_window must be a non-negative integer")
+
+    for key in ("cost_per_m_input", "cost_per_m_output"):
+        if key not in normalized:
+            continue
+        value = normalized[key]
+        if not _is_non_negative_number(value):
+            raise ValueError(f"{model_id}.{key} must be a non-negative number")
+
+    if "has_vision" in normalized and type(normalized["has_vision"]) is not bool:
+        raise ValueError(f"{model_id}.has_vision must be a boolean")
+
+    return normalized
+
+
+def _is_non_negative_number(value: Any) -> bool:
+    return type(value) in (int, float) and value >= 0
 
 
 def load_model_metadata(path: Path) -> Dict[str, Dict[str, Any]]:
@@ -80,4 +105,6 @@ def write_model_metadata(
         "updated_at": datetime.now(timezone.utc).isoformat(),
         "models": models,
     }
-    path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
+    os.replace(tmp, path)

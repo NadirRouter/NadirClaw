@@ -635,7 +635,7 @@ Use short names instead of full model IDs:
 | `gpt5` | `gpt-5.2` |
 | `flash` | `gemini-2.5-flash` |
 | `gemini-pro` | `gemini-2.5-pro` |
-| `deepseek` | `deepseek/deepseek-v4-flash` |
+| `deepseek` | `deepseek/deepseek-chat` |
 | `deepseek-v4` | `deepseek/deepseek-v4-flash` |
 | `deepseek-v4-flash` | `deepseek/deepseek-v4-flash` |
 | `deepseek-v4-pro` | `deepseek/deepseek-v4-pro` |
@@ -740,6 +740,9 @@ Without options it exports the built-in registry. Pass `--source-url` or set
 `NADIRCLAW_MODEL_REGISTRY_URL` to merge a published registry JSON before saving. The
 router merges the saved file at startup, then applies any user-managed overrides from
 `~/.nadirclaw/models.local.json`.
+
+`update-models` only rewrites the generated metadata file. It does not re-export
+entries from `models.local.json`, so local overrides stay separate across refreshes.
 
 Use `models.local.json` for private models or custom pricing:
 

@@ -74,7 +74,7 @@ _TIER_DEFAULTS = {
     "simple": {
         "google": "gemini-2.5-flash",
         "openai": "gpt-4.1-mini",
-        "deepseek": "deepseek/deepseek-v4-flash",
+        "deepseek": "deepseek/deepseek-chat",
         "ollama": "ollama/llama3.1:8b",
         "anthropic": "claude-haiku-4-5-20251001",
     },
@@ -82,12 +82,12 @@ _TIER_DEFAULTS = {
         "anthropic": "claude-sonnet-4-5-20250929",
         "openai": "gpt-4.1",
         "google": "gemini-2.5-pro",
-        "deepseek": "deepseek/deepseek-v4-pro",
+        "deepseek": "deepseek/deepseek-reasoner",
         "ollama": "ollama/qwen3:32b",
     },
     "reasoning": {
         "openai": "o3",
-        "deepseek": "deepseek/deepseek-v4-pro",
+        "deepseek": "deepseek/deepseek-reasoner",
         "anthropic": "claude-sonnet-4-5-20250929",
         "google": "gemini-2.5-pro",
     },

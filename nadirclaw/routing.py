@@ -207,7 +207,7 @@ MODEL_ALIASES: Dict[str, str] = {
     "flash": "gemini-2.5-flash",
     "gemini-flash": "gemini-2.5-flash",
     "gemini-pro": "gemini-2.5-pro",
-    "deepseek": "deepseek/deepseek-v4-flash",
+    "deepseek": "deepseek/deepseek-chat",
     "deepseek-v4": "deepseek/deepseek-v4-flash",
     "deepseek-v4-flash": "deepseek/deepseek-v4-flash",
     "deepseek-v4-pro": "deepseek/deepseek-v4-pro",
