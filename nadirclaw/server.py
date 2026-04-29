@@ -1053,13 +1053,18 @@ async def chat_completions(
 
             # Upgrade-only cache: escalate if new tier is higher,
             # keep cached tier if it's already equal or above.
-            selected_model, final_tier = session_cache.upgrade_if_higher(
+            selected_model, final_tier, cache_status = session_cache.upgrade_if_higher(
                 request.messages, selected_model, final_tier
             )
 
             analysis_info["tier"] = final_tier
             analysis_info["selected_model"] = selected_model
             analysis_info["routing_modifiers"] = routing_info
+            analysis_info["cache_status"] = cache_status
+            if cache_status == "kept":
+                analysis_info["strategy"] = (
+                    analysis_info.get("strategy", "smart-routing") + "+session-cache"
+                )
 
         # Resolve provider credential
         from nadirclaw.credentials import detect_provider, get_credential

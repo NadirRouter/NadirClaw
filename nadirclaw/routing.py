@@ -399,30 +399,41 @@ class SessionCache:
 
     def upgrade_if_higher(
         self, messages: List[Any], new_model: str, new_tier: str
-    ) -> Tuple[str, str]:
+    ) -> Tuple[str, str, str]:
         """Upgrade the cached tier if *new_tier* outranks the stored one.
 
-        Returns the (model, tier) that should actually be used — either the
-        newly upgraded values or the previously cached ones.
+        Returns ``(model, tier, status)`` where status is one of:
+
+        - ``"new"``      — no entry existed (or was expired); fresh values stored
+        - ``"upgraded"`` — cached tier was lower; entry replaced with higher tier
+        - ``"kept"``     — cached tier was equal or higher; cached values returned
+
+        Expired entries are treated as missing so a stale high-tier entry
+        cannot block a fresh classification.
         """
         key = self._make_key(messages)
         new_rank = self.TIER_ORDER.get(new_tier, 0)
+        now = time.time()
         with self._lock:
             entry = self._cache.get(key)
+            # Treat expired entries as missing — fresh classification wins.
+            if entry is not None and now - entry[2] > self._ttl:
+                del self._cache[key]
+                entry = None
             if entry is None:
-                # Nothing cached yet — store and return the new values.
-                self._cache[key] = (new_model, new_tier, time.time())
-                return new_model, new_tier
+                self._cache[key] = (new_model, new_tier, now)
+                self._evict_lru()
+                return new_model, new_tier, "new"
             cached_model, cached_tier, _ts = entry
             cached_rank = self.TIER_ORDER.get(cached_tier, 0)
             if new_rank > cached_rank:
                 # Escalate — upgrade the cache entry.
-                self._cache[key] = (new_model, new_tier, time.time())
+                self._cache[key] = (new_model, new_tier, now)
                 self._touch(key)
-                return new_model, new_tier
+                return new_model, new_tier, "upgraded"
             # Keep the existing (equal or higher) tier.
             self._touch(key)
-            return cached_model, cached_tier
+            return cached_model, cached_tier, "kept"
 
     def put(self, messages: List[Any], model: str, tier: str) -> None:
         """Store a routing decision for this session (upgrade-only).
