@@ -269,5 +269,10 @@ class Settings:
         """Max characters for truncated tool output."""
         return int(os.getenv("NADIRCLAW_COMPRESS_TOOL_MAX", "500"))
 
+    @property
+    def AGENT_ROLE_DETECTION(self) -> bool:
+        """Enable agent role detection for coding agents (opt-in)."""
+        return os.getenv("NADIRCLAW_AGENT_ROLE_DETECTION", "false").lower() in ("true", "1", "yes")
+
 
 settings = Settings()

@@ -555,6 +555,115 @@ def detect_code_review(prompt: str, system_message: str = "") -> Dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
+# Agent role detection — identify AI coding agent session types
+#
+# This feature is opt-in via NADIRCLAW_AGENT_ROLE_DETECTION=true.
+# It detects coding agent session types (planning, explore, subagent)
+# from system prompt markers. Currently tuned for Claude Code;
+# additional agent support welcome via PR.
+#
+# Markers are intentionally matched against system prompts only,
+# not user messages, to avoid false positives from career questions
+# or general discussion about software architecture.
+# ---------------------------------------------------------------------------
+
+# Named constants for session classification thresholds.
+# Claude Code's system prompt is ~35KB; Cursor varies.
+# Models with < MAIN_SESSION_MIN_CHARS are classified as subagents.
+MAIN_SESSION_MIN_CHARS = 15000  # chars — main session has long system prompt
+SHORT_SESSION_MAX_CHARS = 5000  # chars — likely a subagent/background task
+
+_PLANNING_MARKERS = re.compile(
+    r"(plan\s*mode\s*is\s*active"
+    r"|software\s+architect"
+    r"|planning\s+specialist"
+    r"|READ-ONLY.*planning"
+    r"|architect\s+agent"
+    r"|design.*implementation\s+plan)",
+    re.IGNORECASE,
+)
+
+_EXPLORE_MARKERS = re.compile(
+    r"(explore\s+agent"
+    r"|explore\s+codebase"
+    r"|fast\s+agent\s+specialized\s+for\s+exploring)",
+    re.IGNORECASE,
+)
+
+_SUBAGENT_MARKERS = re.compile(
+    r"(specialized\s+agent"
+    r"|subagent"
+    r"|background\s+agent"
+    r"|search\s+agent)",
+    re.IGNORECASE,
+)
+
+_EXECUTION_TOOLS = {
+    "Bash", "bash", "shell", "execute", "Write", "Edit",
+    "Task", "Run", "NotebookEdit",
+}
+
+
+def detect_agent_role(
+    system_prompt: str,
+    message_count: int = 0,
+    tool_names: Optional[List[str]] = None,
+) -> Dict[str, Any]:
+    """Detect the role/type of an AI coding agent session.
+
+    Examines the system prompt for markers that indicate whether this is a
+    planning session, an explore agent, a subagent, or a main execution session.
+
+    Currently tuned for Claude Code. Opt-in via NADIRCLAW_AGENT_ROLE_DETECTION=true.
+
+    Returns {"role": str, "confidence": float, "signals": list[str]}.
+    Role can be: "planning", "explore", "subagent", or "unknown".
+    """
+    role = "unknown"
+    confidence = 0.0
+    signals: List[str] = []
+    tool_names = tool_names or []
+
+    if _PLANNING_MARKERS.search(system_prompt):
+        return {"role": "planning", "confidence": 0.95, "signals": ["planning_markers"]}
+
+    if _EXPLORE_MARKERS.search(system_prompt):
+        return {"role": "explore", "confidence": 0.95, "signals": ["explore_markers"]}
+
+    # Distinguish subagents from main sessions.
+    # Main sessions have long system prompts with extensive instructions.
+    is_main_session = len(system_prompt) > MAIN_SESSION_MIN_CHARS
+
+    if not is_main_session and _SUBAGENT_MARKERS.search(system_prompt):
+        return {"role": "subagent", "confidence": 0.90, "signals": ["subagent_markers"]}
+
+    if not is_main_session and len(system_prompt) < SHORT_SESSION_MAX_CHARS:
+        role = "subagent"
+        confidence = 0.60  # Matches the routing threshold for subagent tier
+        signals.append("short_system_prompt")
+
+    return {"role": role, "confidence": confidence, "signals": signals}
+
+
+def _get_last_assistant_tool_calls(messages: List[Any]) -> List[str]:
+    """Extract tool names from the last assistant message with tool_use blocks."""
+    for msg in reversed(messages):
+        if getattr(msg, "role", "") != "assistant":
+            continue
+        content = getattr(msg, "content", [])
+        if not isinstance(content, list):
+            continue
+        calls = []
+        for block in content:
+            if isinstance(block, dict) and block.get("type") == "tool_use":
+                name = block.get("name", "")
+                if name:
+                    calls.append(name)
+        return calls
+    return []
+
+
+# ---------------------------------------------------------------------------
 # Context window check
 # ---------------------------------------------------------------------------
 
@@ -810,6 +919,116 @@ def estimate_cost(model: str, prompt_tokens: int, completion_tokens: int) -> Opt
 # Main routing modifier — applies all intelligence
 # ---------------------------------------------------------------------------
 
+def _apply_agent_role_routing(
+    agent_role: Dict[str, Any],
+    messages: List[Any],
+    final_model: str,
+    final_tier: str,
+    simple_model: str,
+    complex_model: str,
+    reasoning_model: Optional[str],
+    explore_model: Optional[str],
+    subagent_model: Optional[str],
+    free_model: Optional[str],
+    routing_info: Dict[str, Any],
+) -> None:
+    """Apply agent role-based routing decisions.
+
+    Mutates routing_info by setting final_model/final_tier and appending
+    modifiers. The caller reads these back and removes the temp keys.
+    """
+    role_type = agent_role.get("role", "unknown")
+    confidence = agent_role.get("confidence", 0.0)
+
+    if role_type == "planning" and confidence >= 0.90:
+        _route_planning_session(
+            messages, final_model, final_tier,
+            simple_model, complex_model, reasoning_model,
+            subagent_model, free_model, routing_info,
+        )
+    elif role_type == "explore" and confidence >= 0.90:
+        target = explore_model or complex_model
+        routing_info["modifiers_applied"].append("agent_role[EXPLORE]")
+        logger.info("Role routing [EXPLORE]: → %s", target)
+        routing_info["final_model"] = target
+        routing_info["final_tier"] = "explore"
+        return
+
+    elif role_type == "subagent" and confidence >= 0.60:
+        target = subagent_model or free_model or simple_model
+        if final_tier not in ("reasoning", "explore"):
+            routing_info["modifiers_applied"].append("agent_role[SUBAGENT]")
+            logger.info("Role routing [SUBAGENT]: → %s (conf=%.2f)", target, confidence)
+            routing_info["final_model"] = target
+            routing_info["final_tier"] = "subagent"
+            return
+
+    # No role override — pass through current values
+    routing_info["final_model"] = final_model
+    routing_info["final_tier"] = final_tier
+
+
+def _route_planning_session(
+    messages: List[Any],
+    final_model: str,
+    final_tier: str,
+    simple_model: str,
+    complex_model: str,
+    reasoning_model: Optional[str],
+    subagent_model: Optional[str],
+    free_model: Optional[str],
+    routing_info: Dict[str, Any],
+) -> None:
+    """Route planning sessions based on the driving phase.
+
+    Planning phases:
+    - USER: new user request (no tool result) → reasoning model for decision-making
+    - EXPLORATION: last tool call was exploration (Read, Glob, etc.) → fast model
+    - PLAN_GENERATION: last tool call was write/edit → reasoning model for quality
+    - CONTEXT: indeterminate → fast model (default)
+    """
+    last_message_is_tool = False
+    if messages:
+        last_message_is_tool = getattr(messages[-1], "role", "") == "tool"
+
+    last_tool_calls = _get_last_assistant_tool_calls(messages)
+    exploration_tools = {"Read", "Bash", "Glob", "Grep", "WebFetch", "WebSearch"}
+    plan_tools = {"Write", "Edit", "ExitPlanMode", "AskUserQuestion"}
+
+    called_exploration = bool(set(last_tool_calls) & exploration_tools)
+    called_plan = bool(set(last_tool_calls) & plan_tools)
+
+    use_reasoning = False
+    driver = "CONTEXT"
+
+    if not last_message_is_tool:
+        use_reasoning = True
+        driver = "USER"
+    elif called_plan:
+        use_reasoning = True
+        driver = "PLAN_GENERATION"
+    elif called_exploration:
+        use_reasoning = False
+        driver = "EXPLORATION"
+
+    if use_reasoning:
+        target = reasoning_model or complex_model
+        routing_info["modifiers_applied"].append(f"planning[{driver}]")
+        logger.info("Plan routing [%s]: → %s", driver, target)
+        routing_info["final_model"] = target
+        routing_info["final_tier"] = "reasoning"
+    else:
+        target = subagent_model or free_model or simple_model
+        routing_info["modifiers_applied"].append(f"planning[{driver}]")
+        logger.info("Plan routing [%s]: → %s", driver, target)
+        routing_info["final_model"] = target
+        routing_info["final_tier"] = "subagent"
+
+
+# ---------------------------------------------------------------------------
+# Main routing modifier — applies all intelligence
+# ---------------------------------------------------------------------------
+
 def apply_routing_modifiers(
     base_model: str,
     base_tier: str,
@@ -819,6 +1038,8 @@ def apply_routing_modifiers(
     complex_model: str,
     reasoning_model: Optional[str] = None,
     free_model: Optional[str] = None,
+    explore_model: Optional[str] = None,
+    subagent_model: Optional[str] = None,
 ) -> Tuple[str, str, Dict[str, Any]]:
     """Apply all routing modifiers on top of the classifier's base decision.
 
@@ -832,6 +1053,25 @@ def apply_routing_modifiers(
 
     final_model = base_model
     final_tier = base_tier
+
+    # --- Agent role detection ---
+    system_text = request_meta.get("system_prompt_text", "")
+    tool_names = request_meta.get("tool_names", [])
+    message_count = request_meta.get("message_count", 0)
+
+    # --- Agent role detection (opt-in) ---
+    # Detects coding agent session types (planning, explore, subagent).
+    # Disabled by default — enable with NADIRCLAW_AGENT_ROLE_DETECTION=true.
+    from nadirclaw.settings import settings as _settings
+    if _settings.AGENT_ROLE_DETECTION:
+        agent_role = detect_agent_role(
+            system_prompt=system_text,
+            message_count=message_count,
+            tool_names=tool_names,
+        )
+    else:
+        agent_role = {"role": "unknown", "confidence": 0.0, "signals": []}
+    routing_info["agent_role"] = agent_role
 
     # --- Agentic detection ---
     agentic = detect_agentic(
@@ -877,6 +1117,19 @@ def apply_routing_modifiers(
                 "Reasoning override: → %s (markers=%d: %s)",
                 target, reasoning["marker_count"], reasoning["markers"],
             )
+
+    # --- Agent role-based routing ---
+    _apply_agent_role_routing(
+        agent_role, messages, final_model, final_tier,
+        simple_model, complex_model, reasoning_model,
+        explore_model, subagent_model, free_model,
+        routing_info,
+    )
+    final_model = routing_info["final_model"]
+    final_tier = routing_info["final_tier"]
+    # Clean up temp keys set by _apply_agent_role_routing
+    routing_info.pop("final_model", None)
+    routing_info.pop("final_tier", None)
 
     # --- Vision detection ---
     if request_meta.get("has_images", False) and not has_vision(final_model):
