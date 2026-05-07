@@ -30,6 +30,15 @@ from nadirclaw.settings import settings
 logger = logging.getLogger("nadirclaw")
 
 
+def _fallback_reason(model: str, error: Exception) -> Dict[str, str]:
+    """Build a compact, log-safe fallback failure reason."""
+    return {
+        "model": model,
+        "error_type": type(error).__name__,
+        "message": str(error)[:200].replace("\n", " "),
+    }
+
+
 # ---------------------------------------------------------------------------
 # Exceptions
 # ---------------------------------------------------------------------------
@@ -1006,6 +1015,9 @@ async def _call_with_fallback(
             raise primary_error
 
         failed_models = [selected_model]
+        analysis_info.setdefault("fallback_reasons", []).append(
+            _fallback_reason(selected_model, primary_error)
+        )
         last_error = primary_error
 
         for fallback_model in chain:
@@ -1035,6 +1047,9 @@ async def _call_with_fallback(
                 if isinstance(chain_error, HTTPException):
                     raise
                 failed_models.append(fallback_model)
+                analysis_info.setdefault("fallback_reasons", []).append(
+                    _fallback_reason(fallback_model, chain_error)
+                )
                 last_error = chain_error
                 continue
 
@@ -1353,6 +1368,7 @@ async def chat_completions(
                     "daily_spend": budget_status["daily_spend"],
                     "response_preview": "[streamed]",
                     "fallback_used": _stream_analysis.get("fallback_from"),
+                    "fallback_reasons": _stream_analysis.get("fallback_reasons", []),
                     "streaming": True,
                     "status": "error" if _stream_analysis.get("_stream_error") else "ok",
                     **_stream_req_meta,
@@ -1424,6 +1440,7 @@ async def chat_completions(
             "daily_spend": budget_status["daily_spend"],
             "response_preview": (response_data["content"] or "")[:100],
             "fallback_used": analysis_info.get("fallback_from"),
+            "fallback_reasons": analysis_info.get("fallback_reasons", []),
             "status": "ok",
             **req_meta,
             **(optimization_info or {}),
@@ -1984,6 +2001,9 @@ async def _stream_with_fallback(
                 return
 
             # Pre-content failure — can try fallback
+            analysis_info.setdefault("fallback_reasons", []).append(
+                _fallback_reason(model, e)
+            )
             failed_models.append(model)
             last_error = e
             continue

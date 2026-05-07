@@ -8,6 +8,7 @@ All notable changes to NadirClaw will be documented in this file.
 - **`nadirclaw update-models` command** — writes refreshable model metadata to `~/.nadirclaw/models.json`, optionally merging a published registry JSON via `--source-url` or `NADIRCLAW_MODEL_REGISTRY_URL`.
 - **Local model metadata overrides** — the router now merges `~/.nadirclaw/models.json` and user-managed `~/.nadirclaw/models.local.json` into the runtime model registry.
 - **DeepSeek V4 explicit aliases** — added `deepseek-v4`, `deepseek-v4-flash`, and `deepseek-v4-pro` while preserving the existing `deepseek` alias for `deepseek/deepseek-chat`.
+- **Fallback reasons logging** — failed fallback attempts now record ordered per-model `fallback_reasons` with compact error types and sanitized messages.
 
 ## [0.14.0] - 2026-04-03
 

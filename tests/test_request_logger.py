@@ -2,6 +2,7 @@
 Tests for the SQLite request logger - basic smoke test.
 """
 
+import json
 import sqlite3
 import tempfile
 from pathlib import Path
@@ -42,6 +43,11 @@ def test_basic_logging_works():
                 "cost": 0.0015,
                 "daily_spend": 0.45,
                 "response_preview": "Hello! How can I help?",
+                "fallback_reasons": [{
+                    "model": "model-primary",
+                    "error_type": "RateLimitExhausted",
+                    "message": "Rate limit exhausted for model-primary (retry in 60s)",
+                }],
             }
             
             request_logger.log_request(entry)
@@ -52,13 +58,17 @@ def test_basic_logging_works():
             conn = sqlite3.connect(str(temp_db))
             cursor = conn.cursor()
             
-            cursor.execute("SELECT request_id, selected_model, cost FROM requests WHERE request_id = ?", ("test-123",))
+            cursor.execute(
+                "SELECT request_id, selected_model, cost, fallback_reasons FROM requests WHERE request_id = ?",
+                ("test-123",),
+            )
             row = cursor.fetchone()
             
             assert row is not None
             assert row[0] == "test-123"
             assert row[1] == "gpt-3.5-turbo"
             assert row[2] == 0.0015
+            assert json.loads(row[3]) == entry["fallback_reasons"]
             
             conn.close()
             

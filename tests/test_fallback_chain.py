@@ -132,6 +132,11 @@ class TestFallbackChainBehavior:
         assert updated_info["fallback_from"] == "model-primary"
         assert "+fallback" in updated_info["strategy"]
         assert call_count["count"] == 2  # primary + backup
+        assert updated_info["fallback_reasons"] == [{
+            "model": "model-primary",
+            "error_type": "RateLimitExhausted",
+            "message": "Rate limit exhausted for model-primary (retry in 60s)",
+        }]
 
     @pytest.mark.asyncio
     async def test_fallback_cascade_through_chain(self, monkeypatch):

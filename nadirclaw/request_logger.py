@@ -64,6 +64,7 @@ def _init_db() -> None:
                     daily_spend REAL,
                     response_preview TEXT,
                     fallback_used TEXT,
+                    fallback_reasons TEXT,
                     error TEXT,
                     tool_count INTEGER,
                     has_images INTEGER,
@@ -93,6 +94,7 @@ def _init_db() -> None:
                 ("optimized_tokens", "INTEGER"),
                 ("tokens_saved", "INTEGER"),
                 ("optimizations_applied", "TEXT"),
+                ("fallback_reasons", "TEXT"),
             ]:
                 try:
                     cursor.execute(f"ALTER TABLE requests ADD COLUMN {col} {col_type}")
@@ -141,6 +143,11 @@ def log_request(entry: Dict[str, Any]) -> None:
     daily_spend = entry.get("daily_spend")
     response_preview = entry.get("response_preview")
     fallback_used = entry.get("fallback_used")
+    fallback_reasons = (
+        json.dumps(entry["fallback_reasons"])
+        if entry.get("fallback_reasons")
+        else None
+    )
     error = entry.get("error")
     tool_count = entry.get("tool_count")
     has_images = 1 if entry.get("has_images") else 0
@@ -165,16 +172,16 @@ def log_request(entry: Dict[str, Any]) -> None:
                     timestamp, request_id, type, status, prompt, selected_model,
                     provider, tier, confidence, complexity_score, classifier_latency_ms,
                     total_latency_ms, prompt_tokens, completion_tokens, total_tokens,
-                    cost, daily_spend, response_preview, fallback_used, error,
+                    cost, daily_spend, response_preview, fallback_used, fallback_reasons, error,
                     tool_count, has_images, has_tools, max_context_tokens,
                     optimization_mode, original_tokens, optimized_tokens,
                     tokens_saved, optimizations_applied
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 timestamp, request_id, req_type, status, prompt, selected_model,
                 provider, tier, confidence, complexity_score, classifier_latency_ms,
                 total_latency_ms, prompt_tokens, completion_tokens, total_tokens,
-                cost, daily_spend, response_preview, fallback_used, error,
+                cost, daily_spend, response_preview, fallback_used, fallback_reasons, error,
                 tool_count, has_images, has_tools, max_context_tokens,
                 optimization_mode, original_tokens, optimized_tokens,
                 tokens_saved, optimizations_applied,
