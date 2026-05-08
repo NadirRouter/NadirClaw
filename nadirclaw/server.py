@@ -39,6 +39,37 @@ def _fallback_reason(model: str, error: Exception) -> Dict[str, str]:
     }
 
 
+def _record_provider_success(model: str) -> None:
+    if settings.PROVIDER_HEALTH is not True:
+        return
+    provider_health_tracker = _provider_health_tracker()
+    provider_health_tracker.record_success(model)
+
+
+def _record_provider_failure(model: str, error: Exception) -> None:
+    if settings.PROVIDER_HEALTH is not True:
+        return
+    provider_health_tracker = _provider_health_tracker()
+    reason = _fallback_reason(model, error)
+    provider_health_tracker.record_failure(model, reason["error_type"], reason["message"])
+
+
+def _order_fallback_candidates(chain: list[str]) -> list[str]:
+    if settings.PROVIDER_HEALTH is not True:
+        return chain
+    provider_health_tracker = _provider_health_tracker()
+    return provider_health_tracker.ordered_candidates(chain)
+
+
+def _provider_health_tracker():
+    from nadirclaw.provider_health import provider_health_tracker
+    failure_threshold = settings.PROVIDER_HEALTH_FAILURE_THRESHOLD
+    cooldown_seconds = settings.PROVIDER_HEALTH_COOLDOWN_SECONDS
+    provider_health_tracker.failure_threshold = failure_threshold if isinstance(failure_threshold, int) else 2
+    provider_health_tracker.cooldown_seconds = cooldown_seconds if isinstance(cooldown_seconds, int) else 60
+    return provider_health_tracker
+
+
 # ---------------------------------------------------------------------------
 # Exceptions
 # ---------------------------------------------------------------------------
@@ -999,15 +1030,17 @@ async def _call_with_fallback(
 
     try:
         response_data = await _dispatch_model(selected_model, request, provider)
+        _record_provider_success(selected_model)
         return response_data, selected_model, analysis_info
     except (RateLimitExhausted, Exception) as primary_error:
         if isinstance(primary_error, HTTPException):
             raise  # Don't fallback on validation/auth errors
+        _record_provider_failure(selected_model, primary_error)
 
         # Build fallback chain: use per-tier chain if configured, else global
         tier = analysis_info.get("tier", "")
         full_chain = settings.get_tier_fallback_chain(tier) if tier else settings.FALLBACK_CHAIN
-        chain = [m for m in full_chain if m != selected_model]
+        chain = _order_fallback_candidates([m for m in full_chain if m != selected_model])
 
         if not chain:
             if isinstance(primary_error, RateLimitExhausted):
@@ -1035,6 +1068,7 @@ async def _call_with_fallback(
                 response_data = await _dispatch_model(
                     fallback_model, request, fallback_provider,
                 )
+                _record_provider_success(fallback_model)
                 analysis_info = {
                     **analysis_info,
                     "fallback_from": selected_model,
@@ -1046,6 +1080,7 @@ async def _call_with_fallback(
             except (RateLimitExhausted, Exception) as chain_error:
                 if isinstance(chain_error, HTTPException):
                     raise
+                _record_provider_failure(fallback_model, chain_error)
                 failed_models.append(fallback_model)
                 analysis_info.setdefault("fallback_reasons", []).append(
                     _fallback_reason(fallback_model, chain_error)
@@ -1898,7 +1933,8 @@ async def _stream_with_fallback(
 
     tier = analysis_info.get("tier", "")
     full_chain = settings.get_tier_fallback_chain(tier) if tier else settings.FALLBACK_CHAIN
-    models_to_try = [selected_model] + [m for m in full_chain if m != selected_model]
+    fallback_chain = _order_fallback_candidates([m for m in full_chain if m != selected_model])
+    models_to_try = [selected_model] + fallback_chain
     created = int(time.time())
     failed_models: list[str] = []
     last_error: Exception | None = None
@@ -1957,6 +1993,8 @@ async def _stream_with_fallback(
             yield {"data": json.dumps(finish_chunk)}
             yield {"data": "[DONE]"}
 
+            _record_provider_success(model)
+
             # Update analysis_info in-place for logging
             if failed_models:
                 analysis_info["fallback_from"] = selected_model
@@ -1998,12 +2036,14 @@ async def _stream_with_fallback(
                 analysis_info["_stream_model"] = model
                 analysis_info["_stream_usage"] = accumulated_usage
                 analysis_info["_stream_error"] = str(e)
+                _record_provider_failure(model, e)
                 return
 
             # Pre-content failure — can try fallback
             analysis_info.setdefault("fallback_reasons", []).append(
                 _fallback_reason(model, e)
             )
+            _record_provider_failure(model, e)
             failed_models.append(model)
             last_error = e
             continue
@@ -2135,6 +2175,13 @@ async def health():
         "simple_model": settings.SIMPLE_MODEL,
         "complex_model": settings.COMPLEX_MODEL,
     }
+
+
+@app.get("/internal/provider_health")
+async def provider_health():
+    if settings.PROVIDER_HEALTH is not True:
+        raise HTTPException(status_code=404, detail="Not found")
+    return _provider_health_tracker().snapshot()
 
 
 @app.get("/")

@@ -9,6 +9,7 @@ All notable changes to NadirClaw will be documented in this file.
 - **Local model metadata overrides** — the router now merges `~/.nadirclaw/models.json` and user-managed `~/.nadirclaw/models.local.json` into the runtime model registry.
 - **DeepSeek V4 explicit aliases** — added `deepseek-v4`, `deepseek-v4-flash`, and `deepseek-v4-pro` while preserving the existing `deepseek` alias for `deepseek/deepseek-chat`.
 - **Fallback reasons logging** — failed fallback attempts now record ordered per-model `fallback_reasons` with compact error types and sanitized messages.
+- **Provider health-aware fallback routing** — optional `NADIRCLAW_PROVIDER_HEALTH=true` mode tracks in-process model health and tries healthy fallback candidates before cooling-down ones.
 
 ## [0.14.0] - 2026-04-03
 

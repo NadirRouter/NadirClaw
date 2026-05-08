@@ -212,6 +212,27 @@ class Settings:
             return 0
 
     @property
+    def PROVIDER_HEALTH(self) -> bool:
+        """Enable health-aware fallback routing."""
+        return os.getenv("NADIRCLAW_PROVIDER_HEALTH", "").lower() in ("1", "true", "yes")
+
+    @property
+    def PROVIDER_HEALTH_COOLDOWN_SECONDS(self) -> int:
+        """Seconds to skip unhealthy fallback candidates before re-admitting them."""
+        try:
+            return max(1, int(os.getenv("NADIRCLAW_PROVIDER_HEALTH_COOLDOWN_SECONDS", "60")))
+        except ValueError:
+            return 60
+
+    @property
+    def PROVIDER_HEALTH_FAILURE_THRESHOLD(self) -> int:
+        """Consecutive health failures before a fallback candidate enters cooldown."""
+        try:
+            return max(1, int(os.getenv("NADIRCLAW_PROVIDER_HEALTH_FAILURE_THRESHOLD", "2")))
+        except ValueError:
+            return 2
+
+    @property
     def OPTIMIZE(self) -> str:
         """Context optimization mode: off, safe, aggressive. Default: off."""
         val = os.getenv("NADIRCLAW_OPTIMIZE", "off").lower()

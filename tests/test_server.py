@@ -30,6 +30,18 @@ class TestHealthEndpoint:
         assert data["status"] == "ok"
         assert "version" in data
 
+    def test_provider_health_hidden_by_default(self, client):
+        resp = client.get("/internal/provider_health")
+        assert resp.status_code == 404
+
+    def test_provider_health_returns_snapshot_when_enabled(self, client):
+        with patch("nadirclaw.server.settings") as mock_settings:
+            mock_settings.PROVIDER_HEALTH = True
+            resp = client.get("/internal/provider_health")
+
+        assert resp.status_code == 200
+        assert "models" in resp.json()
+
 
 class TestModelsEndpoint:
     def test_list_models(self, client):

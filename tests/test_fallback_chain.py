@@ -249,3 +249,95 @@ class TestFallbackChainBehavior:
 
         # Should return graceful error (since chain is exhausted after one model)
         assert "rate-limited" in response["content"].lower()
+
+    @pytest.mark.asyncio
+    async def test_provider_health_skips_unhealthy_fallback_candidate(self):
+        """Health-aware routing should try healthy fallback candidates first."""
+        from nadirclaw.provider_health import ProviderHealthTracker
+        from nadirclaw.server import _call_with_fallback
+
+        class MockRequest:
+            messages = []
+            stream = False
+            temperature = None
+            max_tokens = None
+            top_p = None
+            model_extra = {}
+
+        request = MockRequest()
+        analysis_info = {"tier": "complex", "strategy": "smart-routing"}
+        attempts = []
+        tracker = ProviderHealthTracker(failure_threshold=1, cooldown_seconds=60)
+        tracker.record_failure("m2", "ReadTimeout", "timed out")
+
+        async def mock_dispatch(model, req, provider):
+            attempts.append(model)
+            if model == "m1":
+                raise RuntimeError("primary failed")
+            return {
+                "content": f"Success from {model}",
+                "finish_reason": "stop",
+                "prompt_tokens": 10,
+                "completion_tokens": 20,
+            }
+
+        with patch("nadirclaw.server._dispatch_model", side_effect=mock_dispatch):
+            with patch("nadirclaw.server.settings") as mock_settings:
+                mock_settings.PROVIDER_HEALTH = True
+                mock_settings.FALLBACK_CHAIN = ["m1", "m2", "m3"]
+                mock_settings.get_tier_fallback_chain.return_value = ["m1", "m2", "m3"]
+                with patch("nadirclaw.provider_health.provider_health_tracker", tracker):
+                    response, actual_model, updated_info = await _call_with_fallback(
+                        "m1", request, None, analysis_info
+                    )
+
+        assert attempts == ["m1", "m3"]
+        assert actual_model == "m3"
+        assert response["content"] == "Success from m3"
+        assert updated_info["fallback_chain_tried"] == ["m1"]
+
+    @pytest.mark.asyncio
+    async def test_provider_health_tries_unhealthy_candidates_if_needed(self):
+        """Unhealthy candidates remain a last resort instead of causing early failure."""
+        from nadirclaw.provider_health import ProviderHealthTracker
+        from nadirclaw.server import _call_with_fallback
+
+        class MockRequest:
+            messages = []
+            stream = False
+            temperature = None
+            max_tokens = None
+            top_p = None
+            model_extra = {}
+
+        request = MockRequest()
+        analysis_info = {"tier": "complex", "strategy": "smart-routing"}
+        attempts = []
+        tracker = ProviderHealthTracker(failure_threshold=1, cooldown_seconds=60)
+        tracker.record_failure("m2", "ReadTimeout", "timed out")
+
+        async def mock_dispatch(model, req, provider):
+            attempts.append(model)
+            if model in {"m1", "m3"}:
+                raise RuntimeError(f"{model} failed")
+            return {
+                "content": f"Success from {model}",
+                "finish_reason": "stop",
+                "prompt_tokens": 10,
+                "completion_tokens": 20,
+            }
+
+        with patch("nadirclaw.server._dispatch_model", side_effect=mock_dispatch):
+            with patch("nadirclaw.server.settings") as mock_settings:
+                mock_settings.PROVIDER_HEALTH = True
+                mock_settings.FALLBACK_CHAIN = ["m1", "m2", "m3"]
+                mock_settings.get_tier_fallback_chain.return_value = ["m1", "m2", "m3"]
+                with patch("nadirclaw.provider_health.provider_health_tracker", tracker):
+                    response, actual_model, updated_info = await _call_with_fallback(
+                        "m1", request, None, analysis_info
+                    )
+
+        assert attempts == ["m1", "m3", "m2"]
+        assert actual_model == "m2"
+        assert response["content"] == "Success from m2"
+        assert updated_info["fallback_chain_tried"] == ["m1", "m3"]
