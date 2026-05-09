@@ -4,12 +4,19 @@ All notable changes to NadirClaw will be documented in this file.
 
 ## [Unreleased]
 
+## [0.15.0] - 2026-05-09
+
 ### Added
 - **`nadirclaw update-models` command** — writes refreshable model metadata to `~/.nadirclaw/models.json`, optionally merging a published registry JSON via `--source-url` or `NADIRCLAW_MODEL_REGISTRY_URL`.
 - **Local model metadata overrides** — the router now merges `~/.nadirclaw/models.json` and user-managed `~/.nadirclaw/models.local.json` into the runtime model registry.
 - **DeepSeek V4 explicit aliases** — added `deepseek-v4`, `deepseek-v4-flash`, and `deepseek-v4-pro` while preserving the existing `deepseek` alias for `deepseek/deepseek-chat`.
-- **Fallback reasons logging** — failed fallback attempts now record ordered per-model `fallback_reasons` with compact error types and sanitized messages.
-- **Provider health-aware fallback routing** — optional `NADIRCLAW_PROVIDER_HEALTH=true` mode tracks in-process model health and tries healthy fallback candidates before cooling-down ones.
+- **Model pool weighted load balancing** — pool tier configuration with weighted round-robin across multiple models in the same tier (#36).
+- **Selective context compression module** — opt-in compression for tool-heavy contexts (#40).
+- **Complex coding detection and enhanced reasoning markers** — improved tier classification for coding-heavy prompts and Chinese reasoning markers (#38).
+- **Upgrade-only session cache for agent frameworks** — caches routing decisions per session to avoid repeated downgrades on multi-turn agent flows (#27).
+- **Agent role detection for AI coding assistants** — recognizes Claude Code / Cursor-style system prompts and routes accordingly (#37/#45).
+- **Fallback reasons logging** — failed fallback attempts now record ordered per-model `fallback_reasons` with compact error types and sanitized messages (#47).
+- **Provider health-aware fallback routing** — optional `NADIRCLAW_PROVIDER_HEALTH=true` mode tracks in-process model health and tries healthy fallback candidates before cooling-down ones; debug snapshot via `/internal/provider_health` (#48).
 
 ## [0.14.0] - 2026-04-03
 
