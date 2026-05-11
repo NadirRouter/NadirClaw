@@ -295,5 +295,60 @@ class Settings:
         """Enable agent role detection for coding agents (opt-in)."""
         return os.getenv("NADIRCLAW_AGENT_ROLE_DETECTION", "false").lower() in ("true", "1", "yes")
 
+    # ------------------------------------------------------------------
+    # Embedding backend configuration
+    # ------------------------------------------------------------------
+
+    @property
+    def EMBEDDING_BACKEND(self) -> str:
+        """Embedding backend for the complexity classifier.
+
+        Supported values:
+          sentence-transformers  — local model via sentence-transformers library (default)
+          ollama                 — local Ollama server via /api/embed
+
+        Set via NADIRCLAW_EMBEDDING_BACKEND.
+        Default: sentence-transformers
+        """
+        return os.getenv("NADIRCLAW_EMBEDDING_BACKEND", "sentence-transformers")
+
+    @property
+    def EMBEDDING_MODEL(self) -> str:
+        """Embedding model ID used by the classifier.
+
+        For sentence-transformers: any HuggingFace model ID.
+        For ollama: the model name to pass to /api/embed.
+
+        Set via NADIRCLAW_EMBEDDING_MODEL.
+        Default: all-MiniLM-L6-v2
+        """
+        return os.getenv("NADIRCLAW_EMBEDDING_MODEL", "all-MiniLM-L6-v2")
+
+    @property
+    def EMBEDDING_API_BASE(self) -> str:
+        """Base URL for the embedding API endpoint (used by the ollama backend).
+
+        Set via NADIRCLAW_EMBEDDING_API_BASE.
+        Default: same as OLLAMA_API_BASE (http://localhost:11434)
+        """
+        return os.getenv("NADIRCLAW_EMBEDDING_API_BASE", self.OLLAMA_API_BASE)
+
+    @property
+    def CENTROID_DIR(self) -> "Path | None":
+        """Custom directory for centroid .npy and metadata files.
+
+        When set, the classifier loads centroids from this directory and
+        requires a centroid_metadata.json file for safety validation.
+        When unset (default), the package directory is used and metadata
+        is optional for backward compatibility.
+
+        Set via NADIRCLAW_CENTROID_DIR.
+        Default: None (use package directory)
+        """
+        val = os.getenv("NADIRCLAW_CENTROID_DIR", "")
+        if val:
+            return Path(val).expanduser()
+        return None
+
 
 settings = Settings()

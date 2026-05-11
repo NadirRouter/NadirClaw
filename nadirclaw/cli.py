@@ -569,19 +569,75 @@ def export(fmt, since, model, output_path):
 
 
 @main.command(name="build-centroids")
-def build_centroids():
-    """Regenerate centroid .npy files from prototype prompts."""
+@click.option(
+    "--embedding-backend", default=None,
+    help="Embedding backend: sentence-transformers (default) or ollama.",
+)
+@click.option(
+    "--embedding-model", default=None,
+    help="Embedding model ID (default: all-MiniLM-L6-v2 for sentence-transformers).",
+)
+@click.option(
+    "--embedding-api-base", default=None,
+    help="Base URL for the embedding API (used by the ollama backend).",
+)
+@click.option(
+    "--output-dir", default=None, type=click.Path(path_type=Path),
+    help=(
+        "Directory to write centroid files (default: package directory). "
+        "Set NADIRCLAW_CENTROID_DIR to the same path when using the server."
+    ),
+)
+def build_centroids(embedding_backend, embedding_model, embedding_api_base, output_dir):
+    """Regenerate centroid .npy files and metadata from prototype prompts.
+
+    By default, writes to the package directory using the configured embedding
+    backend and model (sentence-transformers/all-MiniLM-L6-v2 unless overridden
+    by env vars or the CLI flags below).
+
+    Examples::
+
+        # Default: rebuild package centroids with all-MiniLM-L6-v2
+        nadirclaw build-centroids
+
+        # Custom backend: build nomic-embed-text centroids into ~/.nadirclaw/centroids/nomic
+        nadirclaw build-centroids \\
+          --embedding-backend ollama \\
+          --embedding-model nomic-embed-text \\
+          --embedding-api-base http://127.0.0.1:11434 \\
+          --output-dir ~/.nadirclaw/centroids/nomic
+
+    After building custom centroids, point the server at them::
+
+        NADIRCLAW_CENTROID_DIR=~/.nadirclaw/centroids/nomic \\
+        NADIRCLAW_EMBEDDING_BACKEND=ollama \\
+        NADIRCLAW_EMBEDDING_MODEL=nomic-embed-text \\
+        nadirclaw serve
+    """
+    import hashlib
     import logging
+    from datetime import datetime, timezone
 
     import numpy as np
 
     logging.basicConfig(level=logging.INFO, format="%(message)s")
 
-    from nadirclaw.encoder import get_shared_encoder_sync
+    from nadirclaw.encoder import _build_encoder, _reset_shared_encoder
     from nadirclaw.prototypes import COMPLEX_PROTOTYPES, SIMPLE_PROTOTYPES
+    from nadirclaw.settings import settings
 
-    click.echo("Loading encoder...")
-    encoder = get_shared_encoder_sync()
+    backend = embedding_backend or settings.EMBEDDING_BACKEND
+    model_id = embedding_model or settings.EMBEDDING_MODEL
+    api_base = embedding_api_base or settings.EMBEDDING_API_BASE
+
+    # Ensure this command does not reuse an encoder built with prior settings.
+    _reset_shared_encoder()
+
+    click.echo(f"Loading encoder ({backend}/{model_id})...")
+    try:
+        encoder = _build_encoder(backend, model_id, api_base)
+    except (ValueError, RuntimeError) as exc:
+        raise click.ClickException(str(exc)) from exc
 
     click.echo(f"Encoding {len(SIMPLE_PROTOTYPES)} simple prototypes...")
     simple_embs = encoder.encode(SIMPLE_PROTOTYPES, show_progress_bar=False)
@@ -593,16 +649,44 @@ def build_centroids():
     complex_centroid = complex_embs.mean(axis=0)
     complex_centroid = complex_centroid / np.linalg.norm(complex_centroid)
 
-    pkg_dir = os.path.dirname(os.path.abspath(__file__))
-    simple_path = os.path.join(pkg_dir, "simple_centroid.npy")
-    complex_path = os.path.join(pkg_dir, "complex_centroid.npy")
+    dim = int(simple_centroid.shape[0])
 
-    np.save(simple_path, simple_centroid.astype(np.float32))
-    np.save(complex_path, complex_centroid.astype(np.float32))
+    # Determine output directory
+    if output_dir:
+        out_dir = Path(output_dir).expanduser()
+        out_dir.mkdir(parents=True, exist_ok=True)
+    else:
+        out_dir = Path(os.path.dirname(os.path.abspath(__file__)))
+
+    simple_path = out_dir / "simple_centroid.npy"
+    complex_path = out_dir / "complex_centroid.npy"
+    meta_path = out_dir / "centroid_metadata.json"
+
+    np.save(str(simple_path), simple_centroid.astype(np.float32))
+    np.save(str(complex_path), complex_centroid.astype(np.float32))
+
+    # Prototype hash for traceability (short prefix for readability)
+    proto_content = "\n".join(sorted(SIMPLE_PROTOTYPES + COMPLEX_PROTOTYPES))
+    proto_hash = "sha256:" + hashlib.sha256(proto_content.encode()).hexdigest()[:16]
+
+    metadata = {
+        "schema_version": 1,
+        "embedding_backend": backend,
+        "embedding_model": model_id,
+        "dimension": dim,
+        "simple_count": len(SIMPLE_PROTOTYPES),
+        "complex_count": len(COMPLEX_PROTOTYPES),
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "prototypes_hash": proto_hash,
+    }
+    meta_path.write_text(json.dumps(metadata, indent=2))
 
     click.echo(f"\nSaved: {simple_path}")
     click.echo(f"Saved: {complex_path}")
-    click.echo(f"Centroid dimension: {simple_centroid.shape[0]}")
+    click.echo(f"Saved: {meta_path}")
+    click.echo(f"Backend:   {backend}")
+    click.echo(f"Model:     {model_id}")
+    click.echo(f"Dimension: {dim}")
 
 
 @main.group()
