@@ -39,6 +39,47 @@ def _load_recent_logs(limit: int = 200) -> List[Dict[str, Any]]:
     return entries
 
 
+# Reason bucketing matches on error_type class names for stable classification.
+# Schema: fallback_reasons entries are {"model", "error_type", "message"} (PR #47).
+_REASON_BUCKETS: Dict[str, set] = {
+    "rate_limit": {"RateLimitExhausted", "RateLimitError"},
+    "timeout": {"ReadTimeout", "ConnectTimeout", "Timeout", "TimeoutError"},
+    "connection_error": {"ConnectError", "APIConnectionError"},
+    "disconnected": {"RemoteProtocolError", "EndOfStream"},
+}
+
+
+def _classify_error_type(error_type: str) -> str:
+    """Map an error_type class name to a dashboard reason bucket."""
+    for bucket, names in _REASON_BUCKETS.items():
+        if error_type in names:
+            return bucket
+    if error_type.endswith("ServerError"):
+        return "server_error"
+    return "other"
+
+
+def compute_model_stats(completions: List[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
+    """Aggregate per-model success/fail counts and categorized reasons.
+
+    Success = request landed on `selected_model`. Fail = every entry in
+    `fallback_reasons`, attributed to the model that actually failed.
+    """
+    stats: Dict[str, Dict[str, Any]] = {}
+    for e in completions:
+        model = e.get("selected_model", "unknown")
+        stats.setdefault(model, {"success": 0, "fail": 0, "fail_reasons": {}})
+        stats[model]["success"] += 1
+        for fr in e.get("fallback_reasons") or []:
+            fm = fr.get("model", "unknown")
+            stats.setdefault(fm, {"success": 0, "fail": 0, "fail_reasons": {}})
+            stats[fm]["fail"] += 1
+            bucket = _classify_error_type(fr.get("error_type", ""))
+            reasons = stats[fm]["fail_reasons"]
+            reasons[bucket] = reasons.get(bucket, 0) + 1
+    return stats
+
+
 @router.get("/dashboard/api/stats")
 async def dashboard_stats(
     current_user: UserSession = Depends(validate_local_auth),
@@ -97,31 +138,8 @@ async def dashboard_stats(
     # Fallback stats
     fallbacks = sum(1 for e in completions if e.get("fallback_used"))
 
-    # Model success/failure tracking from fallback_reasons
-    model_stats: Dict[str, Dict[str, Any]] = {}
-    for e in completions:
-        # Count successful request
-        model = e.get("selected_model", "unknown")
-        if model not in model_stats:
-            model_stats[model] = {"success": 0, "fail": 0, "fail_reasons": {}}
-        model_stats[model]["success"] += 1
-        # Count failed attempts from fallback_reasons
-        for fr in e.get("fallback_reasons") or []:
-            fm = fr.get("model", "unknown")
-            if fm not in model_stats:
-                model_stats[fm] = {"success": 0, "fail": 0, "fail_reasons": {}}
-            model_stats[fm]["fail"] += 1
-            reason_raw = fr.get("reason", "")
-            reason_type = "other"
-            if "rate" in reason_raw.lower() and "limit" in reason_raw.lower():
-                reason_type = "rate_limit"
-            elif "disconnect" in reason_raw.lower() or "endofstream" in reason_raw.lower():
-                reason_type = "disconnected"
-            elif "connection" in reason_raw.lower() or "connecterror" in reason_raw.lower():
-                reason_type = "connection_error"
-            elif "timeout" in reason_raw.lower():
-                reason_type = "timeout"
-            model_stats[fm]["fail_reasons"][reason_type] = model_stats[fm]["fail_reasons"].get(reason_type, 0) + 1
+    # Model success/failure tracking from fallback_reasons (schema: PR #47).
+    model_stats = compute_model_stats(completions)
 
     # Optimization stats
     total_tokens_saved = sum(e.get("tokens_saved", 0) or 0 for e in completions)
