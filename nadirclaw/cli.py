@@ -1353,6 +1353,157 @@ def onboard():
 
 
 @main.group()
+def claude():
+    """Claude Code seamless integration."""
+    pass
+
+
+@claude.command("onboard")
+@click.option(
+    "--base-url",
+    default=None,
+    help="ANTHROPIC_BASE_URL to write into Claude Code settings "
+    "(default: http://localhost:<PORT>/v1).",
+)
+@click.option(
+    "--api-key",
+    default="local",
+    show_default=True,
+    help="ANTHROPIC_API_KEY value to write into Claude Code settings.",
+)
+@click.option(
+    "--no-daemon",
+    is_flag=True,
+    help="Skip installing the launchd/systemd auto-start unit.",
+)
+@click.option(
+    "--no-settings",
+    is_flag=True,
+    help="Skip editing ~/.claude/settings.json.",
+)
+@click.option(
+    "--detect-only",
+    is_flag=True,
+    help="Show detected tier mapping and exit without writing anything.",
+)
+def claude_onboard(base_url, api_key, no_daemon, no_settings, detect_only):
+    """Make Claude Code talk to NadirClaw automatically.
+
+    Detects the models Claude Code is configured to use, maps them into
+    NadirClaw's routing tiers, persists ANTHROPIC_BASE_URL into Claude Code's
+    settings, and installs a user-scope auto-start unit so the proxy is always
+    up when you run `claude`.
+    """
+    from nadirclaw.claude_integration import (
+        CLAUDE_SETTINGS_FILE,
+        detect_models,
+        install_daemon,
+        patch_claude_settings,
+        update_env_file,
+    )
+    from nadirclaw.settings import settings as nadir_settings
+
+    detected = detect_models()
+    click.echo("Detected Claude Code models:")
+    for tier in ("simple", "mid", "complex", "reasoning"):
+        value = getattr(detected, tier)
+        click.echo(f"  {tier:<10} {value or '—'}")
+    click.echo(f"  sources    {', '.join(detected.sources) or '—'}")
+
+    if detect_only:
+        return
+
+    env_path = update_env_file(detected)
+    click.echo(f"\nUpdated tier mapping in {env_path}")
+
+    resolved_base = base_url or f"http://localhost:{nadir_settings.PORT}/v1"
+
+    if no_settings:
+        click.echo("Skipped editing Claude Code settings (--no-settings).")
+    else:
+        patched = patch_claude_settings(resolved_base, api_key=api_key)
+        click.echo(f"Wrote ANTHROPIC_BASE_URL={resolved_base} to {patched}")
+
+    if no_daemon:
+        click.echo("Skipped daemon install (--no-daemon).")
+    else:
+        installed = install_daemon(port=nadir_settings.PORT)
+        if installed:
+            click.echo(f"Installed auto-start unit at {installed}")
+        else:
+            click.echo(
+                "Auto-start unit not installed (unsupported OS). "
+                "Run `nadirclaw serve` manually or use `nadirclaw claude shim install`."
+            )
+
+    click.echo("\nDone. Open a new shell and run `claude` — it will route through NadirClaw.")
+    click.echo("Inside Claude Code, `/model` lists nadir-auto / nadir-eco / nadir-premium / nadir-reasoning.")
+
+
+@claude.command("shim")
+@click.argument("action", type=click.Choice(["install", "uninstall", "status"]), default="install")
+def claude_shim(action):
+    """Install a lazy-start `claude` wrapper on PATH.
+
+    The wrapper checks whether NadirClaw is already serving on its port; if not,
+    it starts the proxy in the background, exports ANTHROPIC_BASE_URL, and execs
+    the real `claude` binary. No background daemon, no settings.json edit.
+    """
+    from nadirclaw.claude_integration import (
+        SHIM_DIR,
+        SHIM_PATH,
+        install_shim,
+        uninstall_shim,
+    )
+    from nadirclaw.settings import settings as nadir_settings
+
+    if action == "status":
+        if SHIM_PATH.exists():
+            click.echo(f"Shim installed at {SHIM_PATH}")
+        else:
+            click.echo("Shim not installed.")
+        on_path = os.environ.get("PATH", "").split(os.pathsep)
+        click.echo(f"On PATH: {'yes' if str(SHIM_DIR) in on_path else 'no'}")
+        return
+
+    if action == "uninstall":
+        if uninstall_shim():
+            click.echo(f"Removed {SHIM_PATH}")
+        else:
+            click.echo("Shim was not installed.")
+        return
+
+    path = install_shim(port=nadir_settings.PORT)
+    click.echo(f"Installed shim at {path}")
+    click.echo("\nAdd this to your shell rc so `claude` resolves to the shim:")
+    click.echo(f'  export PATH="{path.parent}:$PATH"')
+    click.echo("\nThen just run `claude` — the shim will start NadirClaw on demand.")
+
+
+@claude.command("uninstall")
+def claude_uninstall():
+    """Remove all Claude Code integration artifacts (daemon, shim, settings entries)."""
+    from nadirclaw.claude_integration import (
+        uninstall_daemon,
+        uninstall_shim,
+        unpatch_claude_settings,
+    )
+
+    removed_daemon = uninstall_daemon()
+    for p in removed_daemon:
+        click.echo(f"Removed daemon unit {p}")
+
+    if uninstall_shim():
+        click.echo("Removed claude shim")
+
+    if unpatch_claude_settings():
+        click.echo("Cleared ANTHROPIC_BASE_URL/ANTHROPIC_API_KEY from Claude Code settings")
+
+    if not removed_daemon:
+        click.echo("(no daemon unit was installed)")
+
+
+@main.group()
 def ollama():
     """Ollama discovery and management commands."""
     pass

@@ -2138,11 +2138,24 @@ async def list_models(
     current_user: UserSession = Depends(validate_local_auth),
 ) -> Dict[str, Any]:
     now = int(time.time())
-    # Routing profiles first, then tier models
+    # Routing profiles first, then tier models. The `nadir-*` aliases surface
+    # in Claude Code's `/model` picker so users can switch routing strategies
+    # without leaving the session.
+    profile_ids = [
+        "nadir-auto",
+        "nadir-eco",
+        "nadir-premium",
+        "nadir-reasoning",
+        "nadir-free",
+        # Legacy short names — kept so existing OpenAI-compatible clients
+        # (Open WebUI, Cursor, OpenClaw) don't break.
+        "auto",
+        "eco",
+        "premium",
+    ]
     profiles = [
-        {"id": "auto", "object": "model", "created": now, "owned_by": "nadirclaw"},
-        {"id": "eco", "object": "model", "created": now, "owned_by": "nadirclaw"},
-        {"id": "premium", "object": "model", "created": now, "owned_by": "nadirclaw"},
+        {"id": pid, "object": "model", "created": now, "owned_by": "nadirclaw"}
+        for pid in profile_ids
     ]
     tier_data = [
         {

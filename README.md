@@ -471,20 +471,36 @@ This delegates to the Codex CLI for the OAuth flow and stores the credentials in
 
 [Claude Code](https://docs.anthropic.com/en/docs/claude-code) is Anthropic's CLI coding agent. NadirClaw works as a drop-in proxy that intercepts Claude Code's API calls and routes simple prompts to cheaper models.
 
-```bash
-# Point Claude Code at NadirClaw
-export ANTHROPIC_BASE_URL=http://localhost:8856/v1
-export ANTHROPIC_API_KEY=local
+### Seamless onboard (recommended)
 
-# Start NadirClaw, then use Claude Code normally
-nadirclaw serve --verbose
-claude
+One command wires everything up — detects your Claude Code models, maps them into NadirClaw tiers, persists `ANTHROPIC_BASE_URL` into `~/.claude/settings.json`, and installs a launchd / systemd auto-start unit so the proxy is always up when you run `claude`:
+
+```bash
+nadirclaw claude onboard
 ```
 
-You can also wrap this in a shell alias:
+After that, just run `claude` from any new shell — no env exports, no manual server start. Re-run with `--detect-only` first if you want to see the tier mapping without writing anything, or pass `--no-daemon` / `--no-settings` to skip individual pieces. Undo everything with `nadirclaw claude uninstall`.
+
+### Lightweight shim (no daemon, no settings.json edits)
+
+Prefer not to install a background service? Use the shim instead:
 
 ```bash
-alias claude-routed='ANTHROPIC_BASE_URL=http://localhost:8856/v1 ANTHROPIC_API_KEY=local claude'
+nadirclaw claude shim install
+export PATH="$HOME/.nadirclaw/bin:$PATH"   # add to your shell rc
+```
+
+Now `claude` resolves to a small wrapper that probes `http://localhost:8856/health`, lazy-starts `nadirclaw serve` if it's down, exports the right env vars, and exec's the real Claude binary. Remove it with `nadirclaw claude shim uninstall`.
+
+### Manual setup
+
+If you don't want either option, the original env-var dance still works:
+
+```bash
+export ANTHROPIC_BASE_URL=http://localhost:8856/v1
+export ANTHROPIC_API_KEY=local
+nadirclaw serve --verbose
+claude
 ```
 
 ### Authentication
@@ -503,8 +519,23 @@ nadirclaw auth setup-token
 
 Claude Code sends every request to Anthropic's API. With NadirClaw in front, each prompt is classified in ~10ms:
 
-- Simple prompts (reading files, quick questions, "what does this function do?") get routed to a cheap model like Gemini Flash
-- Complex prompts (refactoring, architecture, multi-file changes) stay on Claude
+- **Simple** — short reads, quick questions, formatting, single-file glances (e.g. "what does this function do?"). Routed to a cheap model like Gemini Flash or Haiku.
+- **Mid** — focused edits, single-function debugging, small refactors. Routed to a mid-tier model when `NADIRCLAW_MID_MODEL` is set.
+- **Complex** — architecture, multi-file refactors, multi-step planning, agentic tool loops, reasoning-heavy prompts. Stays on Claude / GPT-5 / Opus.
+
+Classification uses sentence-transformer embeddings against learned centroids plus rule overrides (tool definitions, reasoning markers, large context, vision content). See `nadirclaw classify "<prompt>"` to test how any prompt would be bucketed.
+
+### `/model` picker inside Claude Code
+
+Once onboarded, Claude Code's `/model` lists NadirClaw routing strategies alongside any underlying real models:
+
+- `nadir-auto` — smart routing (default; per-prompt classification)
+- `nadir-eco` — force cheap tier for every prompt
+- `nadir-premium` — force complex tier for every prompt
+- `nadir-reasoning` — force the reasoning-optimized model
+- `nadir-free` — force the configured free / local model
+
+Pick one with `/model nadir-eco` to override routing for the session.
 
 Streaming works as expected. In typical Claude Code usage, 40-70% of prompts are simple enough to route to a cheaper model, which translates directly to cost savings.
 

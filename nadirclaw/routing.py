@@ -225,14 +225,17 @@ ROUTING_PROFILES = {"auto", "eco", "premium", "free", "reasoning"}
 def resolve_profile(model_field: Optional[str]) -> Optional[str]:
     """Check if the model field is a routing profile name.
 
-    Returns the profile name if matched, None otherwise.
+    Accepts: bare names (`auto`, `eco`, `premium`, `free`, `reasoning`),
+    the `nadirclaw/` prefix, and the `nadir-` prefix (e.g. `nadir-eco`)
+    which is how the profiles surface in Claude Code's `/model` picker.
     """
     if not model_field:
         return None
     cleaned = model_field.strip().lower()
-    # Support "nadirclaw/eco" prefix style
     if cleaned.startswith("nadirclaw/"):
         cleaned = cleaned[len("nadirclaw/"):]
+    elif cleaned.startswith("nadir-"):
+        cleaned = cleaned[len("nadir-"):]
     if cleaned in ROUTING_PROFILES:
         return cleaned
     return None
