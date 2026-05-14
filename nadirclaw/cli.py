@@ -3,8 +3,10 @@
 import json
 import os
 import shutil
+import sys
 from datetime import datetime
 from pathlib import Path
+from typing import Optional
 
 import click
 
@@ -97,34 +99,45 @@ def serve(port, simple_model, complex_model, models, token, verbose, log_raw, op
 @click.argument("prompt", nargs=-1, required=True)
 @click.option("--format", "fmt", default="text", type=click.Choice(["text", "json"]), help="Output format")
 def classify(prompt, fmt):
-    """Classify a prompt as simple or complex (no server needed)."""
+    """Classify a prompt with the configured analyzer (no server needed).
+
+    Honors NADIRCLAW_COMPLEXITY_ANALYZER (binary | distilbert).
+    """
+    import asyncio
     import logging
 
     logging.basicConfig(level=logging.WARNING)
 
-    from nadirclaw.classifier import BinaryComplexityClassifier
+    from nadirclaw.classifier import get_classifier
     from nadirclaw.settings import settings
 
     prompt_text = " ".join(prompt)
-    classifier = BinaryComplexityClassifier()
-    is_complex, confidence = classifier.classify(prompt_text)
+    classifier = get_classifier()
+    result = asyncio.run(classifier.analyze(text=prompt_text))
 
-    tier = "complex" if is_complex else "simple"
-    score = classifier._confidence_to_score(is_complex, confidence)
+    tier = result.get("tier_name") or "simple"
+    confidence = float(result.get("confidence") or 0.0)
+    score = float(result.get("complexity_score") or 0.0)
+    analyzer_type = result.get("analyzer_type", "binary")
 
-    # Pick model from explicit tier config
-    model = settings.COMPLEX_MODEL if is_complex else settings.SIMPLE_MODEL
+    if tier == "complex":
+        model = settings.COMPLEX_MODEL
+    elif tier == "mid":
+        model = settings.MID_MODEL
+    else:
+        model = settings.SIMPLE_MODEL
 
     if fmt == "json":
         click.echo(json.dumps({
             "tier": tier,
-            "is_complex": is_complex,
+            "analyzer": analyzer_type,
             "confidence": round(confidence, 4),
             "score": round(score, 4),
             "model": model,
             "prompt": prompt_text,
         }))
     else:
+        click.echo(f"Analyzer:   {analyzer_type}")
         click.echo(f"Tier:       {tier}")
         click.echo(f"Confidence: {confidence:.4f}")
         click.echo(f"Score:      {score:.4f}")
@@ -1363,7 +1376,8 @@ def claude():
     "--base-url",
     default=None,
     help="ANTHROPIC_BASE_URL to write into Claude Code settings "
-    "(default: http://localhost:<PORT>/v1).",
+    "(default: http://localhost:<PORT>). Claude Code appends `/v1/messages` "
+    "itself, so do NOT include a /v1 suffix.",
 )
 @click.option(
     "--api-key",
@@ -1386,7 +1400,22 @@ def claude():
     is_flag=True,
     help="Show detected tier mapping and exit without writing anything.",
 )
-def claude_onboard(base_url, api_key, no_daemon, no_settings, detect_only):
+@click.option(
+    "--interactive/--no-interactive",
+    "-i/-I",
+    default=None,
+    help="Pick a model for each tier from a menu. Auto-enabled when no "
+    "real config or live API result is available.",
+)
+@click.option(
+    "--default-profile",
+    type=click.Choice(["nadir-auto", "nadir-eco", "nadir-premium", "nadir-reasoning", "nadir-free", "off"]),
+    default=None,
+    help="Set ANTHROPIC_MODEL in settings.json so every `claude` launch routes "
+    "through this profile by default. 'off' leaves Claude Code's picker in "
+    "charge (proxy will just pass through whatever it sends).",
+)
+def claude_onboard(base_url, api_key, no_daemon, no_settings, detect_only, interactive, default_profile):
     """Make Claude Code talk to NadirClaw automatically.
 
     Detects the models Claude Code is configured to use, maps them into
@@ -1397,7 +1426,9 @@ def claude_onboard(base_url, api_key, no_daemon, no_settings, detect_only):
     from nadirclaw.claude_integration import (
         CLAUDE_SETTINGS_FILE,
         detect_models,
+        gather_candidate_models,
         install_daemon,
+        interactive_pick_models,
         patch_claude_settings,
         update_env_file,
     )
@@ -1410,19 +1441,71 @@ def claude_onboard(base_url, api_key, no_daemon, no_settings, detect_only):
         click.echo(f"  {tier:<10} {value or '—'}")
     click.echo(f"  sources    {', '.join(detected.sources) or '—'}")
 
+    # Auto-enable interactive when detection only saw the hardcoded fallback
+    # (i.e. neither Claude Code config nor the live Anthropic API produced
+    # anything). Skip auto when --detect-only or stdin isn't a tty.
+    should_prompt = interactive
+    if should_prompt is None and not detect_only:
+        only_defaults = detected.sources == ["defaults"]
+        should_prompt = only_defaults and sys.stdin.isatty()
+
+    if should_prompt:
+        pool = gather_candidate_models()
+        detected = interactive_pick_models(pool, defaults=detected)
+        click.echo("Final tier mapping:")
+        for tier in ("simple", "mid", "complex", "reasoning"):
+            value = getattr(detected, tier)
+            click.echo(f"  {tier:<10} {value or '—'}")
+
+    # Resolve the default routing profile (what Claude Code sends as `model`).
+    # Without this, Claude Code defaults to opus/sonnet/haiku and the proxy
+    # just passes through — no smart routing happens.
+    chosen_profile: Optional[str] = default_profile
+    if chosen_profile is None and should_prompt and not detect_only:
+        click.echo(
+            "\nWhich profile should `claude` use by default?\n"
+            "  [1] nadir-auto      — smart routing per prompt (recommended)\n"
+            "  [2] nadir-eco       — always cheapest tier\n"
+            "  [3] nadir-premium   — always strongest tier\n"
+            "  [4] nadir-reasoning — always reasoning tier\n"
+            "  [5] off             — leave Claude Code's picker in charge"
+        )
+        pick = click.prompt("  pick", default="1", show_default=True).strip()
+        chosen_profile = {
+            "1": "nadir-auto", "nadir-auto": "nadir-auto",
+            "2": "nadir-eco", "nadir-eco": "nadir-eco",
+            "3": "nadir-premium", "nadir-premium": "nadir-premium",
+            "4": "nadir-reasoning", "nadir-reasoning": "nadir-reasoning",
+            "5": "off", "off": "off",
+        }.get(pick.lower(), "nadir-auto")
+
+    if chosen_profile == "off":
+        chosen_profile = None  # don't write ANTHROPIC_MODEL
+
     if detect_only:
         return
 
     env_path = update_env_file(detected)
     click.echo(f"\nUpdated tier mapping in {env_path}")
 
-    resolved_base = base_url or f"http://localhost:{nadir_settings.PORT}/v1"
+    # Claude Code expects ANTHROPIC_BASE_URL to be the bare host. It appends
+    # `/v1/messages` itself, so a `/v1` suffix here produces `/v1/v1/messages`.
+    resolved_base = base_url or f"http://localhost:{nadir_settings.PORT}"
+    resolved_base = resolved_base.rstrip("/")
+    if resolved_base.endswith("/v1"):
+        resolved_base = resolved_base[:-3]
 
     if no_settings:
         click.echo("Skipped editing Claude Code settings (--no-settings).")
     else:
-        patched = patch_claude_settings(resolved_base, api_key=api_key)
+        patched = patch_claude_settings(
+            resolved_base, api_key=api_key, default_profile=chosen_profile
+        )
         click.echo(f"Wrote ANTHROPIC_BASE_URL={resolved_base} to {patched}")
+        if chosen_profile:
+            click.echo(f"Set ANTHROPIC_MODEL={chosen_profile} (every `claude` launch routes through this)")
+        else:
+            click.echo("Left ANTHROPIC_MODEL untouched — Claude Code's picker controls routing.")
 
     if no_daemon:
         click.echo("Skipped daemon install (--no-daemon).")

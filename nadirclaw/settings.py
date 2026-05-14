@@ -164,6 +164,20 @@ class Settings:
         return os.getenv("NADIRCLAW_FREE_MODEL", "") or self.SIMPLE_MODEL
 
     @property
+    def COMPLEXITY_ANALYZER_TYPE(self) -> str:
+        """Which classifier to use for smart routing.
+
+          - "binary"     (default) — fast 2-class centroid classifier (~10ms, 22MB)
+          - "distilbert"           — 3-class fine-tuned DistilBERT (~30ms, 256MB)
+                                     produces simple/mid/complex tiers natively.
+
+        Set via NADIRCLAW_COMPLEXITY_ANALYZER. The DistilBERT artifact is not
+        shipped in the package — install separately or train via
+        `nadir.distilbert_classifier.DistilBertClassifier()`.
+        """
+        return os.getenv("NADIRCLAW_COMPLEXITY_ANALYZER", "binary").strip().lower()
+
+    @property
     def FALLBACK_CHAIN(self) -> list[str]:
         """Ordered fallback chain. When a model fails, try the next one.
 

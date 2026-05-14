@@ -33,6 +33,10 @@ logs/
 .gemini/
 .cursor/
 
+# Optional DistilBERT classifier artifact (~256MB) — opt-in via
+# NADIRCLAW_COMPLEXITY_ANALYZER=distilbert. Users train or download separately.
+nadirclaw/distilbert_model/
+
 # NadirClaw credentials (prevent accidental commits)
 .nadirclaw/
 credentials.json

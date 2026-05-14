@@ -42,3 +42,49 @@ class TestBinaryClassifier:
     async def test_analyze_async(self):
         result = await self.clf.analyze(text="What is Python?")
         assert result["tier_name"] in ("simple", "complex")
+
+
+class TestClassifierFactory:
+    """get_classifier() dispatches on NADIRCLAW_COMPLEXITY_ANALYZER."""
+
+    def _reset_singleton(self):
+        import nadirclaw.classifier as c
+        c._active_classifier = None
+
+    def test_default_is_binary(self, monkeypatch):
+        monkeypatch.delenv("NADIRCLAW_COMPLEXITY_ANALYZER", raising=False)
+        self._reset_singleton()
+        from nadirclaw.classifier import get_classifier, BinaryComplexityClassifier
+        clf = get_classifier()
+        assert isinstance(clf, BinaryComplexityClassifier)
+
+    def test_explicit_binary(self, monkeypatch):
+        monkeypatch.setenv("NADIRCLAW_COMPLEXITY_ANALYZER", "binary")
+        self._reset_singleton()
+        from nadirclaw.classifier import get_classifier, BinaryComplexityClassifier
+        assert isinstance(get_classifier(), BinaryComplexityClassifier)
+
+    def test_distilbert_load_failure_falls_back_to_binary(self, monkeypatch):
+        """If the DistilBERT artifact can't load, we degrade to binary, not crash."""
+        monkeypatch.setenv("NADIRCLAW_COMPLEXITY_ANALYZER", "distilbert")
+        self._reset_singleton()
+
+        import builtins
+        real_import = builtins.__import__
+
+        def _boom(name, *args, **kwargs):
+            if name == "nadirclaw.distilbert_classifier":
+                raise RuntimeError("simulated missing model artifact")
+            return real_import(name, *args, **kwargs)
+
+        monkeypatch.setattr(builtins, "__import__", _boom)
+        from nadirclaw.classifier import get_classifier, BinaryComplexityClassifier
+        clf = get_classifier()
+        assert isinstance(clf, BinaryComplexityClassifier)
+        self._reset_singleton()
+
+    def test_factory_singleton_is_cached(self, monkeypatch):
+        monkeypatch.delenv("NADIRCLAW_COMPLEXITY_ANALYZER", raising=False)
+        self._reset_singleton()
+        from nadirclaw.classifier import get_classifier
+        assert get_classifier() is get_classifier()

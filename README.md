@@ -85,6 +85,7 @@ That's it. NadirClaw starts on `http://localhost:8856` with sensible defaults (G
 
 - **Context Optimize** — compacts bloated context (JSON, tool schemas, chat history, whitespace) before dispatch, saving 30-70% input tokens with zero semantic loss. Modes: `off` (default), `safe` (lossless), `aggressive` (future). See [savings analysis](docs/context-optimize-savings.md)
 - **Smart routing** — classifies prompts in ~10ms using sentence embeddings
+- **Pluggable classifier** — `binary` (default, ~10ms centroid classifier) or `distilbert` (3-class fine-tuned DistilBERT that natively predicts simple/mid/complex). Select with `NADIRCLAW_COMPLEXITY_ANALYZER`
 - **Three-tier routing** — simple / mid / complex tiers with configurable score thresholds (`NADIRCLAW_TIER_THRESHOLDS`); set `NADIRCLAW_MID_MODEL` for a cost-effective middle tier
 - **Agentic task detection** — auto-detects tool use, multi-step loops, and agent system prompts; forces complex model for agentic requests
 - **Reasoning detection** — identifies prompts needing chain-of-thought and routes to reasoning-optimized models
@@ -289,6 +290,29 @@ NADIRCLAW_FALLBACK_CHAIN=gpt-4.1,claude-sonnet-4-5-20250929,gemini-2.5-flash  # 
 
 Gemini models are called natively via the Google GenAI SDK. All other models go through [LiteLLM](https://docs.litellm.ai/docs/providers), which supports 100+ providers.
 
+### Complexity analyzer
+
+NadirClaw ships two prompt classifiers. Pick one with `NADIRCLAW_COMPLEXITY_ANALYZER`:
+
+| Value | Model | Latency | Size | Output |
+|---|---|---|---|---|
+| `binary` *(default)* | Sentence-embedding centroid classifier | ~10ms | ~22MB | 2-class (simple / complex) — `mid` and `reasoning` come from rule overlays |
+| `distilbert` | Fine-tuned DistilBERT sequence classifier | ~30ms | ~256MB | 3-class (simple / mid / complex) predicted natively |
+
+```bash
+# opt into the 3-class DistilBERT classifier
+NADIRCLAW_COMPLEXITY_ANALYZER=distilbert
+```
+
+The DistilBERT artifact is **not** bundled in the package — on first use it downloads (~256MB, then cached under `~/.cache/huggingface/hub/`) from the Hugging Face Hub. Override the source repo with `NADIRCLAW_DISTILBERT_REPO`. If the download fails, NadirClaw logs a warning and falls back to the binary classifier — it never crashes the router.
+
+Test how any prompt buckets with either analyzer:
+
+```bash
+nadirclaw classify "design a distributed rate limiter"
+NADIRCLAW_COMPLEXITY_ANALYZER=distilbert nadirclaw classify "fix this typo"
+```
+
 ## Usage with Gemini
 
 Gemini is the default simple model. NadirClaw calls Gemini natively via the Google GenAI SDK for best performance.
@@ -473,13 +497,17 @@ This delegates to the Codex CLI for the OAuth flow and stores the credentials in
 
 ### Seamless onboard (recommended)
 
-One command wires everything up — detects your Claude Code models, maps them into NadirClaw tiers, persists `ANTHROPIC_BASE_URL` into `~/.claude/settings.json`, and installs a launchd / systemd auto-start unit so the proxy is always up when you run `claude`:
+One command wires everything up — detects your Claude Code models, maps them into NadirClaw tiers, persists `ANTHROPIC_BASE_URL` + `ANTHROPIC_MODEL` into `~/.claude/settings.json`, and installs a launchd / systemd auto-start unit so the proxy is always up when you run `claude`:
 
 ```bash
-nadirclaw claude onboard
+nadirclaw claude onboard --interactive
 ```
 
+`--interactive` shows a menu of every model your account can reach (pulled live from Anthropic's `/v1/models` using your stored token, with a hardcoded fallback) and lets you pick a model for each tier plus a default routing profile. Without the flag, onboarding auto-detects.
+
 After that, just run `claude` from any new shell — no env exports, no manual server start. Re-run with `--detect-only` first if you want to see the tier mapping without writing anything, or pass `--no-daemon` / `--no-settings` to skip individual pieces. Undo everything with `nadirclaw claude uninstall`.
+
+> **Subscription users:** if you don't have an Anthropic API key, run `claude setup-token` and feed the result to `nadirclaw auth setup-token` first. NadirClaw then talks to Anthropic on your behalf using the subscription token.
 
 ### Lightweight shim (no daemon, no settings.json edits)
 
@@ -497,11 +525,14 @@ Now `claude` resolves to a small wrapper that probes `http://localhost:8856/heal
 If you don't want either option, the original env-var dance still works:
 
 ```bash
-export ANTHROPIC_BASE_URL=http://localhost:8856/v1
+export ANTHROPIC_BASE_URL=http://localhost:8856   # bare host — Claude Code appends /v1/messages itself
 export ANTHROPIC_API_KEY=local
+export ANTHROPIC_MODEL=nadir-auto                 # so Claude Code routes through NadirClaw
 nadirclaw serve --verbose
 claude
 ```
+
+> **Important:** `ANTHROPIC_BASE_URL` must **not** include a `/v1` suffix — Claude Code appends `/v1/messages` itself, so a suffix produces a broken `/v1/v1/messages` path.
 
 ### Authentication
 
@@ -525,19 +556,28 @@ Claude Code sends every request to Anthropic's API. With NadirClaw in front, eac
 
 Classification uses sentence-transformer embeddings against learned centroids plus rule overrides (tool definitions, reasoning markers, large context, vision content). See `nadirclaw classify "<prompt>"` to test how any prompt would be bucketed.
 
-### `/model` picker inside Claude Code
+### Choosing routing profiles in Claude Code
 
-Once onboarded, Claude Code's `/model` lists NadirClaw routing strategies alongside any underlying real models:
+Claude Code's `/model` **picker UI is hardcoded** to Anthropic's own model families — it does not show custom entries, even though NadirClaw advertises them on `/v1/models`. To route through a NadirClaw profile, set the model explicitly:
 
-- `nadir-auto` — smart routing (default; per-prompt classification)
-- `nadir-eco` — force cheap tier for every prompt
-- `nadir-premium` — force complex tier for every prompt
-- `nadir-reasoning` — force the reasoning-optimized model
-- `nadir-free` — force the configured free / local model
+```bash
+claude --model nadir-auto        # smart routing (per-prompt classification)
+claude --model nadir-eco         # force cheap tier for every prompt
+claude --model nadir-premium     # force complex tier for every prompt
+claude --model nadir-reasoning   # force the reasoning-optimized model
+claude --model nadir-free        # force the configured free / local model
+```
 
-Pick one with `/model nadir-eco` to override routing for the session.
+Or persist a default by setting `ANTHROPIC_MODEL` in `~/.claude/settings.json` (the `onboard` command does this for you). Inside a session you can also type `/model nadir-eco` as a slash command.
 
 Streaming works as expected. In typical Claude Code usage, 40-70% of prompts are simple enough to route to a cheaper model, which translates directly to cost savings.
+
+### How the proxy speaks to Claude Code
+
+NadirClaw exposes **both** API surfaces:
+
+- `/v1/chat/completions` — OpenAI-compatible (Open WebUI, Cursor, Continue, …)
+- `/v1/messages` — Anthropic-compatible (Claude Code). Routing runs first, then the request is forwarded to `api.anthropic.com` with the model rewritten. Streaming is piped through SSE byte-for-byte.
 
 ## Usage with Open WebUI
 

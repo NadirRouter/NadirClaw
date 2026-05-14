@@ -199,19 +199,65 @@ class BinaryComplexityClassifier:
 # Singleton helpers
 # ---------------------------------------------------------------------------
 _singleton: Optional[BinaryComplexityClassifier] = None
+_active_classifier: Optional[Any] = None  # binary or distilbert, set on first use
 
 
 def get_binary_classifier() -> BinaryComplexityClassifier:
-    """Return the singleton classifier instance."""
+    """Return the singleton binary classifier instance."""
     global _singleton
     if _singleton is None:
         _singleton = BinaryComplexityClassifier()
     return _singleton
 
 
+def get_classifier() -> Any:
+    """Return whichever classifier is configured via NADIRCLAW_COMPLEXITY_ANALYZER.
+
+    Defaults to the binary centroid classifier. Set
+    `NADIRCLAW_COMPLEXITY_ANALYZER=distilbert` to use the 3-class DistilBERT
+    classifier (requires the ~256MB model directory to be present).
+    """
+    global _active_classifier
+    if _active_classifier is not None:
+        return _active_classifier
+
+    from nadirclaw.settings import settings
+
+    kind = settings.COMPLEXITY_ANALYZER_TYPE
+    if kind == "distilbert":
+        try:
+            from nadirclaw.distilbert_classifier import DistilBertClassifier
+            _active_classifier = DistilBertClassifier()
+            logger.info("Using DistilBERT classifier (3-class: simple/mid/complex)")
+            return _active_classifier
+        except Exception as e:
+            logger.warning(
+                "Failed to load DistilBERT classifier (%s) — falling back to binary",
+                e,
+            )
+    _active_classifier = get_binary_classifier()
+    return _active_classifier
+
+
 def warmup() -> None:
-    """Pre-warm the encoder and load centroids once at startup."""
-    global _singleton
+    """Pre-warm the configured classifier at startup."""
+    global _singleton, _active_classifier
+    from nadirclaw.settings import settings
+
+    kind = settings.COMPLEXITY_ANALYZER_TYPE
+    if kind == "distilbert":
+        try:
+            from nadirclaw.distilbert_classifier import DistilBertClassifier
+            logger.info("Warming up DistilBertClassifier (3-class) ...")
+            _active_classifier = DistilBertClassifier()
+            logger.info("DistilBertClassifier warmup complete")
+            return
+        except Exception as e:
+            logger.warning(
+                "DistilBERT warmup failed (%s) — falling back to binary classifier",
+                e,
+            )
     logger.info("Warming up BinaryComplexityClassifier ...")
     _singleton = BinaryComplexityClassifier()
+    _active_classifier = _singleton
     logger.info("BinaryComplexityClassifier warmup complete")

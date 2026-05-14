@@ -31,7 +31,9 @@ import sys
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Callable, Dict, List, Optional, Tuple
+from urllib import error as urllib_error
+from urllib import request as urllib_request
 
 from nadirclaw.setup import CONFIG_DIR, ENV_FILE, classify_model_tier
 
@@ -100,20 +102,159 @@ def _candidate_models(claude_settings: Dict, claude_json: Dict) -> List[str]:
 
 
 _CLAUDE_FAMILY_FALLBACK = [
-    "claude-haiku-4-5-20251001",
-    "claude-sonnet-4-5-20250929",
-    "claude-opus-4-1-20250805",
+    "claude-haiku-4-5",
+    "claude-sonnet-4-6",
+    "claude-opus-4-6",
 ]
+
+
+_ANTHROPIC_MODELS_URL = "https://api.anthropic.com/v1/models"
+_LIVE_FETCH_TIMEOUT = 5.0
+
+
+def _auth_headers_for_token(token: str) -> List[Dict[str, str]]:
+    """Return header sets to try for /v1/models, in order.
+
+    Anthropic accepts two auth styles:
+      - `x-api-key: <key>` for regular API keys (`sk-ant-api*`)
+      - `Authorization: Bearer <token>` for subscription OAuth tokens
+        (`sk-ant-oat*`, minted by `claude setup-token`)
+    """
+    common = {"anthropic-version": "2023-06-01"}
+    bearer = {"Authorization": f"Bearer {token}", **common}
+    api_key = {"x-api-key": token, **common}
+    if token.startswith("sk-ant-oat"):
+        return [bearer, api_key]
+    if token.startswith("sk-ant-api"):
+        return [api_key, bearer]
+    return [bearer, api_key]
+
+
+def _fetch_anthropic_models(token: Optional[str] = None) -> List[str]:
+    """Query Anthropic's /v1/models with the stored credential.
+
+    Returns a list of model IDs, or an empty list on any failure
+    (no creds, network error, non-200, bad JSON). Handles both regular
+    API keys and subscription OAuth tokens.
+    """
+    if not token:
+        try:
+            from nadirclaw.credentials import get_credential
+
+            token = get_credential("anthropic")
+        except Exception:
+            token = None
+    if not token:
+        return []
+
+    payload = None
+    for headers in _auth_headers_for_token(token):
+        req = urllib_request.Request(_ANTHROPIC_MODELS_URL, headers=headers)
+        try:
+            with urllib_request.urlopen(req, timeout=_LIVE_FETCH_TIMEOUT) as resp:
+                payload = json.loads(resp.read().decode("utf-8"))
+                break
+        except urllib_error.HTTPError as e:
+            if e.code in (401, 403):
+                continue  # try the next auth style
+            return []
+        except (urllib_error.URLError, TimeoutError, ValueError, OSError):
+            return []
+
+    if payload is None:
+        return []
+
+    data = payload.get("data") if isinstance(payload, dict) else None
+    if not isinstance(data, list):
+        return []
+    ids: List[str] = []
+    for entry in data:
+        if isinstance(entry, dict):
+            mid = entry.get("id")
+            if isinstance(mid, str) and mid.strip():
+                ids.append(mid.strip())
+    return ids
+
+
+@dataclass
+class CandidatePool:
+    """Pool of model IDs available for tier selection, with source attribution."""
+
+    models: List[str] = field(default_factory=list)
+    sources: List[str] = field(default_factory=list)
+    source_of: Dict[str, str] = field(default_factory=dict)
+
+
+def gather_candidate_models(
+    claude_settings: Optional[Dict] = None,
+    claude_json: Optional[Dict] = None,
+    fetch_live_models: Optional[Callable[[], List[str]]] = None,
+) -> CandidatePool:
+    """Collect every model ID we can offer the user, with where it came from.
+
+    Pool order (deduped, preserves order of first appearance):
+      1. Models named in `~/.claude/settings.json` / `~/.claude.json`.
+      2. Live `/v1/models` lookup against Anthropic.
+      3. Hardcoded Claude 4.6 family defaults.
+    """
+    if claude_settings is None:
+        claude_settings = _read_json(CLAUDE_SETTINGS_FILE)
+    if claude_json is None:
+        claude_json = _read_json(CLAUDE_JSON_FILE)
+
+    pool = CandidatePool()
+    seen: set = set()
+
+    def add(model: str, source: str) -> None:
+        if not model or model in seen:
+            return
+        seen.add(model)
+        pool.models.append(model)
+        pool.source_of[model] = source
+
+    settings_models = _candidate_models(claude_settings, {})
+    if settings_models:
+        pool.sources.append(str(CLAUDE_SETTINGS_FILE))
+        for m in settings_models:
+            add(m, str(CLAUDE_SETTINGS_FILE))
+
+    claude_json_models = _candidate_models({}, claude_json)
+    if claude_json_models:
+        pool.sources.append(str(CLAUDE_JSON_FILE))
+        for m in claude_json_models:
+            add(m, str(CLAUDE_JSON_FILE))
+
+    fetcher = fetch_live_models or _fetch_anthropic_models
+    try:
+        live = fetcher() or []
+    except Exception:
+        live = []
+    if live:
+        pool.sources.append("anthropic api")
+        for m in live:
+            add(m, "anthropic api")
+
+    if not pool.models:
+        pool.sources.append("defaults")
+        for m in _CLAUDE_FAMILY_FALLBACK:
+            add(m, "defaults")
+
+    return pool
 
 
 def detect_models(
     claude_settings: Optional[Dict] = None,
     claude_json: Optional[Dict] = None,
+    fetch_live_models: Optional[Callable[[], List[str]]] = None,
 ) -> DetectedModels:
     """Bucket detected Claude Code models into NadirClaw tiers.
 
-    If no config exists, fall back to the Anthropic family defaults so
-    that NadirClaw still has reasonable tier targets for Claude Code.
+    Resolution order:
+      1. Models named in `~/.claude/settings.json` / `~/.claude.json`.
+      2. Live `/v1/models` lookup against Anthropic using the stored
+         subscription token or API key (subscription users have no
+         model IDs in local files, so this is the common path).
+      3. Hardcoded Claude 4.6 family defaults.
     """
     if claude_settings is None:
         claude_settings = _read_json(CLAUDE_SETTINGS_FILE)
@@ -122,10 +263,21 @@ def detect_models(
 
     found = _candidate_models(claude_settings, claude_json)
     sources: List[str] = []
-    if CLAUDE_SETTINGS_FILE.exists() and claude_settings:
-        sources.append(str(CLAUDE_SETTINGS_FILE))
-    if CLAUDE_JSON_FILE.exists() and claude_json:
-        sources.append(str(CLAUDE_JSON_FILE))
+    if found:
+        if CLAUDE_SETTINGS_FILE.exists() and _candidate_models(claude_settings, {}):
+            sources.append(str(CLAUDE_SETTINGS_FILE))
+        if CLAUDE_JSON_FILE.exists() and _candidate_models({}, claude_json):
+            sources.append(str(CLAUDE_JSON_FILE))
+
+    if not found:
+        fetcher = fetch_live_models or _fetch_anthropic_models
+        try:
+            live = fetcher() or []
+        except Exception:
+            live = []
+        if live:
+            found = live
+            sources.append("anthropic api")
 
     if not found:
         found = list(_CLAUDE_FAMILY_FALLBACK)
@@ -154,6 +306,85 @@ def detect_models(
         buckets.simple = buckets.complex
 
     return buckets
+
+
+_TIER_HINTS = {
+    "simple": "short questions, formatting, quick reads → cheapest haiku/flash tier",
+    "mid": "focused edits, single-function debugging → optional mid tier",
+    "complex": "architecture, multi-file refactors, agentic loops → sonnet/opus tier",
+    "reasoning": "heavy thinking, long-horizon planning → strongest available model",
+}
+
+_TIER_ORDER = ("simple", "mid", "complex", "reasoning")
+
+
+def interactive_pick_models(
+    pool: CandidatePool,
+    defaults: Optional[DetectedModels] = None,
+    prompt_fn: Optional[Callable[..., str]] = None,
+    echo_fn: Optional[Callable[[str], None]] = None,
+) -> DetectedModels:
+    """Walk the user through picking a model for each routing tier.
+
+    Each tier gets a numbered menu of `pool.models`. The user can:
+      - press Enter to accept the suggested default
+      - type a number from the list
+      - type a model ID not in the list (free-form)
+      - type 'skip' / '-' / '' (when no default) to leave the tier empty
+
+    `prompt_fn` and `echo_fn` are injectable so this can be unit-tested
+    without spawning a real terminal.
+    """
+    import click  # local import to keep module importable in headless contexts
+
+    if prompt_fn is None:
+        prompt_fn = click.prompt
+    if echo_fn is None:
+        echo_fn = click.echo
+
+    defaults = defaults or DetectedModels()
+    selected = DetectedModels(sources=list(pool.sources))
+
+    echo_fn("\nAvailable models:")
+    for idx, model in enumerate(pool.models, 1):
+        src = pool.source_of.get(model, "")
+        echo_fn(f"  [{idx}] {model}{f'  ({src})' if src else ''}")
+    echo_fn("Press Enter to accept the default, type a number, paste a model ID, or type 'skip'.\n")
+
+    for tier in _TIER_ORDER:
+        suggestion = getattr(defaults, tier)
+        suggestion_label = suggestion or "skip"
+        hint = _TIER_HINTS.get(tier, "")
+        echo_fn(f"  {tier} — {hint}")
+        raw = prompt_fn(
+            f"  pick model for '{tier}'",
+            default=suggestion_label,
+            show_default=True,
+        )
+        raw = (raw or "").strip()
+        chosen: Optional[str] = None
+        if raw.lower() in ("skip", "-", "none"):
+            chosen = None
+        elif raw.isdigit():
+            i = int(raw)
+            if 1 <= i <= len(pool.models):
+                chosen = pool.models[i - 1]
+            else:
+                echo_fn(f"  ! out of range (1..{len(pool.models)}), leaving '{tier}' unset")
+                chosen = None
+        elif raw:
+            chosen = raw
+        setattr(selected, tier, chosen)
+        echo_fn(f"    → {tier}: {chosen or '—'}\n")
+
+    if not selected.reasoning and selected.complex:
+        selected.reasoning = selected.complex
+    if not selected.complex and selected.simple:
+        selected.complex = selected.simple
+    if not selected.simple and selected.complex:
+        selected.simple = selected.complex
+
+    return selected
 
 
 # ---------------------------------------------------------------------------
@@ -232,12 +463,22 @@ def update_env_file(models: DetectedModels, env_path: Optional[Path] = None) -> 
 # Claude Code settings.json
 # ---------------------------------------------------------------------------
 
+DEFAULT_PROFILES = ("nadir-auto", "nadir-eco", "nadir-premium", "nadir-reasoning", "nadir-free")
+
+
 def patch_claude_settings(
     base_url: str,
     api_key: str = "local",
+    default_profile: Optional[str] = None,
     settings_path: Optional[Path] = None,
 ) -> Path:
-    """Persist ANTHROPIC_BASE_URL + ANTHROPIC_API_KEY into Claude Code settings."""
+    """Persist ANTHROPIC_BASE_URL + ANTHROPIC_API_KEY (and optionally
+    ANTHROPIC_MODEL) into Claude Code settings.
+
+    `default_profile` controls what model Claude Code sends on every
+    request — pick `nadir-auto` for smart routing, `nadir-eco`/`-premium`
+    to pin a tier, or pass None to leave the existing value alone.
+    """
     if settings_path is None:
         settings_path = CLAUDE_SETTINGS_FILE
     settings_path.parent.mkdir(parents=True, exist_ok=True)
@@ -258,6 +499,8 @@ def patch_claude_settings(
         env = {}
     env["ANTHROPIC_BASE_URL"] = base_url
     env["ANTHROPIC_API_KEY"] = api_key
+    if default_profile:
+        env["ANTHROPIC_MODEL"] = default_profile
     config["env"] = env
 
     settings_path.write_text(json.dumps(config, indent=2) + "\n")
@@ -278,8 +521,11 @@ def unpatch_claude_settings(settings_path: Optional[Path] = None) -> bool:
     if not isinstance(env, dict):
         return False
     changed = False
-    for key in ("ANTHROPIC_BASE_URL", "ANTHROPIC_API_KEY"):
+    for key in ("ANTHROPIC_BASE_URL", "ANTHROPIC_API_KEY", "ANTHROPIC_MODEL"):
         if key in env:
+            # Only remove ANTHROPIC_MODEL if it points at one of our profiles.
+            if key == "ANTHROPIC_MODEL" and env[key] not in DEFAULT_PROFILES:
+                continue
             env.pop(key)
             changed = True
     if changed:
@@ -483,7 +729,7 @@ if ! probe; then
     done
 fi
 
-export ANTHROPIC_BASE_URL="http://localhost:${{NADIRCLAW_PORT}}/v1"
+export ANTHROPIC_BASE_URL="http://localhost:${{NADIRCLAW_PORT}}"
 export ANTHROPIC_API_KEY="${{ANTHROPIC_API_KEY:-local}}"
 exec "$REAL_CLAUDE" "$@"
 """

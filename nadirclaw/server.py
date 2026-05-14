@@ -15,7 +15,7 @@ import uuid
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from threading import Lock
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 from fastapi import Depends, FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
@@ -378,11 +378,11 @@ async def _smart_route_analysis(
     prompt: str, system_message: str, user: UserSession
 ) -> tuple:
     """Run classifier, return (selected_model, analysis_dict). No LLM call."""
-    from nadirclaw.classifier import get_binary_classifier
+    from nadirclaw.classifier import get_classifier
     from nadirclaw.telemetry import trace_span
 
     with trace_span("smart_route_analysis") as span:
-        analyzer = get_binary_classifier()
+        analyzer = get_classifier()
         result = await analyzer.analyze(text=prompt, system_message=system_message)
 
         tier_name = result.get("tier_name", "simple")
@@ -2103,6 +2103,204 @@ async def view_logs(
 
 
 # ---------------------------------------------------------------------------
+# /v1/messages — Anthropic-compatible endpoint (Claude Code talks here)
+# ---------------------------------------------------------------------------
+
+_ANTHROPIC_UPSTREAM = "https://api.anthropic.com/v1/messages"
+_CLAUDE_OAUTH_BETA = "oauth-2025-04-20,claude-code-20250219"
+
+
+def _anthropic_messages_to_chat(messages: List[Dict[str, Any]]) -> List[ChatMessage]:
+    """Convert Anthropic message blocks to our internal ChatMessage shape.
+
+    Used only for routing classification — the actual upstream call sends
+    the original Anthropic body untouched.
+    """
+    out: List[ChatMessage] = []
+    for m in messages:
+        if not isinstance(m, dict):
+            continue
+        role = m.get("role", "user")
+        content = m.get("content")
+        # Normalize: string stays string; list of blocks → list of dicts the
+        # ChatMessage.text_content() can read ({"type":"text","text":...}).
+        if isinstance(content, list):
+            normalized: List[Any] = []
+            for block in content:
+                if isinstance(block, dict) and block.get("type") == "text":
+                    normalized.append({"type": "text", "text": block.get("text", "")})
+                elif isinstance(block, dict) and block.get("type") == "tool_result":
+                    inner = block.get("content")
+                    if isinstance(inner, str):
+                        normalized.append({"type": "text", "text": inner})
+                    elif isinstance(inner, list):
+                        for b in inner:
+                            if isinstance(b, dict) and b.get("type") == "text":
+                                normalized.append({"type": "text", "text": b.get("text", "")})
+            out.append(ChatMessage(role=role, content=normalized))
+        else:
+            out.append(ChatMessage(role=role, content=content))
+    return out
+
+
+async def _resolve_messages_model(
+    requested_model: str,
+    chat_messages: List[ChatMessage],
+    current_user: UserSession,
+) -> Tuple[str, Dict[str, Any]]:
+    """Resolve the requested model into an upstream Anthropic model id.
+
+    Mirrors the routing logic in /v1/chat/completions but limited to the
+    Anthropic-compatible surface (no LiteLLM aliases — Claude Code is
+    talking to us as if we were api.anthropic.com).
+    """
+    from nadirclaw.routing import resolve_profile
+
+    profile = resolve_profile(requested_model)
+    if profile == "eco":
+        return settings.SIMPLE_MODEL, {"strategy": "profile:eco", "tier": "simple"}
+    if profile == "premium":
+        return settings.COMPLEX_MODEL, {"strategy": "profile:premium", "tier": "complex"}
+    if profile == "reasoning":
+        return settings.REASONING_MODEL, {"strategy": "profile:reasoning", "tier": "reasoning"}
+    if profile == "free":
+        return settings.FREE_MODEL, {"strategy": "profile:free", "tier": "free"}
+    if profile == "auto" or not requested_model:
+        selected, analysis = await _smart_route_full(chat_messages, current_user)
+        return selected, {"strategy": "smart_route", **(analysis or {})}
+    return requested_model, {"strategy": "direct", "tier": "direct"}
+
+
+def _strip_provider_prefix(model_id: str) -> str:
+    """LiteLLM-style prefixes (anthropic/, claude/) → bare model id for Anthropic."""
+    if not model_id:
+        return model_id
+    for prefix in ("anthropic/", "claude/"):
+        if model_id.startswith(prefix):
+            return model_id[len(prefix):]
+    return model_id
+
+
+def _extract_text_from_anthropic_response(payload: Dict[str, Any]) -> str:
+    text = ""
+    for block in payload.get("content", []) or []:
+        if isinstance(block, dict) and block.get("type") == "text":
+            text += block.get("text", "")
+    return text
+
+
+@app.post("/v1/messages")
+async def anthropic_messages(
+    raw: Request,
+    current_user: UserSession = Depends(validate_local_auth),
+):
+    """Anthropic /v1/messages-compatible endpoint with NadirClaw routing.
+
+    The proxy treats the incoming body as opaque Anthropic JSON and only
+    rewrites the `model` field before forwarding upstream. Streaming
+    responses are piped through SSE-byte-for-SSE-byte.
+    """
+    from nadirclaw.credentials import get_credential
+
+    try:
+        body = await raw.json()
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"invalid JSON: {e}")
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail="body must be a JSON object")
+
+    requested_model = body.get("model") or ""
+    stream = bool(body.get("stream"))
+    messages = body.get("messages") or []
+    if not isinstance(messages, list):
+        raise HTTPException(status_code=400, detail="messages must be an array")
+
+    chat_messages = _anthropic_messages_to_chat(messages)
+    selected_model, analysis_info = await _resolve_messages_model(
+        requested_model, chat_messages, current_user
+    )
+    upstream_model = _strip_provider_prefix(selected_model)
+
+    body["model"] = upstream_model
+
+    token = get_credential("anthropic")
+    if not token:
+        raise HTTPException(
+            status_code=401,
+            detail="No anthropic credential. Run `nadirclaw auth setup-token`.",
+        )
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "anthropic-version": body.pop("anthropic_version", None) or raw.headers.get("anthropic-version") or "2023-06-01",
+        "anthropic-beta": raw.headers.get("anthropic-beta") or _CLAUDE_OAUTH_BETA,
+        "content-type": "application/json",
+    }
+    # If the upstream token is an API key (not OAuth), switch to x-api-key.
+    if token.startswith("sk-ant-api"):
+        headers.pop("Authorization", None)
+        headers["x-api-key"] = token
+
+    import httpx
+    from fastapi.responses import StreamingResponse
+
+    log_entry: Dict[str, Any] = {
+        "type": "messages",
+        "requested_model": requested_model,
+        "selected_model": upstream_model,
+        "streaming": stream,
+        **analysis_info,
+    }
+
+    if not stream:
+        async with httpx.AsyncClient(timeout=300) as client:
+            try:
+                upstream = await client.post(_ANTHROPIC_UPSTREAM, headers=headers, json=body)
+            except httpx.HTTPError as e:
+                _log_request({**log_entry, "error": f"upstream_error: {e}"})
+                raise HTTPException(status_code=502, detail=f"upstream error: {e}")
+
+        if upstream.status_code != 200:
+            _log_request({**log_entry, "error": f"upstream_status_{upstream.status_code}", "body": upstream.text[:500]})
+            return Response(
+                content=upstream.content,
+                status_code=upstream.status_code,
+                media_type=upstream.headers.get("content-type", "application/json"),
+            )
+
+        payload = upstream.json()
+        usage = payload.get("usage", {}) if isinstance(payload, dict) else {}
+        _log_request({
+            **log_entry,
+            "prompt_tokens": usage.get("input_tokens", 0),
+            "completion_tokens": usage.get("output_tokens", 0),
+            "response_preview": _extract_text_from_anthropic_response(payload)[:200],
+        })
+        return JSONResponse(content=payload, status_code=200)
+
+    # Streaming: pipe SSE bytes straight through.
+    async def proxy_stream():
+        async with httpx.AsyncClient(timeout=300) as client:
+            async with client.stream(
+                "POST", _ANTHROPIC_UPSTREAM, headers=headers, json=body
+            ) as upstream:
+                if upstream.status_code != 200:
+                    err_body = await upstream.aread()
+                    _log_request({
+                        **log_entry,
+                        "error": f"upstream_stream_status_{upstream.status_code}",
+                        "body": err_body[:500].decode("utf-8", errors="replace"),
+                    })
+                    yield f"event: error\ndata: {json.dumps({'type': 'error', 'error': {'type': 'upstream_error', 'message': err_body.decode('utf-8', errors='replace')[:500]}})}\n\n".encode()
+                    return
+                async for chunk in upstream.aiter_bytes():
+                    if chunk:
+                        yield chunk
+        _log_request(log_entry)
+
+    return StreamingResponse(proxy_stream(), media_type="text/event-stream")
+
+
+# ---------------------------------------------------------------------------
 # /v1/models & /health
 # ---------------------------------------------------------------------------
 
@@ -2138,28 +2336,43 @@ async def list_models(
     current_user: UserSession = Depends(validate_local_auth),
 ) -> Dict[str, Any]:
     now = int(time.time())
-    # Routing profiles first, then tier models. The `nadir-*` aliases surface
-    # in Claude Code's `/model` picker so users can switch routing strategies
-    # without leaving the session.
-    profile_ids = [
-        "nadir-auto",
-        "nadir-eco",
-        "nadir-premium",
-        "nadir-reasoning",
-        "nadir-free",
+    created_at_iso = datetime.fromtimestamp(now, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    # Routing profiles first, then tier models. We emit BOTH Anthropic-style
+    # fields (`type`, `display_name`, `created_at`) and OpenAI-style fields
+    # (`object`, `created`, `owned_by`) so every client (Claude Code, Open
+    # WebUI, Cursor, OpenClaw) sees something it understands.
+    profile_meta = [
+        ("nadir-auto",      "Nadir — Auto",      "Smart routing per prompt (recommended)"),
+        ("nadir-eco",       "Nadir — Eco",       "Always cheapest tier (Haiku-class)"),
+        ("nadir-premium",   "Nadir — Premium",   "Always strongest tier (Opus-class)"),
+        ("nadir-reasoning", "Nadir — Reasoning", "Always reasoning model"),
+        ("nadir-free",      "Nadir — Free",      "Always local/free tier"),
         # Legacy short names — kept so existing OpenAI-compatible clients
         # (Open WebUI, Cursor, OpenClaw) don't break.
-        "auto",
-        "eco",
-        "premium",
+        ("auto",    "Auto",    "Smart routing per prompt"),
+        ("eco",     "Eco",     "Cheapest tier"),
+        ("premium", "Premium", "Strongest tier"),
     ]
     profiles = [
-        {"id": pid, "object": "model", "created": now, "owned_by": "nadirclaw"}
-        for pid in profile_ids
+        {
+            "id": pid,
+            "type": "model",
+            "display_name": display,
+            "description": desc,
+            "created_at": created_at_iso,
+            # OpenAI-compatible legacy fields
+            "object": "model",
+            "created": now,
+            "owned_by": "nadirclaw",
+        }
+        for pid, display, desc in profile_meta
     ]
     tier_data = [
         {
             "id": m,
+            "type": "model",
+            "display_name": m,
+            "created_at": created_at_iso,
             "object": "model",
             "created": now,
             "owned_by": m.split("/")[0] if "/" in m else "api",
