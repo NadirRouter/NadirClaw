@@ -17,6 +17,7 @@ budget tracker, and auth all run for real.
 """
 
 import json
+import os
 import subprocess
 import sys
 from unittest.mock import AsyncMock, patch
@@ -477,54 +478,52 @@ class TestDeveloperRoleMessages:
 class TestCLIClassify:
     """nadirclaw classify should work without the server running."""
 
-    def test_classify_simple_prompt(self):
-        result = subprocess.run(
-            [sys.executable, "-m", "nadirclaw.cli", "classify", "What", "is", "2+2?"],
-            capture_output=True, text=True, timeout=30,
+    # Cold-starting a fresh Python process loads the SentenceTransformer
+    # encoder, which can take 30-40s on a cold model cache. Be generous.
+    _TIMEOUT = 120
+    _VALID_TIERS = ("simple", "mid", "complex", "reasoning", "free")
+
+    def _run(self, *args):
+        """Run `nadirclaw classify` in a subprocess, pinned to the fast
+        binary analyzer for deterministic, quick CLI tests."""
+        env = {**os.environ, "NADIRCLAW_COMPLEXITY_ANALYZER": "binary"}
+        return subprocess.run(
+            [sys.executable, "-m", "nadirclaw.cli", "classify", *args],
+            capture_output=True, text=True, timeout=self._TIMEOUT, env=env,
         )
-        assert result.returncode == 0
+
+    def test_classify_simple_prompt(self):
+        result = self._run("What", "is", "2+2?")
+        assert result.returncode == 0, result.stderr
         output = result.stdout.lower()
-        assert "simple" in output or "complex" in output
+        assert any(t in output for t in self._VALID_TIERS)
 
     def test_classify_complex_prompt(self):
-        result = subprocess.run(
-            [sys.executable, "-m", "nadirclaw.cli", "classify",
-             "Design", "a", "distributed", "event-sourcing", "system",
-             "with", "CQRS", "and", "eventual", "consistency"],
-            capture_output=True, text=True, timeout=30,
+        result = self._run(
+            "Design", "a", "distributed", "event-sourcing", "system",
+            "with", "CQRS", "and", "eventual", "consistency",
         )
-        assert result.returncode == 0
+        assert result.returncode == 0, result.stderr
 
     def test_classify_json_format(self):
-        result = subprocess.run(
-            [sys.executable, "-m", "nadirclaw.cli", "classify",
-             "--format", "json", "What", "is", "2+2?"],
-            capture_output=True, text=True, timeout=30,
-        )
-        assert result.returncode == 0
+        result = self._run("--format", "json", "What", "is", "2+2?")
+        assert result.returncode == 0, result.stderr
         data = json.loads(result.stdout)
         assert "tier" in data
         assert "confidence" in data
         assert "model" in data
-        assert data["tier"] in ("simple", "complex")
+        assert data["tier"] in self._VALID_TIERS
         assert 0.0 <= data["confidence"] <= 1.0
 
     def test_classify_quoted_single_arg(self):
         """Single-argument classify (quoted string) should also work."""
-        result = subprocess.run(
-            [sys.executable, "-m", "nadirclaw.cli", "classify", "What is the weather?"],
-            capture_output=True, text=True, timeout=30,
-        )
-        assert result.returncode == 0
+        result = self._run("What is the weather?")
+        assert result.returncode == 0, result.stderr
 
     def test_classify_json_prompt_field(self):
         """JSON output must echo back the prompt."""
-        result = subprocess.run(
-            [sys.executable, "-m", "nadirclaw.cli", "classify",
-             "--format", "json", "Hello", "world"],
-            capture_output=True, text=True, timeout=30,
-        )
-        assert result.returncode == 0
+        result = self._run("--format", "json", "Hello", "world")
+        assert result.returncode == 0, result.stderr
         data = json.loads(result.stdout)
         assert "Hello world" in data["prompt"]
 

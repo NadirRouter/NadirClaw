@@ -218,6 +218,90 @@ class TestMessagesEndpoint:
         # Upstream 429 surfaced to the caller as-is
         assert resp.status_code == 429
 
+    def test_streaming_pipes_sse_bytes_through(self, client):
+        """stream:true → upstream SSE bytes are forwarded verbatim."""
+        import httpx
+        from nadirclaw.settings import settings
+
+        captured = {}
+        sse_chunks = [
+            b'event: message_start\ndata: {"type":"message_start"}\n\n',
+            b'event: content_block_delta\ndata: {"type":"content_block_delta"}\n\n',
+            b'event: message_stop\ndata: {"type":"message_stop"}\n\n',
+        ]
+
+        class _FakeStream:
+            status_code = 200
+            async def __aenter__(self): return self
+            async def __aexit__(self, *a): return False
+            async def aiter_bytes(self):
+                for c in sse_chunks:
+                    yield c
+            async def aread(self):
+                return b""
+
+        class _FakeClient:
+            def __init__(self, *a, **kw): pass
+            async def __aenter__(self): return self
+            async def __aexit__(self, *a): return False
+            def stream(self, method, url, headers=None, json=None):
+                captured["model"] = json.get("model")
+                captured["url"] = url
+                return _FakeStream()
+
+        with patch("nadirclaw.credentials.get_credential", return_value="sk-ant-oat01-test"), \
+             patch.object(httpx, "AsyncClient", _FakeClient):
+            resp = client.post("/v1/messages", json={
+                "model": "nadir-premium",
+                "max_tokens": 10,
+                "stream": True,
+                "messages": [{"role": "user", "content": "hi"}],
+            })
+
+        assert resp.status_code == 200
+        assert resp.headers["content-type"].startswith("text/event-stream")
+        body = resp.content
+        # every upstream chunk made it through, in order
+        for chunk in sse_chunks:
+            assert chunk in body
+        assert body.index(sse_chunks[0]) < body.index(sse_chunks[-1])
+        # nadir-premium resolved to the complex model before forwarding
+        assert captured["model"] == settings.COMPLEX_MODEL
+
+    def test_streaming_upstream_error_emits_sse_error_event(self, client):
+        """A non-200 upstream status in streaming mode → an SSE error event."""
+        import httpx
+
+        class _FakeStream:
+            status_code = 500
+            async def __aenter__(self): return self
+            async def __aexit__(self, *a): return False
+            async def aiter_bytes(self):
+                if False:
+                    yield b""  # pragma: no cover
+            async def aread(self):
+                return b'{"type":"error","error":{"type":"overloaded_error"}}'
+
+        class _FakeClient:
+            def __init__(self, *a, **kw): pass
+            async def __aenter__(self): return self
+            async def __aexit__(self, *a): return False
+            def stream(self, method, url, headers=None, json=None):
+                return _FakeStream()
+
+        with patch("nadirclaw.credentials.get_credential", return_value="sk-ant-oat01-test"), \
+             patch.object(httpx, "AsyncClient", _FakeClient):
+            resp = client.post("/v1/messages", json={
+                "model": "nadir-eco",
+                "max_tokens": 10,
+                "stream": True,
+                "messages": [{"role": "user", "content": "hi"}],
+            })
+
+        assert resp.status_code == 200  # SSE stream opened
+        assert b"event: error" in resp.content
+        assert b"overloaded_error" in resp.content
+
 
 # ---------------------------------------------------------------------------
 # X-Routed-* response headers
