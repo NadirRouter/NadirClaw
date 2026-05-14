@@ -22,7 +22,7 @@ _PKG_DIR = os.path.dirname(os.path.abspath(__file__))
 _MODEL_DIR = os.path.join(_PKG_DIR, "distilbert_model")
 # Published artifact (~256MB). from_pretrained() downloads + caches it under
 # ~/.cache/huggingface/hub on first use. Override with NADIRCLAW_DISTILBERT_REPO.
-_HF_REPO = os.getenv("NADIRCLAW_DISTILBERT_REPO", "amirdor/nadirclaw-distilbert")
+_HF_REPO = os.getenv("NADIRCLAW_DISTILBERT_REPO", "nadirclaw/nadirclaw-distilbert")
 _TIER_MAP = {0: "simple", 1: "medium", 2: "complex"}
 
 
