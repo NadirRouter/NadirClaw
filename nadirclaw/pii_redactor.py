@@ -12,13 +12,14 @@ cannot be reliably redacted due to partial regex matches across chunks.
 """
 
 import logging
-import os
 import re
 from typing import Tuple
 
+from nadirclaw.settings import settings
+
 logger = logging.getLogger("nadirclaw.pii_redactor")
 
-_MODE = os.getenv("NADIRCLAW_PII_REDACTION", "none").lower()
+# Mode is read lazily via `settings.PII_REDACTION_MODE` at call time.
 
 # ---------------------------------------------------------------------------
 # PII patterns
@@ -26,7 +27,7 @@ _MODE = os.getenv("NADIRCLAW_PII_REDACTION", "none").lower()
 
 # Email addresses
 _EMAIL_RE = re.compile(
-    r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b"
+    r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b"
 )
 
 # US phone numbers (various formats)
@@ -89,13 +90,27 @@ def scan_pii(text: str) -> list[dict]:
     return findings
 
 
+def _cc_replacer_factory(replacement: str):
+    """Build a Luhn-validating re.sub replacer bound to a specific replacement string.
+
+    Using a factory (instead of a nested def inside the loop) avoids the
+    late-binding closure trap if `_PATTERNS` is ever reordered.
+    """
+    def _replace(match):
+        if _luhn_check(match.group(0)):
+            return replacement
+        return match.group(0)
+    return _replace
+
+
 def redact_pii(text: str) -> Tuple[str, bool]:
     """Redact PII from text based on configured mode.
 
     Returns:
         Tuple of (possibly_redacted_text, pii_was_found).
     """
-    if _MODE == "none":
+    mode = settings.PII_REDACTION_MODE
+    if mode == "none":
         return text, False
 
     findings = scan_pii(text)
@@ -106,20 +121,14 @@ def redact_pii(text: str) -> Tuple[str, bool]:
     types_found = set(f["type"] for f in findings)
     logger.warning("PII detected in LLM output: types=%s count=%d", types_found, len(findings))
 
-    if _MODE == "log_only":
+    if mode == "log_only":
         return text, True
 
-    # Mode is "redact" — replace all PII matches
+    # Mode is "redact" — replace all PII matches.
     result = text
-    # Process in reverse order to preserve character offsets
     for pii_type, pattern, replacement in _PATTERNS:
         if pii_type == "credit_card":
-            # Luhn-validated replacement
-            def _cc_replacer(match):
-                if _luhn_check(match.group(0)):
-                    return replacement
-                return match.group(0)
-            result = pattern.sub(_cc_replacer, result)
+            result = pattern.sub(_cc_replacer_factory(replacement), result)
         else:
             result = pattern.sub(replacement, result)
 

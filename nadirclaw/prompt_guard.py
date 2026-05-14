@@ -13,22 +13,17 @@ Action modes (set via NADIRCLAW_PROMPT_GUARD env var):
 """
 
 import logging
-import os
 import re
 from dataclasses import dataclass
 from typing import List, Optional
 
+from nadirclaw.settings import settings
+
 logger = logging.getLogger("nadirclaw.prompt_guard")
 
-# ---------------------------------------------------------------------------
-# Configuration
-# ---------------------------------------------------------------------------
-
-_ACTION = os.getenv("NADIRCLAW_PROMPT_GUARD", "log").lower()
-if _ACTION not in ("log", "warn", "block"):
-    raise ValueError(
-        f"Invalid NADIRCLAW_PROMPT_GUARD={_ACTION!r}; expected log|warn|block"
-    )
+# Configuration is read lazily via `settings.PROMPT_GUARD_ACTION` at call
+# time — bad env values log a warning and fall back to "log" rather than
+# crashing the entire package at import.
 
 # ---------------------------------------------------------------------------
 # Detection patterns
@@ -138,8 +133,11 @@ def scan_messages(
     """
     Scan a list of ChatMessage objects for prompt injection signals.
 
-    Only scans user-role messages (system and assistant messages are trusted
-    in the agentic context — they come from the operator or the model itself).
+    Scope: only user- and tool-role messages are scanned. System and
+    assistant messages are intentionally trusted in the agentic context —
+    they come from the operator or the model itself. This means indirect
+    injection via crafted assistant replay messages is *not* detected here;
+    that surface needs an upstream defense.
 
     Returns the highest-confidence signal above threshold, or None.
     """
@@ -193,9 +191,9 @@ def check_and_act(messages: list) -> Optional[InjectionSignal]:
 
 def should_block() -> bool:
     """Whether the configured action is 'block'."""
-    return _ACTION == "block"
+    return settings.PROMPT_GUARD_ACTION == "block"
 
 
 def should_warn() -> bool:
     """Whether the configured action is 'warn' (add header)."""
-    return _ACTION == "warn"
+    return settings.PROMPT_GUARD_ACTION == "warn"
