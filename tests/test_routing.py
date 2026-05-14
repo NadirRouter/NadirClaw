@@ -877,8 +877,14 @@ class TestCostBreakdown:
 # ---------------------------------------------------------------------------
 
 class TestSettingsMidTier:
-    def test_default_no_mid(self):
+    def test_default_no_mid(self, monkeypatch):
+        # Import first so settings.py's import-time load_dotenv() runs and the
+        # module is cached — otherwise the import below would re-run
+        # load_dotenv() and re-populate the var we're about to delete.
         from nadirclaw.settings import Settings
+        # Hermetic: ignore any NADIRCLAW_MID_MODEL inherited from the
+        # environment or ~/.nadirclaw/.env on the developer's machine.
+        monkeypatch.delenv("NADIRCLAW_MID_MODEL", raising=False)
         s = Settings()
         assert s.has_mid_tier is False
 
@@ -889,8 +895,12 @@ class TestSettingsMidTier:
         assert s.has_mid_tier is True
         assert s.MID_MODEL == "gpt-4.1-mini"
 
-    def test_default_thresholds(self):
+    def test_default_thresholds(self, monkeypatch):
+        # Import first (see test_default_no_mid) so load_dotenv() doesn't
+        # re-populate the var after we delete it.
         from nadirclaw.settings import Settings
+        # Hermetic: ignore any NADIRCLAW_TIER_THRESHOLDS from the dev env.
+        monkeypatch.delenv("NADIRCLAW_TIER_THRESHOLDS", raising=False)
         s = Settings()
         assert s.TIER_THRESHOLDS == (0.35, 0.65)
 
