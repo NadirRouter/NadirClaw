@@ -4,6 +4,20 @@ All notable changes to NadirClaw will be documented in this file.
 
 ## [Unreleased]
 
+## [0.16.0] - 2026-05-14
+
+### Added
+- **Anthropic-compatible `/v1/messages` endpoint** — Anthropic-native clients (Claude Code) now route through NadirClaw. The proxy classifies, rewrites the `model` field, forwards to `api.anthropic.com`, and pipes SSE streaming through byte-for-byte (#51).
+- **Seamless Claude Code integration** — `nadirclaw claude onboard` / `shim` / `uninstall`. Onboarding detects models, maps them into tiers, persists `ANTHROPIC_BASE_URL` + `ANTHROPIC_MODEL` into `~/.claude/settings.json`, and installs a launchd / systemd auto-start unit (#51).
+- **Live model detection** — onboarding queries Anthropic's `/v1/models` using the stored token (Bearer for subscription tokens, `x-api-key` for API keys) instead of a hardcoded list; `--interactive` lets you pick a model per tier (#51).
+- **Pluggable complexity classifier** — `NADIRCLAW_COMPLEXITY_ANALYZER=binary` (default, ~10ms centroid) or `distilbert` (3-class fine-tuned DistilBERT predicting simple/mid/complex natively). The DistilBERT artifact downloads from the Hugging Face Hub on first use with a graceful fallback to binary (#51, #52).
+- **Pro upsell surfaces** — `nadirclaw savings` / `serve` / `report` and the README now surface Nadir Pro at high-intent moments with attribution-tagged URLs; new `demo/cost_vs_opus.py` zero-API-key demo (#53).
+- **Enriched `/v1/models`** — responses now include Anthropic-style `type` / `display_name` / `description` / `created_at` alongside the OpenAI-style fields.
+
+### Fixed
+- `ANTHROPIC_BASE_URL` is written as the bare host (Claude Code appends `/v1/messages` itself; a `/v1` suffix produced a broken `/v1/v1/messages` path) (#51).
+- Updated the stale Claude model fallback list from the 4.5/4.1 generation to the 4.6 family (#51).
+
 ## [0.15.0] - 2026-05-09
 
 ### Added

@@ -93,7 +93,7 @@ NadirClaw is the free, open-source core. If you are routing production traffic o
 |---|---|---|
 | **License** | MIT | Proprietary |
 | **Deploy** | Self-hosted, localhost | `api.getnadir.com` or self-host via Docker |
-| **Classifier** | Binary centroid, ~10ms | Trained classifier + 3-tier routing, higher accuracy |
+| **Classifier** | Binary centroid (~10ms) or opt-in 3-class DistilBERT | Trained classifier + 3-tier routing, higher accuracy |
 | **Storage** | Local JSONL + SQLite | Postgres (Supabase), multi-tenant |
 | **Dashboard** | Terminal + local web | Hosted web dashboard, per-team analytics |
 | **Cost tracking** | `nadirclaw savings` CLI | Live dashboard, monthly invoices, projected savings |
@@ -122,7 +122,8 @@ NadirClaw is the free, open-source core. If you are routing production traffic o
 - **Native Gemini support** — calls Gemini models directly via the Google GenAI SDK (not through LiteLLM)
 - **OAuth login** — use your subscription with `nadirclaw auth <provider> login` (OpenAI, Anthropic, Google), no API key needed
 - **Multi-provider** — supports Gemini, OpenAI, Anthropic, Ollama, and any LiteLLM-supported provider
-- **OpenAI-compatible API** — drop-in replacement for any tool that speaks the OpenAI chat completions API
+- **OpenAI-compatible API** — drop-in replacement for any tool that speaks the OpenAI chat completions API (`/v1/chat/completions`)
+- **Anthropic-compatible API** — `/v1/messages` endpoint so Anthropic-native clients like Claude Code route through NadirClaw; streaming piped through byte-for-byte
 - **Request reporting** — `nadirclaw report` with per-model and per-day cost breakdown (`--by-model --by-day`), anomaly flagging, filters, latency stats, tier breakdown, and token usage
 - **Log export** — `nadirclaw export --format csv|jsonl --since 7d` for offline analysis in spreadsheets or data tools
 - **Raw logging** — optional `--log-raw` flag to capture full request/response content for debugging and replay
