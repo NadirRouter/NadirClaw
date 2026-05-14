@@ -130,6 +130,9 @@ def classify(prompt, fmt):
     if fmt == "json":
         click.echo(json.dumps({
             "tier": tier,
+            # Kept for backward compatibility with pre-3-class-analyzer
+            # scripts. "mid" counts as not-complex.
+            "is_complex": tier == "complex",
             "analyzer": analyzer_type,
             "confidence": round(confidence, 4),
             "score": round(score, 4),
