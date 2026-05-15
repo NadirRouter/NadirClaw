@@ -292,6 +292,32 @@ class Settings:
             return 500
 
     @property
+    def PROMPT_GUARD_ACTION(self) -> str:
+        """Prompt injection guard action: log, warn, block. Default: log."""
+        val = os.getenv("NADIRCLAW_PROMPT_GUARD", "log").lower()
+        if val not in ("log", "warn", "block"):
+            _settings_logger.warning(
+                "Invalid NADIRCLAW_PROMPT_GUARD=%r — expected log|warn|block. "
+                "Falling back to 'log'.",
+                val,
+            )
+            return "log"
+        return val
+
+    @property
+    def PII_REDACTION_MODE(self) -> str:
+        """PII redaction mode: none, log_only, redact. Default: none."""
+        val = os.getenv("NADIRCLAW_PII_REDACTION", "none").lower()
+        if val not in ("none", "log_only", "redact"):
+            _settings_logger.warning(
+                "Invalid NADIRCLAW_PII_REDACTION=%r — expected none|log_only|redact. "
+                "Falling back to 'none'.",
+                val,
+            )
+            return "none"
+        return val
+
+    @property
     def has_explicit_tiers(self) -> bool:
         """True if SIMPLE_MODEL and COMPLEX_MODEL are explicitly set via env."""
         return bool(
