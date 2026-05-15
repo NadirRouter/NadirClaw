@@ -4,6 +4,23 @@ All notable changes to NadirClaw will be documented in this file.
 
 ## [Unreleased]
 
+## [0.17.0] - 2026-05-15
+
+### Added
+- **Configurable embedding backends for the centroid classifier** — `NADIRCLAW_EMBEDDING_BACKEND` (default `sentence-transformers`; also `ollama` via `/api/embed`), `NADIRCLAW_EMBEDDING_MODEL`, `NADIRCLAW_EMBEDDING_API_BASE`, and `NADIRCLAW_CENTROID_DIR`. Custom centroid directories require a `centroid_metadata.json` (schema-versioned, with `prototypes_hash` for traceability) so users never silently mismatch a self-built centroid against a different encoder. `nadirclaw build-centroids` gains `--backend`, `--model`, `--api-base`, `--output-dir` flags. Original work by @clawSean (#50).
+- **Optional prompt-injection guard** — `nadirclaw/prompt_guard.py`. Heuristic detection of 7 patterns (instruction override, role reassignment, prompt extraction, JSON role confusion, delimiter injection, encoded payloads, DAN/jailbreak). `NADIRCLAW_PROMPT_GUARD`: `log` (default) / `warn` / `block`. Scans only user/tool messages — system/assistant treated as trusted. Original work by @pradumna-gautam (#55, supersedes #31).
+- **Optional PII redactor** — `nadirclaw/pii_redactor.py`. Detects email, US phone, SSN, and Luhn-validated credit-card numbers. `NADIRCLAW_PII_REDACTION`: `none` (default) / `log_only` / `redact`. Non-streaming responses only. Original work by @pradumna-gautam (#55).
+
+### Security
+- **Production hardening baseline** — recommended for anyone exposing `nadirclaw serve` beyond localhost. Original work by @pradumna-gautam (#30).
+  - **CORS**: explicit allowlist via `NADIRCLAW_CORS_ORIGINS`; localhost regex default; never wildcard + credentials.
+  - **Auth**: constant-time token comparison via `hmac.compare_digest` to defeat timing-side-channel guessing.
+  - **Security headers** on every response: `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: strict-origin-when-cross-origin`, `Cache-Control: no-store` on `/v1/*`, opt-in HSTS via `NADIRCLAW_HSTS=true`.
+  - **Bounds validation** on `ChatCompletionRequest`: caps on messages (500), `max_tokens` (100K), `temperature` (0–2), `top_p` (0–1), `n` (1–8) — closes a cost-amplification surface.
+  - **Sanitized validation errors** — Pydantic internals no longer leak to clients; full details still server-side logged.
+  - **Async logging** — SQLite writes moved off the event loop into a `ThreadPoolExecutor`, with `done_callback` exception logging and `shutdown(wait=True)` on SIGTERM so queued entries drain instead of dropping.
+  - **Prompt truncation** — 500-char default in SQLite request logs (configurable via `NADIRCLAW_LOG_PROMPT_TRUNCATE`); API-key shaped tokens (`sk-…`, `AIza…`, `ghp_…`, `gho_…`, `xox[bpars]-…`) redacted from logged system prompts.
+
 ## [0.16.0] - 2026-05-14
 
 ### Added
