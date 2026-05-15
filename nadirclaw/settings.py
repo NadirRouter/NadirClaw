@@ -268,6 +268,30 @@ class Settings:
             return 40
 
     @property
+    def CORS_ORIGINS(self) -> list[str]:
+        """Allowed CORS origins (comma-separated). Empty = local-only regex default."""
+        raw = os.getenv("NADIRCLAW_CORS_ORIGINS", "")
+        return [o.strip() for o in raw.split(",") if o.strip()] if raw else []
+
+    @property
+    def LOG_SYSTEM_PROMPTS(self) -> bool:
+        """When True, log (redacted+truncated) system prompts to the request log."""
+        return os.getenv("NADIRCLAW_LOG_SYSTEM_PROMPTS", "").lower() in ("1", "true", "yes")
+
+    @property
+    def HSTS(self) -> bool:
+        """When True, emit Strict-Transport-Security header. Opt-in for HTTPS deployments."""
+        return os.getenv("NADIRCLAW_HSTS", "").lower() in ("1", "true", "yes")
+
+    @property
+    def LOG_PROMPT_TRUNCATE(self) -> int:
+        """Max chars of `prompt` stored in the SQLite request log. Default: 500."""
+        try:
+            return max(0, int(os.getenv("NADIRCLAW_LOG_PROMPT_TRUNCATE", "500")))
+        except ValueError:
+            return 500
+
+    @property
     def has_explicit_tiers(self) -> bool:
         """True if SIMPLE_MODEL and COMPLEX_MODEL are explicitly set via env."""
         return bool(

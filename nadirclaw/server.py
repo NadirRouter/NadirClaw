@@ -9,10 +9,11 @@ import asyncio
 import collections
 import json
 import logging
+import re
 import os
 import time
 import uuid
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import Future, ThreadPoolExecutor
 from datetime import datetime, timezone
 from threading import Lock
 from typing import Any, Dict, List, Optional, Tuple, Union
@@ -20,8 +21,10 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 from fastapi import Depends, FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, model_validator
 from sse_starlette.sse import EventSourceResponse
+
+import os
 
 from nadirclaw import __version__
 from nadirclaw.auth import UserSession, validate_local_auth
@@ -134,18 +137,64 @@ app.include_router(dashboard_router)
 
 _ROUTING_HEADERS = ("X-Routed-Model", "X-Routed-Tier", "X-Complexity-Score")
 
+# ---------------------------------------------------------------------------
+# CORS — restrict to explicit origins (never wildcard + credentials)
+# Reads via `settings.CORS_ORIGINS` so CLI / env overrides applied after this
+# module is imported still take effect on subsequent reads (matches the
+# Settings pattern used elsewhere in the codebase).
+# ---------------------------------------------------------------------------
+_cors_origins = settings.CORS_ORIGINS
+if _cors_origins:
+    _cors_origin_regex = None
+    _cors_credentials = True
+else:
+    # Local-only default: match any port on localhost/127.0.0.1
+    # Starlette does exact string matching on allow_origins, so we use
+    # allow_origin_regex to support arbitrary ports during development.
+    _cors_origin_regex = r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$"
+    _cors_credentials = False  # No credentials unless origins are explicitly configured
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=_cors_origins,
+    allow_origin_regex=_cors_origin_regex,
+    allow_credentials=_cors_credentials,
+    allow_methods=["GET", "POST", "HEAD", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "X-API-Key", "X-Request-ID"],
     expose_headers=list(_ROUTING_HEADERS),
 )
 
 
 # ---------------------------------------------------------------------------
-# Validation error handler — log request body for debugging
+# Security headers middleware
+# ---------------------------------------------------------------------------
+from starlette.middleware.base import BaseHTTPMiddleware
+
+
+class SecurityHeadersMiddleware(BaseHTTPMiddleware):
+    """Inject security headers on every response."""
+
+    async def dispatch(self, request: Request, call_next):
+        response = await call_next(request)
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+        response.headers["X-Request-ID"] = str(uuid.uuid4())
+        # Prevent caching of API responses
+        if request.url.path.startswith("/v1/"):
+            response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
+        if settings.HSTS:
+            response.headers["Strict-Transport-Security"] = (
+                "max-age=31536000; includeSubDomains"
+            )
+        return response
+
+
+app.add_middleware(SecurityHeadersMiddleware)
+
+
+# ---------------------------------------------------------------------------
+# Validation error handler — sanitized responses (no Pydantic internals)
 # ---------------------------------------------------------------------------
 
 from fastapi.exceptions import RequestValidationError
@@ -154,14 +203,24 @@ from fastapi.exceptions import RequestValidationError
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
     body = await request.body()
+    # Log full details server-side only
     logger.error(
-        "Validation error on %s %s: %s\nBody: %s",
+        "Validation error on %s %s: %s\nBody (truncated): %s",
         request.method,
         request.url.path,
         exc.errors(),
-        body[:2000].decode("utf-8", errors="replace"),
+        body[:500].decode("utf-8", errors="replace"),
     )
-    return JSONResponse(status_code=422, content={"detail": exc.errors()})
+    # Return sanitized error to client — no Pydantic internals
+    safe_errors = []
+    for err in exc.errors():
+        loc = err.get("loc", [])
+        field = ".".join(str(part) for part in loc if part != "body")
+        safe_errors.append({
+            "field": field or "request",
+            "message": f"Invalid value for '{field}'" if field else "Invalid request body",
+        })
+    return JSONResponse(status_code=422, content={"detail": safe_errors})
 
 
 # ---------------------------------------------------------------------------
@@ -197,6 +256,22 @@ class ChatCompletionRequest(BaseModel):
     max_tokens: Optional[int] = None
     top_p: Optional[float] = None
     stream: Optional[bool] = False
+    n: Optional[int] = None
+
+    @model_validator(mode="after")
+    def _validate_bounds(self) -> "ChatCompletionRequest":
+        """Enforce safe bounds on all numeric parameters."""
+        if len(self.messages) > 500:
+            raise ValueError("messages: max 500 messages allowed")
+        if self.temperature is not None and not (0.0 <= self.temperature <= 2.0):
+            raise ValueError("temperature: must be between 0.0 and 2.0")
+        if self.max_tokens is not None and (self.max_tokens < 1 or self.max_tokens > 100_000):
+            raise ValueError("max_tokens: must be between 1 and 100,000")
+        if self.top_p is not None and not (0.0 <= self.top_p <= 1.0):
+            raise ValueError("top_p: must be between 0.0 and 1.0")
+        if self.n is not None and (self.n < 1 or self.n > 8):
+            raise ValueError("n: must be between 1 and 8")
+        return self
 
 
 class ClassifyRequest(BaseModel):
@@ -212,11 +287,18 @@ class ClassifyBatchRequest(BaseModel):
 # Logging helper
 # ---------------------------------------------------------------------------
 
+# Compiled once: redacts common API-key shapes from logged system prompts.
+_API_KEY_PATTERN = re.compile(
+    r"(sk-[a-zA-Z0-9_-]{10,}|AIza[a-zA-Z0-9_-]{20,}|ghp_[a-zA-Z0-9]{20,}"
+    r"|gho_[a-zA-Z0-9]{20,}|xox[bpars]-[a-zA-Z0-9-]{10,})"
+)
+
 _log_lock = Lock()
+_log_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="nadirclaw-log")
 
 
-def _log_request(entry: Dict[str, Any]) -> None:
-    """Append a JSON line to the request log and print to console."""
+def _log_request_sync(entry: Dict[str, Any]) -> None:
+    """Synchronous log writer — runs in thread pool to avoid blocking the event loop."""
     log_dir = settings.LOG_DIR
     log_dir.mkdir(parents=True, exist_ok=True)
     request_log = log_dir / "requests.jsonl"
@@ -227,13 +309,27 @@ def _log_request(entry: Dict[str, Any]) -> None:
         with open(request_log, "a") as f:
             f.write(line)
 
-    # Also log to SQLite
-    from nadirclaw.request_logger import log_request as sqlite_log
-    sqlite_log(entry)
 
-    # Update Prometheus metrics
-    from nadirclaw.metrics import record_request
-    record_request(entry)
+def _on_log_done(fut: Future) -> None:
+    """Surface exceptions from the async log thread — otherwise they're swallowed."""
+    exc = fut.exception()
+    if exc is not None:
+        logger.error("async request log write failed", exc_info=exc)
+
+
+def _log_request(entry: Dict[str, Any]) -> None:
+    """Non-blocking log request — submits all blocking I/O to thread pool."""
+    def _do_log():
+        _log_request_sync(entry)
+        # SQLite logging (also blocking I/O with threading.Lock)
+        from nadirclaw.request_logger import log_request as sqlite_log
+        sqlite_log(entry)
+        # Prometheus metrics (CPU-only, fast)
+        from nadirclaw.metrics import record_request
+        record_request(entry)
+
+    fut = _log_executor.submit(_do_log)
+    fut.add_done_callback(_on_log_done)
 
     tier = entry.get("tier", "?")
     model = entry.get("selected_model", "?")
@@ -264,6 +360,11 @@ def _extract_request_metadata(request: ChatCompletionRequest) -> Dict[str, Any]:
 
     system_text = " ".join(m.text_content() for m in system_msgs) if has_system else ""
 
+    if settings.LOG_SYSTEM_PROMPTS and system_text:
+        sanitized_system_text = _API_KEY_PATTERN.sub("[REDACTED_KEY]", system_text)[:500]
+    else:
+        sanitized_system_text = ""
+
     from nadirclaw.routing import detect_images
     image_info = detect_images(messages)
 
@@ -272,7 +373,7 @@ def _extract_request_metadata(request: ChatCompletionRequest) -> Dict[str, Any]:
         "message_count": len(messages),
         "has_system_prompt": has_system,
         "system_prompt_length": system_len,
-        "system_prompt_text": system_text,
+        "system_prompt_text": sanitized_system_text,
         "has_tools": tool_count > 0,
         "tool_count": tool_count,
         "requested_model": request.model,
@@ -371,6 +472,12 @@ async def startup():
     logger.info("Want a hosted dashboard, trained classifier, and team billing?")
     logger.info("Try Nadir Pro free: https://getnadir.com?ref=cli-serve")
     logger.info("=" * 60)
+
+
+@app.on_event("shutdown")
+def _shutdown_log_executor():
+    """Drain pending log writes on SIGTERM / uvicorn shutdown."""
+    _log_executor.shutdown(wait=True)
 
 
 # ---------------------------------------------------------------------------
@@ -1130,6 +1237,7 @@ def _routing_headers(model: str, analysis_info: Dict[str, Any]) -> Dict[str, str
 
 @app.post("/v1/chat/completions")
 async def chat_completions(
+    raw_request: Request,
     request: ChatCompletionRequest,
     response: Response,
     current_user: UserSession = Depends(validate_local_auth),
@@ -1527,7 +1635,7 @@ async def chat_completions(
                 "reasoning_tokens": response_data["reasoning_tokens"],
             }
 
-        return {
+        response_body = {
             "id": request_id,
             "object": "chat.completion",
             "created": int(time.time()),
@@ -1547,6 +1655,8 @@ async def chat_completions(
                 **({"optimization": optimization_info} if optimization_info else {}),
             },
         }
+
+        return JSONResponse(content=response_body)
 
     except HTTPException:
         raise  # Re-raise FastAPI HTTP exceptions as-is

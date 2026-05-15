@@ -5,6 +5,7 @@ Supports both Authorization: Bearer <token> and X-API-Key: <token>
 so any OpenAI-compatible client works out of the box.
 """
 
+import hmac
 import json
 import logging
 import os
@@ -102,14 +103,22 @@ async def validate_local_auth(
             detail="Missing auth token. Send Authorization: Bearer <token> or X-API-Key: <token>",
         )
 
-    user_data = _LOCAL_USERS.get(token)
-    if user_data is None:
+    # Constant-time token comparison to prevent timing side-channel attacks.
+    # Iterate all configured tokens so timing does not reveal which (or whether)
+    # a token exists in the dict.
+    matched_user_data = None
+    for candidate_token, candidate_data in _LOCAL_USERS.items():
+        if hmac.compare_digest(token.encode("utf-8"), candidate_token.encode("utf-8")):
+            matched_user_data = candidate_data
+            # Do NOT break — iterate all keys for constant-time behavior
+
+    if matched_user_data is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid auth token",
         )
 
-    return UserSession(user_data)
+    return UserSession(matched_user_data)
 
 
 def _default_user() -> Dict[str, Any]:

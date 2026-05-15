@@ -128,7 +128,11 @@ def log_request(entry: Dict[str, Any]) -> None:
     request_id = entry.get("request_id")
     req_type = entry.get("type")
     status = entry.get("status", "ok")
-    prompt = entry.get("prompt")
+    # Truncate prompt to prevent storing sensitive system prompt content.
+    # Length is configurable via NADIRCLAW_LOG_PROMPT_TRUNCATE (default 500).
+    _raw_prompt = entry.get("prompt")
+    _truncate = settings.LOG_PROMPT_TRUNCATE
+    prompt = _raw_prompt[:_truncate] if isinstance(_raw_prompt, str) else _raw_prompt
     selected_model = entry.get("selected_model")
     provider = entry.get("provider")
     tier = entry.get("tier")
