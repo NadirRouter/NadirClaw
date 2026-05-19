@@ -2014,13 +2014,16 @@ async def _stream_gemini(
     for chunk in all_chunks:
         delta_dict: dict[str, Any] = {}
         text = ""
-        if hasattr(chunk, "text") and chunk.text:
-            text = chunk.text
-        elif chunk.candidates:
-            candidate = chunk.candidates[0]
-            if hasattr(candidate, "content") and candidate.content and candidate.content.parts:
-                text_parts = [p.text for p in candidate.content.parts if hasattr(p, "text") and p.text]
-                text = "".join(text_parts)
+        try:
+            if getattr(chunk, "text", None):
+                text = getattr(chunk, "text")
+            elif getattr(chunk, "candidates", None):
+                candidate = chunk.candidates[0]
+                if getattr(candidate, "content", None) and getattr(candidate.content, "parts", None):
+                    text_parts = [str(p.text) if getattr(p, "text", None) else "" for p in candidate.content.parts]
+                    text = "".join(text_parts)
+        except Exception as e:
+            logger.warning("Error parsing Gemini stream chunk text: %s", e)
 
         if text:
             delta_dict["content"] = text
@@ -2034,16 +2037,25 @@ async def _stream_gemini(
             }
 
         finish_reason = None
-        if chunk.candidates:
-            raw_reason = getattr(chunk.candidates[0], "finish_reason", None)
-            if raw_reason:
-                reason_str = str(raw_reason).lower()
-                if "safety" in reason_str:
-                    finish_reason = "content_filter"
-                elif "length" in reason_str or "max_tokens" in reason_str:
-                    finish_reason = "length"
-                elif "stop" in reason_str:
-                    finish_reason = "stop"
+        try:
+            if getattr(chunk, "candidates", None):
+                raw_reason = getattr(chunk.candidates[0], "finish_reason", None)
+                if raw_reason:
+                    try:
+                        reason_str = str(getattr(raw_reason, "value", raw_reason)).lower()
+                    except Exception:
+                        try:
+                            reason_str = str(raw_reason).lower()
+                        except TypeError:
+                            reason_str = getattr(raw_reason, "name", "").lower()
+                    if "safety" in reason_str:
+                        finish_reason = "content_filter"
+                    elif "length" in reason_str or "max_tokens" in reason_str:
+                        finish_reason = "length"
+                    elif "stop" in reason_str:
+                        finish_reason = "stop"
+        except Exception as e:
+            logger.warning("Error parsing Gemini stream finish_reason: %s", e)
 
         if delta_dict or finish_reason:
             yield delta_dict, usage, finish_reason
@@ -2067,9 +2079,7 @@ async def _dispatch_model_stream(
         raise RateLimitExhausted(model=model, retry_after=retry_after)
 
     if provider == "google":
-        async_gen = None
-        # _stream_gemini is a sync generator; wrap it
-        for item in _stream_gemini(model, request, provider):
+        async for item in _stream_gemini(model, request, provider):
             yield item
     else:
         async for item in _stream_litellm(model, request, provider):
