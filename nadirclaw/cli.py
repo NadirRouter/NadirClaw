@@ -214,6 +214,8 @@ def status():
     click.echo("NadirClaw Status")
     click.echo("-" * 40)
     click.echo(f"Simple model:  {settings.SIMPLE_MODEL}")
+    if settings.has_mid_tier:
+        click.echo(f"Mid model:     {settings.MID_MODEL}")
     click.echo(f"Complex model: {settings.COMPLEX_MODEL}")
     if settings.has_explicit_tiers:
         click.echo("Tier config:   explicit (env vars)")
