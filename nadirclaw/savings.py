@@ -35,7 +35,7 @@ def calculate_actual_cost(entries: List[Dict[str, Any]]) -> float:
     """Calculate the actual cost of all requests using the models NadirClaw chose."""
     total = 0.0
     for e in entries:
-        model = e.get("selected_model", "")
+        model = e.get("selected_model") or ""
         pt = _safe_int(e.get("prompt_tokens", 0))
         ct = _safe_int(e.get("completion_tokens", 0))
         cost_in, cost_out = get_model_cost(model)
@@ -217,10 +217,12 @@ def format_savings_text(report: Dict[str, Any]) -> str:
         lines.append("Routing Distribution")
         lines.append("-" * 30)
         total = sum(tiers.values())
-        for tier, count in sorted(tiers.items()):
+        # Sort carefully handling None keys
+        for tier, count in sorted(tiers.items(), key=lambda item: str(item[0])):
+            tier_str = str(tier) if tier is not None else "unknown"
             pct = count / total * 100 if total else 0
             bar = "█" * int(pct / 2)
-            lines.append(f"  {tier:12s} {count:>5} ({pct:4.1f}%) {bar}")
+            lines.append(f"  {tier_str:12s} {count:>5} ({pct:4.1f}%) {bar}")
 
     # Monthly projection
     proj = report.get("projection", {})
