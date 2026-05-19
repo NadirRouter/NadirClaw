@@ -633,7 +633,7 @@ def _is_oauth_token(token: str) -> bool:
 _VERTEX_DEFAULT_LOCATION = "us-central1"
 
 
-def _get_gemini_client(api_key: str):
+def _get_gemini_client(api_key: Optional[str]):
     """Get or create a thread-safe, per-key google-genai Client.
 
     Handles both API keys (AIza...) and OAuth access tokens (ya29...).
@@ -643,10 +643,11 @@ def _get_gemini_client(api_key: str):
     OAuth tokens (from OpenClaw/Gemini CLI) must use the Vertex AI path.
     """
     with _gemini_client_lock:
-        if api_key not in _gemini_clients:
+        cache_key = api_key if api_key is not None else "adc_default"
+        if cache_key not in _gemini_clients:
             from google import genai
 
-            if _is_oauth_token(api_key):
+            if api_key and _is_oauth_token(api_key):
                 from google.oauth2.credentials import Credentials
                 from nadirclaw.credentials import get_gemini_oauth_config
 
@@ -661,7 +662,7 @@ def _get_gemini_client(api_key: str):
                         "credentials include a project_id."
                     )
                 creds = Credentials(token=api_key)
-                _gemini_clients[api_key] = genai.Client(
+                _gemini_clients[cache_key] = genai.Client(
                     vertexai=True,
                     credentials=creds,
                     project=project_id,
@@ -671,10 +672,43 @@ def _get_gemini_client(api_key: str):
                     "Created Gemini client with OAuth credentials (Vertex AI, project=%s)",
                     project_id,
                 )
-            else:
-                _gemini_clients[api_key] = genai.Client(api_key=api_key)
+            elif api_key:
+                _gemini_clients[cache_key] = genai.Client(api_key=api_key)
                 logger.debug("Created Gemini client with API key")
-        return _gemini_clients[api_key]
+            else:
+                import google.auth
+                from google.auth.exceptions import DefaultCredentialsError
+                from fastapi import HTTPException
+                
+                try:
+                    credentials, project_id = google.auth.default()
+                except DefaultCredentialsError as e:
+                    raise HTTPException(
+                        status_code=500,
+                        detail="No Google/Gemini API key configured and no Application Default Credentials found. "
+                               "Set GEMINI_API_KEY, GOOGLE_API_KEY, or configure ADC.",
+                    ) from e
+                    
+                project_id = os.environ.get("GOOGLE_CLOUD_PROJECT") or project_id
+                
+                if not project_id:
+                    logger.warning(
+                        "Gemini ADC detected but no project_id found. "
+                        "Set GOOGLE_CLOUD_PROJECT env var."
+                    )
+
+                _gemini_clients[cache_key] = genai.Client(
+                    vertexai=True,
+                    credentials=credentials,
+                    project=project_id,
+                    location=os.environ.get("GOOGLE_CLOUD_LOCATION", _VERTEX_DEFAULT_LOCATION),
+                )
+                logger.debug(
+                    "Created Gemini client with Application Default Credentials (Vertex AI, project=%s)",
+                    project_id,
+                )
+
+        return _gemini_clients[cache_key]
 
 
 async def _call_gemini(
@@ -698,13 +732,8 @@ async def _call_gemini(
     MAX_RETRIES = 1  # Keep low — fallback handles the rest
 
     api_key = get_credential(provider)
-    if not api_key:
-        raise HTTPException(
-            status_code=500,
-            detail="No Google/Gemini API key configured. "
-                   "Set GEMINI_API_KEY or GOOGLE_API_KEY, or run: nadirclaw auth add -p google",
-        )
 
+    # Allow api_key to be None here; _get_gemini_client will attempt to use ADC instead.
     client = _get_gemini_client(api_key)
     native_model = _strip_gemini_prefix(model)
 
@@ -1672,7 +1701,10 @@ async def chat_completions(
             },
         }
 
-        resp = JSONResponse(content=response_body)
+        resp = JSONResponse(
+            content=response_body,
+            headers=_routing_headers(selected_model, analysis_info),
+        )
         if _injection_signal and should_warn():
             resp.headers["X-Prompt-Guard-Warning"] = _injection_signal.pattern_name
         return resp
@@ -1909,12 +1941,8 @@ async def _stream_gemini(
     from nadirclaw.credentials import get_credential
 
     api_key = get_credential(provider)
-    if not api_key:
-        raise HTTPException(
-            status_code=500,
-            detail="No Google/Gemini API key configured.",
-        )
 
+    # Allow api_key to be None here; _get_gemini_client will attempt to use ADC instead.
     client = _get_gemini_client(api_key)
     native_model = _strip_gemini_prefix(model)
 

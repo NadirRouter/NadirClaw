@@ -44,6 +44,21 @@ class Settings:
         return models[0] if models else "openai-codex/gpt-5.3-codex"
 
     @property
+    def MID_MODEL(self) -> str:
+        """Mid-tier model fallback. Optional."""
+        return os.getenv("NADIRCLAW_MID_MODEL", "")
+
+    @property
+    def REASONING_MODEL(self) -> str:
+        """Reasoning-tier model fallback. Optional."""
+        return os.getenv("NADIRCLAW_REASONING_MODEL", "")
+
+    @property
+    def FREE_MODEL(self) -> str:
+        """Free-tier model fallback. Optional."""
+        return os.getenv("NADIRCLAW_FREE_MODEL", "")
+
+    @property
     def MODELS(self) -> list[str]:
         raw = os.getenv(
             "NADIRCLAW_MODELS",

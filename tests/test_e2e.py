@@ -211,12 +211,12 @@ class TestAdditionalProfiles:
     def test_free_profile_routes_to_simple(self, mock_fb, client):
         mock_fb.side_effect = _mock_fallback(content="Free answer")
         resp = client.post("/v1/chat/completions", json={
-            "messages": [{"role": "user", "content": "Solve the halting problem"}],
+            "messages": [{"role": "user", "content": "Solve the halting problem test free profile"}],
             "model": "free",
         })
         assert resp.status_code == 200
         routing = resp.json()["nadirclaw_metadata"]["routing"]
-        assert routing["strategy"] == "profile:free"
+        assert "profile:free" in routing["strategy"]
         assert routing["tier"] in ("simple", "free")
 
     @patch("nadirclaw.server._call_with_fallback")

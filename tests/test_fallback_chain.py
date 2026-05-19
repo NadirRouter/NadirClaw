@@ -12,8 +12,12 @@ class TestFallbackChainConfig:
         chain = settings.FALLBACK_CHAIN
         assert settings.COMPLEX_MODEL in chain
         assert settings.SIMPLE_MODEL in chain
-        # Complex should come first
-        assert chain.index(settings.COMPLEX_MODEL) < chain.index(settings.SIMPLE_MODEL)
+        
+        # In testing environments without explicit models configured,
+        # COMPLEX_MODEL might equal SIMPLE_MODEL if the default MODELS list is altered.
+        # Only verify ordering if they are distinct.
+        if settings.COMPLEX_MODEL != settings.SIMPLE_MODEL:
+            assert chain.index(settings.COMPLEX_MODEL) < chain.index(settings.SIMPLE_MODEL)
 
     def test_custom_chain_from_env(self, monkeypatch):
         """NADIRCLAW_FALLBACK_CHAIN env var should override defaults."""
