@@ -4,6 +4,16 @@ All notable changes to NadirClaw will be documented in this file.
 
 ## [Unreleased]
 
+## [0.18.0] - 2026-05-25
+
+### Added
+- **Application Default Credentials (ADC) for Gemini** — when no `GOOGLE_API_KEY` is set, the Gemini path now falls back to `google.auth.default()` so users can authenticate via `GOOGLE_CLOUD_PROJECT` / `GOOGLE_CLOUD_LOCATION` (Vertex AI / gcloud-managed creds) instead of pasting a key. Original work by @froody (#57).
+- **`nadirclaw status` displays the mid-tier model** when one is configured, alongside simple/complex (#57).
+
+### Fixed
+- **Gemini streaming was broken** — `_dispatch_model_stream` consumed `_stream_gemini` (an async generator) with a plain `for` loop, which would raise `TypeError: 'async_generator' object is not iterable` on any actual streaming Gemini call. Now uses `async for`, and chunk / `finish_reason` parsing is robust to the google-genai SDK returning enum-like objects (#57).
+- **`savings` no longer crashes on `None` values** in the request log for `selected_model` and `tier` — these show up for failed / aborted requests and previously broke the report (#57).
+
 ## [0.17.0] - 2026-05-15
 
 ### Added
