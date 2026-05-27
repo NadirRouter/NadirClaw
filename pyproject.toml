@@ -48,16 +48,22 @@ include = ["nadirclaw*"]
 version = {attr = "nadirclaw.__version__"}
 
 [tool.setuptools.package-data]
-nadirclaw = ["*.npy"]
+nadirclaw = ["*.npy", "cascade_rules/profiles/*.yaml"]
 
 [project.optional-dependencies]
 dev = [
     "pytest>=7.0",
     "pytest-asyncio>=0.21",
     "httpx",
+    "pyyaml>=6.0",
 ]
 dashboard = [
     "rich>=13.0",
+]
+cascade-rules = [
+    # PyYAML is only needed to LOAD cascade rule profiles from disk
+    # (`load_profile`). `load_inline` works without it, so this is opt-in.
+    "pyyaml>=6.0",
 ]
 telemetry = [
     "opentelemetry-api>=1.20.0",
