@@ -280,6 +280,39 @@ def test_load_default_profile_forces_escalation_on_code():
     assert "code_python_triple_backtick" in d.matched_rules
 
 
+def test_load_multi_provider_profile_has_rules():
+    """The multi-provider profile bundles cross-vendor routing rules."""
+    e = load_profile("multi_provider")
+    assert len(e.rules) > 0
+    names = {r.name for r in e.rules}
+    # Cross-vendor rules: refusal, CoT, structured-output, greetings.
+    assert "refusal_prone_jailbreak_keywords" in names
+    assert "chain_of_thought_trigger" in names
+    assert "threshold_json_structured_output" in names
+    assert "force_cheap_trivial_greeting" in names
+
+
+def test_multi_provider_profile_force_escalates_cot():
+    e = load_profile("multi_provider")
+    d = e.evaluate("Think step by step about the time complexity")
+    assert d.action == "force_escalate"
+    assert "chain_of_thought_trigger" in d.matched_rules
+
+
+def test_multi_provider_profile_force_cheap_on_greeting():
+    e = load_profile("multi_provider")
+    d = e.evaluate("hi")
+    assert d.action == "force_cheap"
+    assert "force_cheap_trivial_greeting" in d.matched_rules
+
+
+def test_multi_provider_profile_raises_threshold_on_json():
+    e = load_profile("multi_provider")
+    d = e.evaluate("Return json format with the answer")
+    assert d.action == "set_threshold"
+    assert d.threshold == 0.85
+
+
 def test_load_unknown_profile_returns_empty_engine():
     e = load_profile("this_profile_does_not_exist")
     assert e.rules == ()
