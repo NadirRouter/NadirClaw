@@ -397,6 +397,27 @@ class Settings:
         """
         return os.getenv("NADIRCLAW_EMBEDDING_API_BASE", self.OLLAMA_API_BASE)
 
+    # ------------------------------------------------------------------
+    # N-tier configuration (see nadirclaw.tier_config)
+    # ------------------------------------------------------------------
+
+    @property
+    def TIERS_PROFILE(self) -> str:
+        """Name or absolute path of the active N-tier profile.
+
+        - Unset (default) → bundled ``n2_default.yaml`` (cheap + strong).
+        - Bare name (e.g. ``n3_legacy``) → bundled profile under
+          ``nadirclaw/tier_config/profiles/<name>.yaml``.
+        - Absolute path ending in ``.yaml``/``.yml`` → user profile.
+
+        Existing 3-tier callers that rely on ``NADIRCLAW_SIMPLE_MODEL`` /
+        ``NADIRCLAW_MID_MODEL`` / ``NADIRCLAW_COMPLEX_MODEL`` should set
+        ``NADIRCLAW_TIERS_PROFILE=n3_legacy`` (or leave the env var unset
+        and call the migration helper to write an auto-profile that
+        embeds those env values).
+        """
+        return os.getenv("NADIRCLAW_TIERS_PROFILE", "").strip()
+
     @property
     def CENTROID_DIR(self) -> "Path | None":
         """Custom directory for centroid .npy and metadata files.

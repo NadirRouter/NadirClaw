@@ -1,0 +1,52 @@
+# N=2 default tier profile (NadirClaw, MIT).
+#
+# This is the profile that ships out of the box. Two tiers — cheap and
+# strong — with the model pools used in the RouterArena submission
+# (arena_F 0.7358, beats N=3 at 0.7136). The verifier-gated cascade
+# starts cheap, escalates to strong when the verifier rejects.
+#
+# Switch profiles with NADIRCLAW_TIERS_PROFILE=<name>. The legacy
+# 3-tier behaviour is preserved as `n3_legacy`.
+#
+# Schema is documented in `nadirclaw/tier_config/schema.py`.
+
+version: 1
+mode: tiered
+
+selector:
+  classifier: wide_deep_asym_v3
+  lambda_cost: 1.0
+
+cascade:
+  # Adjacent escalation == today's behaviour. With N=2 there is only one
+  # rung above cheap, so adjacent and jump are functionally identical.
+  escalation: adjacent
+  acceptance_threshold: 0.80
+  rules_profile: default
+  # N=2 has nothing past strong, so cap is implicit. Set for clarity.
+  max_escalations: 1
+
+tiers:
+  # ----- Cheap tier: workhorses for simple/mid prompts. -----
+  - name: cheap
+    score_min: 0.00
+    model_pool:
+      - gpt-4o-mini
+      - qwen3-235b-a22b-2507
+      - deepseek-v3.2
+      - claude-3-haiku-20240307
+    max_output_tokens: 2048
+
+  # ----- Strong tier: reasoning models for the verifier-rejected tail. -----
+  - name: strong
+    # The medium-tier threshold from RouterArena (conf=0.65) is the
+    # cheap → strong split point. Scores ≥ 0.65 start at strong directly;
+    # everything else starts cheap and lets the verifier decide.
+    score_min: 0.65
+    model_pool:
+      - gpt-5-mini
+      - deepseek-reasoner
+      - deepseek-v4-flash
+      - grok-4-1-fast-reasoning
+      - claude-sonnet-4
+    max_output_tokens: 4096

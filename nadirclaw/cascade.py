@@ -391,6 +391,412 @@ class Cascade:
         )
 
 
+# ---------------------------------------------------------------------------
+# N-tier cascade
+# ---------------------------------------------------------------------------
+
+
+class NTierCascade:
+    """Verifier-gated cascade across N tiers (N ≥ 2).
+
+    Generalises :class:`Cascade` to an arbitrary tier ladder defined by
+    a :class:`nadirclaw.tier_config.TierProfile`. The 2-tier `Cascade`
+    is preserved verbatim for back-compat; this class is the new entry
+    point for callers that want to consume an N-tier YAML profile.
+
+    Each request:
+
+    1. The :class:`~nadirclaw.tier_config.TierSelector` picks a starting
+       tier from the classifier ``score`` (and optionally
+       ``confidence``).
+    2. The rule engine is consulted on the prompt. ``force_escalate``
+       jumps to the rule's ``to_tier`` (or the next tier if unspecified);
+       ``force_cheap`` pins the starting tier; ``set_threshold`` raises
+       the verifier bar.
+    3. Cheap tier is called. Heuristic verifier scores its answer.
+    4. If accepted (or terminal), ship. Else escalate per
+       ``cascade.escalation`` (``adjacent`` walks one rung,
+       ``jump`` goes straight to the top non-terminal tier).
+    5. Cap at ``cascade.max_escalations`` hops.
+
+    The kill-switch + fail-open semantics carry over from
+    :class:`Cascade`: a verifier exception is treated as accept, and
+    after three consecutive failures the cascade short-circuits to the
+    starting tier until process restart.
+    """
+
+    def __init__(
+        self,
+        tier_callers,
+        tier_profile,
+        verifier: Optional[HeuristicVerifier] = None,
+        rule_engine: Optional["CascadeRuleEngine"] = None,
+    ) -> None:
+        """
+        Parameters
+        ----------
+        tier_callers
+            ``dict[str, Callable]`` mapping tier name → callable of
+            signature ``(messages, **kwargs) -> response | awaitable``.
+            Every tier in ``tier_profile.tiers`` must have a caller.
+        tier_profile
+            A :class:`nadirclaw.tier_config.TierProfile`.
+        verifier
+            Custom verifier; defaults to the shared
+            :class:`HeuristicVerifier` at the profile's
+            ``cascade.acceptance_threshold``.
+        rule_engine
+            Optional rule engine. ``cascade.rules_profile`` on the tier
+            profile is informational only — the caller is responsible
+            for constructing the engine and passing it in. Mirrors the
+            2-tier :class:`Cascade` constructor.
+        """
+        from nadirclaw.tier_config import TierProfile, TierSelector  # noqa: PLC0415
+
+        if not isinstance(tier_profile, TierProfile):
+            raise TypeError(
+                "tier_profile must be a nadirclaw.tier_config.TierProfile"
+            )
+        missing = [
+            t.name for t in tier_profile.tiers if t.name not in tier_callers
+        ]
+        if missing:
+            raise ValueError(
+                f"tier_callers is missing entries for: {missing}. "
+                f"Every tier in the profile needs a caller."
+            )
+        self.profile = tier_profile
+        self.tier_callers = dict(tier_callers)
+        self.selector = TierSelector(tier_profile)
+        self.threshold = float(tier_profile.cascade.acceptance_threshold)
+        self.verifier = verifier or get_heuristic_verifier(threshold=self.threshold)
+        self.rule_engine = rule_engine
+        self._consecutive_errors: int = 0
+        self._kill_switch: bool = False
+
+    # ------------------------------------------------------------------
+    # Public dispatch
+    # ------------------------------------------------------------------
+
+    def dispatch_sync(
+        self,
+        messages: list[dict],
+        prompt_text: str,
+        score: float,
+        confidence: Optional[float] = None,
+        expect_json: bool = False,
+        **call_kwargs,
+    ) -> CascadeDecision:
+        """Synchronous N-tier dispatch."""
+        return self._dispatch(
+            messages=messages,
+            prompt_text=prompt_text,
+            score=score,
+            confidence=confidence,
+            expect_json=expect_json,
+            is_async=False,
+            call_kwargs=call_kwargs,
+        )
+
+    async def dispatch(
+        self,
+        messages: list[dict],
+        prompt_text: str,
+        score: float,
+        confidence: Optional[float] = None,
+        expect_json: bool = False,
+        **call_kwargs,
+    ) -> CascadeDecision:
+        """Async-friendly N-tier dispatch."""
+        return await self._dispatch_async(
+            messages=messages,
+            prompt_text=prompt_text,
+            score=score,
+            confidence=confidence,
+            expect_json=expect_json,
+            call_kwargs=call_kwargs,
+        )
+
+    # ------------------------------------------------------------------
+    # Internals
+    # ------------------------------------------------------------------
+
+    def _starting_tier(self, score: float, prompt_text: str) -> tuple[str, float, list[str], dict]:
+        """Resolve the starting tier, effective threshold, and rule audit.
+
+        Returns ``(tier_name, threshold, matched_rule_names, meta)``.
+        """
+        selection = self.selector.assign(score)
+        tier_name = selection.tier_name
+        meta: dict = {"tier_selection_reason": selection.reason}
+        matched_rules: list[str] = []
+        threshold = self.threshold
+
+        if self.rule_engine is not None and CascadeRuleEngine is not None:
+            try:
+                decision = self.rule_engine.evaluate(prompt_text)
+            except Exception as e:  # noqa: BLE001
+                logger.warning("CascadeRuleEngine.evaluate failed; ignoring: %s", e)
+                decision = None
+            if decision is not None:
+                matched_rules = list(decision.matched_rules)
+                if decision.threshold is not None:
+                    threshold = max(threshold, float(decision.threshold))
+                if decision.action == "force_escalate":
+                    target = decision.to_tier
+                    if target and self.profile.tier_by_name(target) is not None:
+                        tier_name = target
+                        meta["rule_action"] = "force_escalate"
+                        meta["rule_to_tier"] = target
+                elif decision.action == "force_cheap":
+                    # Pin to the cheapest tier (index 0). `to_tier` on
+                    # force_cheap is honoured when it names a real tier.
+                    target = decision.to_tier or self.profile.tiers[0].name
+                    if self.profile.tier_by_name(target) is not None:
+                        tier_name = target
+                        meta["rule_action"] = "force_cheap"
+                        meta["rule_to_tier"] = target
+
+        return tier_name, threshold, matched_rules, meta
+
+    def _max_hops(self) -> int:
+        cap = self.profile.cascade.max_escalations
+        n_minus_1 = max(0, self.profile.num_tiers - 1)
+        return n_minus_1 if cap is None else min(int(cap), n_minus_1)
+
+    def _verify(
+        self,
+        prompt_text: str,
+        cheap_response: Any,
+        threshold: float,
+        expect_json: bool,
+    ):
+        """Score the cheap response. Returns the verifier's score result.
+
+        Raises to the caller on verifier failure — the caller decides
+        whether to fail-open or trip the kill switch.
+        """
+        cheap_text = _extract_text(cheap_response)
+        # Only swap in a fresh HeuristicVerifier when the rule engine
+        # raised the bar AND the configured verifier is itself a
+        # HeuristicVerifier; custom verifiers (e.g. those in tests or
+        # Pro's trained verifier) own their threshold semantics and we
+        # must not silently replace them.
+        if (
+            isinstance(self.verifier, HeuristicVerifier)
+            and threshold != self.verifier.threshold
+        ):
+            verifier = HeuristicVerifier(threshold=threshold)
+        else:
+            verifier = self.verifier
+        return verifier.score(
+            prompt=prompt_text,
+            cheap_answer=cheap_text,
+            expect_json=expect_json,
+        )
+
+    def _dispatch(
+        self,
+        messages,
+        prompt_text,
+        score,
+        confidence,
+        expect_json,
+        is_async,
+        call_kwargs,
+    ):
+        # Sync path. Async path is _dispatch_async; the two share too
+        # little control flow to fold together cleanly.
+        if self._kill_switch:
+            start_tier, _, _, _ = self._starting_tier(score, prompt_text)
+            response = self.tier_callers[start_tier](messages, **call_kwargs)
+            return CascadeDecision(
+                final_tier=start_tier,
+                response=response,
+                accepted=True,
+                escalated=False,
+                meta={"cascade_skipped": "kill_switch"},
+            )
+
+        tier_name, threshold, matched_rules, meta = self._starting_tier(
+            score, prompt_text
+        )
+        hops = 0
+        max_hops = self._max_hops()
+        visited: list[str] = []
+        last_score: Optional[float] = None
+        last_reasons: list[str] = []
+        last_meta: dict = {}
+
+        while True:
+            response = self.tier_callers[tier_name](messages, **call_kwargs)
+            visited.append(tier_name)
+
+            if self.profile.is_terminal(tier_name):
+                return CascadeDecision(
+                    final_tier=tier_name,
+                    response=response,
+                    verifier_score=last_score,
+                    accepted=True,
+                    escalated=hops > 0,
+                    reasons=last_reasons or [f"rule:{n}" for n in matched_rules],
+                    meta={**meta, **last_meta, "visited_tiers": visited},
+                    matched_rules=matched_rules,
+                )
+
+            try:
+                result = self._verify(prompt_text, response, threshold, expect_json)
+                self._consecutive_errors = 0
+            except Exception as e:  # noqa: BLE001
+                logger.warning("Verifier failed; failing open: %s", e)
+                self._consecutive_errors += 1
+                if self._consecutive_errors >= KILL_SWITCH_THRESHOLD:
+                    self._kill_switch = True
+                return CascadeDecision(
+                    final_tier=tier_name,
+                    response=response,
+                    accepted=True,
+                    escalated=hops > 0,
+                    meta={**meta, "verifier_error": type(e).__name__, "visited_tiers": visited},
+                    matched_rules=matched_rules,
+                )
+
+            last_score = result.score
+            last_reasons = list(result.reasons)
+            last_meta = result.to_dict()
+
+            if result.accepted or hops >= max_hops:
+                return CascadeDecision(
+                    final_tier=tier_name,
+                    response=response,
+                    verifier_score=result.score,
+                    accepted=result.accepted,
+                    escalated=hops > 0,
+                    reasons=result.reasons,
+                    meta={**meta, **result.to_dict(), "visited_tiers": visited,
+                          "hops_used": hops,
+                          "hop_cap_reached": (not result.accepted) and hops >= max_hops},
+                    matched_rules=matched_rules,
+                )
+
+            nxt = self.selector.next_tier(tier_name)
+            if nxt is None:
+                return CascadeDecision(
+                    final_tier=tier_name,
+                    response=response,
+                    verifier_score=result.score,
+                    accepted=False,
+                    escalated=hops > 0,
+                    reasons=result.reasons,
+                    meta={**meta, **result.to_dict(), "visited_tiers": visited,
+                          "terminal_reached": True},
+                    matched_rules=matched_rules,
+                )
+            tier_name = nxt.name
+            hops += 1
+
+    async def _dispatch_async(
+        self,
+        messages,
+        prompt_text,
+        score,
+        confidence,
+        expect_json,
+        call_kwargs,
+    ):
+        if self._kill_switch:
+            start_tier, _, _, _ = self._starting_tier(score, prompt_text)
+            response = await _maybe_await(
+                self.tier_callers[start_tier](messages, **call_kwargs)
+            )
+            return CascadeDecision(
+                final_tier=start_tier,
+                response=response,
+                accepted=True,
+                escalated=False,
+                meta={"cascade_skipped": "kill_switch"},
+            )
+
+        tier_name, threshold, matched_rules, meta = self._starting_tier(
+            score, prompt_text
+        )
+        hops = 0
+        max_hops = self._max_hops()
+        visited: list[str] = []
+        last_score: Optional[float] = None
+        last_reasons: list[str] = []
+        last_meta: dict = {}
+
+        while True:
+            response = await _maybe_await(
+                self.tier_callers[tier_name](messages, **call_kwargs)
+            )
+            visited.append(tier_name)
+
+            if self.profile.is_terminal(tier_name):
+                return CascadeDecision(
+                    final_tier=tier_name,
+                    response=response,
+                    verifier_score=last_score,
+                    accepted=True,
+                    escalated=hops > 0,
+                    reasons=last_reasons or [f"rule:{n}" for n in matched_rules],
+                    meta={**meta, **last_meta, "visited_tiers": visited},
+                    matched_rules=matched_rules,
+                )
+
+            try:
+                result = self._verify(prompt_text, response, threshold, expect_json)
+                self._consecutive_errors = 0
+            except Exception as e:  # noqa: BLE001
+                logger.warning("Verifier failed; failing open: %s", e)
+                self._consecutive_errors += 1
+                if self._consecutive_errors >= KILL_SWITCH_THRESHOLD:
+                    self._kill_switch = True
+                return CascadeDecision(
+                    final_tier=tier_name,
+                    response=response,
+                    accepted=True,
+                    escalated=hops > 0,
+                    meta={**meta, "verifier_error": type(e).__name__, "visited_tiers": visited},
+                    matched_rules=matched_rules,
+                )
+
+            last_score = result.score
+            last_reasons = list(result.reasons)
+            last_meta = result.to_dict()
+
+            if result.accepted or hops >= max_hops:
+                return CascadeDecision(
+                    final_tier=tier_name,
+                    response=response,
+                    verifier_score=result.score,
+                    accepted=result.accepted,
+                    escalated=hops > 0,
+                    reasons=result.reasons,
+                    meta={**meta, **result.to_dict(), "visited_tiers": visited,
+                          "hops_used": hops,
+                          "hop_cap_reached": (not result.accepted) and hops >= max_hops},
+                    matched_rules=matched_rules,
+                )
+
+            nxt = self.selector.next_tier(tier_name)
+            if nxt is None:
+                return CascadeDecision(
+                    final_tier=tier_name,
+                    response=response,
+                    verifier_score=result.score,
+                    accepted=False,
+                    escalated=hops > 0,
+                    reasons=result.reasons,
+                    meta={**meta, **result.to_dict(), "visited_tiers": visited,
+                          "terminal_reached": True},
+                    matched_rules=matched_rules,
+                )
+            tier_name = nxt.name
+            hops += 1
+
+
 async def _maybe_await(x: Any) -> Any:
     import inspect
 
