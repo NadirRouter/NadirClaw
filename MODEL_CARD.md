@@ -5,18 +5,22 @@ posture, and published benchmark numbers for the pre-generation tier
 classifier that powers Nadir's routing decisions.
 
 NadirClaw, the open-source router in this repo, ships **the architecture
-description and the heuristics on top of it** (see
-`nadirclaw/cascade.py`, `nadirclaw/cascade_rules/`,
-`nadirclaw/heuristic_verifier.py`). The trained `wide_deep_asym_v3.pt`
-artifact itself is proprietary to [Nadir Pro](https://getnadir.com).
-NadirClaw users get the same routing topology with the simpler binary
-centroid or DistilBERT classifier — the card below explains where the
-Pro-tier numbers come from so users can decide whether to stay free or
-upgrade.
+description, the bundled trained weights, the heuristics on top of
+them**, and the cascade rule engine (see `nadirclaw/cascade.py`,
+`nadirclaw/cascade_rules/`, `nadirclaw/heuristic_verifier.py`,
+`nadirclaw/wide_deep_classifier.py`). The `wide_deep_asym_v3.pt`
+checkpoint (and its symmetric-loss companion `wide_deep_sym_v3.pt`,
+~900 KB each) lives under `nadirclaw/models/` and is loaded
+automatically by `nadirclaw.wide_deep_classifier.get_wide_deep_classifier()`.
+The weights and code are MIT-licensed alongside the rest of the
+package. [Nadir Pro](https://getnadir.com) layers a hosted dashboard,
+team billing, the trained DeBERTa-v3-small cascade verifier, and
+closed-loop retraining over the same classifier.
 
 - **Router name**: `nadir`
 - **Classifier family**: wide-and-deep asymmetric (`wide_deep_asym`)
-- **Production artifact (Nadir Pro)**: `wide_deep_asym_v3.pt`
+- **Production artifact**: `wide_deep_asym_v3.pt` (bundled in NadirClaw + used in Nadir Pro)
+- **Companion artifact**: `wide_deep_sym_v3.pt` (symmetric-loss variant, fixes the asym head's simple-class collapse under argmax decoding)
 - **Card last updated**: 2026-05-27
 - **Schema version**: 1
 
@@ -181,17 +185,31 @@ to τ=0.80 in `DEFAULT_ACCEPTANCE_THRESHOLD`.
 
 | Component | NadirClaw (OSS) | Nadir Pro |
 | --- | --- | --- |
-| Pre-generation classifier | Binary centroid (~10 ms) or DistilBERT (3-class, opt-in) | `wide_deep_asym_v3` (the model documented in this card) |
+| Pre-generation classifier | Binary centroid (~10 ms), DistilBERT (opt-in), **or** bundled `wide_deep_asym_v3` (~40 ms CPU) | `wide_deep_asym_v3` with closed-loop retraining + provider-health-aware ranking |
 | Post-generation verifier | Rule-based heuristic, ~1 ms | DeBERTa-v3-small INT8, ~193 ms, AUROC 0.96 |
-| Cascade rule engine | Same engine, default profile bundled | Same engine, same default profile, plus per-tenant overrides |
+| Cascade rule engine | Same engine; `default.yaml` + `multi_provider.yaml` profiles bundled | Same engine, same profiles, plus per-tenant overrides |
 | Default τ | 0.80 | 0.80 (env override `CASCADE_DEFAULT_THRESHOLD`) |
 | Contamination audit utility | `verifier/contamination_audit.py` | Same script, plus internal corpus loader |
 
-If you want the trained classifier numbers reproduced on your own
-workload, the path is: run NadirClaw with the heuristic verifier first,
-log decisions and outcomes, then use those logs as the labeled corpus
-for training your own wide-and-deep classifier following the
-architecture above. Nadir Pro automates this loop for hosted customers.
+To use the bundled trained classifier directly, import it from
+`nadirclaw.wide_deep_classifier`:
+
+```python
+from nadirclaw.wide_deep_classifier import get_wide_deep_classifier
+
+clf = get_wide_deep_classifier(
+    checkpoint_variant="asym",            # or "symmetric"
+    decision_rule="cost_sensitive",       # pair asym with cost-sensitive
+    cost_lambda=20.0,                     # max-safe, ~47% cost vs always-Opus
+)
+result = clf.classify("Your prompt here")
+print(result.tier, result.confidence, result.probabilities)
+```
+
+For closed-loop retraining on your own workload, the path is: log
+decisions and outcomes from NadirClaw, then re-train a copy of the
+wide-and-deep head with the same architecture. Nadir Pro automates
+this loop for hosted customers.
 
 ---
 

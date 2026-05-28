@@ -48,7 +48,11 @@ include = ["nadirclaw*"]
 version = {attr = "nadirclaw.__version__"}
 
 [tool.setuptools.package-data]
-nadirclaw = ["*.npy", "cascade_rules/profiles/*.yaml"]
+nadirclaw = [
+    "*.npy",
+    "cascade_rules/profiles/*.yaml",
+    "models/*.pt",
+]
 
 [project.optional-dependencies]
 dev = [

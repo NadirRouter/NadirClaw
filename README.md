@@ -141,7 +141,7 @@ NadirClaw is the free, open-source core. If you are routing production traffic o
 |---|---|---|
 | **License** | MIT | Proprietary |
 | **Deploy** | Self-hosted, localhost | `api.getnadir.com` or self-host via Docker |
-| **Pre-generation classifier** | Binary centroid (~10ms) or opt-in 3-class DistilBERT | Trained classifier + 3-tier routing, higher accuracy |
+| **Pre-generation classifier** | Binary centroid (~10ms), opt-in DistilBERT, or **bundled** `wide_deep_asym_v3` trained checkpoint (~40ms CPU; see [`MODEL_CARD.md`](MODEL_CARD.md)) | Same trained classifier + closed-loop retraining, provider-health-aware ranking |
 | **Post-generation verifier** | Rule-based heuristic (refusal / length / JSON checks, ~1ms) | Trained DeBERTa-v3-small cross-encoder, AUROC 0.96 on RouterBench held-out |
 | **Verifier-gated cascade** | Yes (heuristic verifier) | Yes (trained verifier) |
 | **Storage** | Local JSONL + SQLite | Postgres (Supabase), multi-tenant |
