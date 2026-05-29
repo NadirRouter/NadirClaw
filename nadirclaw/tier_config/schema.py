@@ -66,13 +66,13 @@ class CascadeConfig(BaseModel):
     max_escalations: Optional[int] = Field(default=None, ge=0)
     # Which verifier the cascade should use. `heuristic` (default) uses
     # the rule-based HeuristicVerifier shipped in this repo. `trained`
-    # loads NadirRouter/cascade-verifier-v1 from HuggingFace and
+    # loads nadirclaw/cascade-verifier-v1 from HuggingFace and
     # requires the `trained` extras (pip install nadirclaw[trained]).
     verifier: str = "heuristic"
     # HuggingFace model id or local path for the trained verifier.
     # Only consulted when verifier == "trained". Defaults to the
     # released v1 snapshot.
-    verifier_model: str = "NadirRouter/cascade-verifier-v1"
+    verifier_model: str = "nadirclaw/cascade-verifier-v1"
 
     @model_validator(mode="after")
     def _check_mode(self) -> "CascadeConfig":

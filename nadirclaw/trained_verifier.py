@@ -9,7 +9,7 @@ open-source NadirClaw router.
 What's released
 ---------------
 * Frozen INT8 / FP32 weights at the HuggingFace model id
-  ``NadirRouter/cascade-verifier-v1``.
+  ``nadirclaw/cascade-verifier-v1``.
 * Tokenizer + config to load via the standard
   ``transformers.AutoModelForSequenceClassification`` pipeline.
 
@@ -58,7 +58,7 @@ logger = logging.getLogger(__name__)
 # Default HuggingFace model id for the released snapshot. Override with
 # the ``NADIRCLAW_TRAINED_VERIFIER_MODEL`` env var or the ``model_id``
 # constructor argument if you mirror the weights elsewhere.
-DEFAULT_MODEL_ID = "NadirRouter/cascade-verifier-v1"
+DEFAULT_MODEL_ID = "nadirclaw/cascade-verifier-v1"
 
 # Default acceptance threshold. Calibrated against the same held-out
 # RouterBench test split as the HeuristicVerifier default. The trained
@@ -103,7 +103,7 @@ class TrainedVerifier:
     ----------
     model_id:
         HuggingFace model id or local path. Defaults to
-        ``NadirRouter/cascade-verifier-v1``.
+        ``nadirclaw/cascade-verifier-v1``.
     threshold:
         Score cutoff for acceptance. Defaults to 0.80 (same as the
         heuristic, so cascade behaviour is consistent when you swap).
