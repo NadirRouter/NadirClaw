@@ -148,6 +148,85 @@ def test_trained_verifier_interface_matches_heuristic():
         assert {"score", "accepted", "threshold", "reasons", "verifier"} <= d.keys()
 
 
+def test_trained_verifier_wraps_input_in_production_format():
+    """The tokenizer must receive ``text_pair`` wrapped in the
+    ``CHEAP:\\n...\\n\\nEXPENSIVE:\\n...`` format the cross-encoder was
+    trained on. Without this wrapper, scores drift against the
+    calibrated tau=0.80 threshold.
+
+    Production reference:
+      ``getnadir.dev/backend/app/services/verifier_model.py:195``
+    """
+    from nadirclaw.trained_verifier import TrainedVerifier
+
+    captured: dict = {}
+
+    class _FakeEncoding(dict):
+        def __init__(self):
+            super().__init__()
+            # Minimal tensor-like values so the .to(device) loop works.
+            class _T:
+                def to(self, _device):
+                    return self
+
+            self["input_ids"] = _T()
+            self["attention_mask"] = _T()
+
+    class _FakeTokenizer:
+        def __call__(self, prompt, text_pair, **kwargs):
+            captured["prompt"] = prompt
+            captured["text_pair"] = text_pair
+            captured["kwargs"] = kwargs
+            return _FakeEncoding()
+
+    class _FakeLogits:
+        # Two-class head; softmax([0, 0]) => probs[..., 1] == 0.5
+        shape = (1, 2)
+
+        def __init__(self):
+            import torch
+            self._t = torch.tensor([[0.0, 0.0]])
+
+        def __getattr__(self, name):
+            return getattr(self._t, name)
+
+    class _FakeModelOut:
+        def __init__(self):
+            import torch
+            self.logits = torch.tensor([[0.0, 0.0]])
+
+    class _FakeModel:
+        def __call__(self, **kwargs):
+            return _FakeModelOut()
+
+        def eval(self):
+            return self
+
+        def to(self, _device):
+            return self
+
+    v = TrainedVerifier(threshold=0.8, device="cpu")
+    v._tokenizer = _FakeTokenizer()
+    v._model = _FakeModel()
+    v._resolved_device = "cpu"
+
+    # Case 1: reference_answer provided.
+    out = v.score("What is 2+2?", "4", reference_answer="four")
+    assert captured["prompt"] == "What is 2+2?"
+    assert captured["text_pair"] == "CHEAP:\n4\n\nEXPENSIVE:\nfour"
+    assert 0.0 <= out.score <= 1.0
+
+    # Case 2: reference_answer=None -> empty EXPENSIVE: block.
+    captured.clear()
+    v.score("What is 2+2?", "4")
+    assert captured["text_pair"] == "CHEAP:\n4\n\nEXPENSIVE:\n"
+
+    # Case 3: reference_answer is whitespace-only -> stripped to empty.
+    captured.clear()
+    v.score("What is 2+2?", "4", reference_answer="   \n  ")
+    assert captured["text_pair"] == "CHEAP:\n4\n\nEXPENSIVE:\n"
+
+
 def test_trained_verifier_get_singleton_caches():
     """The module-level singleton accessor should cache same-threshold calls
     and return fresh instances for mismatched thresholds. Construction
