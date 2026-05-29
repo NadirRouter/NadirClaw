@@ -52,6 +52,7 @@ nadirclaw = [
     "*.npy",
     "cascade_rules/profiles/*.yaml",
     "models/*.pt",
+    "tier_config/profiles/*.yaml",
 ]
 
 [project.optional-dependencies]

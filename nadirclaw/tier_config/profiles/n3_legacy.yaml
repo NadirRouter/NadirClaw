@@ -1,0 +1,56 @@
+# N=3 legacy tier profile (NadirClaw, MIT).
+#
+# Reproduces the 3-tier behaviour shipped with the cascade rule engine
+# PR (#59): simple / medium / complex with the cutoffs that match
+# NADIRCLAW_TIER_THRESHOLDS=0.35,0.65 (the previous default).
+#
+# Existing users who relied on env-var-based tier configuration get this
+# profile automatically when they set NADIRCLAW_TIERS_PROFILE=n3_legacy
+# or when the migration helper synthesises a 3-tier profile from
+# NADIRCLAW_SIMPLE_MODEL / NADIRCLAW_MID_MODEL / NADIRCLAW_COMPLEX_MODEL.
+#
+# Schema is documented in `nadirclaw/tier_config/schema.py`.
+
+version: 1
+mode: tiered
+
+selector:
+  classifier: wide_deep_asym_v3
+  lambda_cost: 1.0
+
+cascade:
+  escalation: adjacent
+  acceptance_threshold: 0.80
+  rules_profile: default
+  # Walk the full ladder by default; N-1 = 2 hops in the worst case.
+  max_escalations: 2
+
+# The model pools below intentionally mirror the historic NadirClaw
+# defaults: a free/cheap workhorse for simple prompts, a mid-tier
+# Anthropic Haiku for medium prompts, and an Anthropic Sonnet for
+# complex prompts. Operators that already set the legacy env vars can
+# leave them in place — the migration helper writes a tailored profile
+# at first run.
+tiers:
+  - name: simple
+    score_min: 0.00
+    model_pool:
+      - gemini-3-flash-preview
+      - claude-3-haiku-20240307
+    max_output_tokens: 1024
+
+  - name: medium
+    # Matches NADIRCLAW_TIER_THRESHOLDS lower bound.
+    score_min: 0.35
+    model_pool:
+      - claude-3-haiku-20240307
+      - gpt-4o-mini
+    max_output_tokens: 2048
+
+  - name: complex
+    # Matches NADIRCLAW_TIER_THRESHOLDS upper bound.
+    score_min: 0.65
+    model_pool:
+      - claude-sonnet-4
+      - gpt-4.1
+    max_output_tokens: 4096

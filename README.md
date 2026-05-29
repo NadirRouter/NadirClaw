@@ -160,7 +160,8 @@ NadirClaw is the free, open-source core. If you are routing production traffic o
 - **Smart routing** — classifies prompts in ~10ms using sentence embeddings
 - **Pluggable classifier** — `binary` (default, ~10ms centroid classifier) or `distilbert` (3-class fine-tuned DistilBERT that natively predicts simple/mid/complex). Select with `NADIRCLAW_COMPLEXITY_ANALYZER`
 - **Three-tier routing** — simple / mid / complex tiers with configurable score thresholds (`NADIRCLAW_TIER_THRESHOLDS`); set `NADIRCLAW_MID_MODEL` for a cost-effective middle tier
-- **Verifier-gated cascade** — cheap model first, score the response with a rule-based heuristic verifier (refusals, truncations, JSON-format failures, ~1ms), escalate to the expensive tier when the score falls below τ=0.80. Same architecture as Nadir Pro, swap the verifier for the trained DeBERTa cross-encoder. See `nadirclaw/cascade.py`.
+- **N-tier YAML config** — one classifier head, any number of tiers. The default profile (`n2_default.yaml`) ships a cheap-and-strong two-tier cascade tuned on RouterArena (arena_F 0.7358, beats the legacy three-tier baseline). Switch profiles with `NADIRCLAW_TIERS_PROFILE=<name>`. Custom YAML profiles hot-reload from disk in <30s. See `nadirclaw/tier_config/` and the [N-tier docs](#n-tier-routing) below.
+- **Verifier-gated cascade** — cheap model first, score the response with a rule-based heuristic verifier (refusals, truncations, JSON-format failures, ~1ms), escalate to the next tier when the score falls below τ=0.80. Same architecture as Nadir Pro, swap the verifier for the trained DeBERTa cross-encoder. See `nadirclaw/cascade.py` (`Cascade` for 2-tier, `NTierCascade` for N≥2).
 - **Cascade rule engine** — declarative YAML rules drive per-prompt overrides: `force_escalate` on patterns where the verifier is unreliable (code, summarisation), `set_threshold` to raise the verifier bar on borderline domains, `force_cheap` for trivially-easy patterns, `set_max_tokens` for length budgeting. Hot-reload from disk; profiles live in `nadirclaw/cascade_rules/profiles/`.
 - **Agentic task detection** — auto-detects tool use, multi-step loops, and agent system prompts; forces complex model for agentic requests
 - **Reasoning detection** — identifies prompts needing chain-of-thought and routes to reasoning-optimized models
@@ -388,6 +389,62 @@ Test how any prompt buckets with either analyzer:
 nadirclaw classify "design a distributed rate limiter"
 NADIRCLAW_COMPLEXITY_ANALYZER=distilbert nadirclaw classify "fix this typo"
 ```
+
+### N-tier routing
+
+The shape of the cascade — how many tiers, which models per tier, how the
+verifier escalates — is configured via a YAML profile. One classifier
+head serves N=2, N=3, N=5, ..., because the classifier emits a continuous
+score in `[0, 1]` and the YAML cutoffs slice it into tiers.
+
+Switch profiles with `NADIRCLAW_TIERS_PROFILE`:
+
+```bash
+# default: cheap + strong, tuned on RouterArena
+unset NADIRCLAW_TIERS_PROFILE                       # uses n2_default.yaml
+
+# legacy three-tier behaviour (simple / medium / complex)
+export NADIRCLAW_TIERS_PROFILE=n3_legacy
+
+# your own profile
+export NADIRCLAW_TIERS_PROFILE=/path/to/my_5tier.yaml
+```
+
+The bundled `n2_default.yaml` is the new default. It encodes the two-tier
+cascade that won our internal RouterArena bake-off (arena_F 0.7358 vs N=3
+at 0.7136):
+
+```yaml
+version: 1
+mode: tiered
+selector:
+  classifier: wide_deep_asym_v3
+cascade:
+  escalation: adjacent
+  acceptance_threshold: 0.80
+  rules_profile: default
+tiers:
+  - name: cheap
+    score_min: 0.00
+    model_pool: [gpt-4o-mini, qwen3-235b-a22b-2507, deepseek-v3.2, claude-3-haiku-20240307]
+    max_output_tokens: 2048
+  - name: strong
+    score_min: 0.65
+    model_pool: [gpt-5-mini, deepseek-reasoner, deepseek-v4-flash, grok-4-1-fast-reasoning, claude-sonnet-4]
+    max_output_tokens: 4096
+```
+
+Edit a profile YAML on disk and the change is picked up within 30s — no
+restart, same TTL hot-reload pattern as the cascade rule engine.
+
+**Migration for existing users:** if you have `NADIRCLAW_SIMPLE_MODEL` /
+`NADIRCLAW_MID_MODEL` / `NADIRCLAW_COMPLEX_MODEL` set and `NADIRCLAW_TIERS_PROFILE`
+unset, your routing keeps working — the legacy 3-tier env-var path is
+untouched. Set `NADIRCLAW_TIERS_PROFILE=n3_legacy` to opt into the
+N-tier dispatch with the bundled 3-tier profile, or write your own.
+
+Schema reference: `nadirclaw/tier_config/schema.py`. Sample profiles:
+`nadirclaw/tier_config/profiles/`.
 
 ## Usage with Gemini
 

@@ -197,6 +197,13 @@ class ClassificationResult:
     cost_lambda: float
     latency_ms: int
     classifier_version: str
+    # Continuous score in [0, 1]. The N-tier selector consumes this
+    # directly; legacy 3-tier callers can ignore it. Computed as the
+    # expected-class adapter `E[class] / 2` over the 3-way softmax —
+    # see `nadirclaw.tier_config.score_adapter` for the formula and
+    # rationale. Always populated (even under cost-sensitive decoding)
+    # because the score is independent of the chosen class.
+    score: float = 0.0
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -209,6 +216,7 @@ class ClassificationResult:
             "cost_lambda": self.cost_lambda,
             "latency_ms": self.latency_ms,
             "classifier_version": self.classifier_version,
+            "score": self.score,
         }
 
 
@@ -361,6 +369,13 @@ class WideDeepClassifier:
             pred_idx = int(np.argmax(probs))
 
         tier = _TIER_MAP[pred_idx]
+        # Continuous-score adapter for the N-tier selector. Inlined
+        # rather than imported to keep this module dependency-free at
+        # import time (the tier_config package imports pydantic via
+        # its schema, which we don't want to force on classifier-only
+        # callers).
+        score = float(0.0 * probs[0] + 1.0 * probs[1] + 2.0 * probs[2]) / 2.0
+        score = max(0.0, min(1.0, score))
         return ClassificationResult(
             tier=tier,
             tier_num=_TIER_NUM[tier],
@@ -375,6 +390,7 @@ class WideDeepClassifier:
             cost_lambda=self.cost_lambda,
             latency_ms=latency_ms,
             classifier_version=self.ANALYZER_VERSION,
+            score=score,
         )
 
     # Convenience: legacy 3-tuple shape (matches getnadir's analyzer)
