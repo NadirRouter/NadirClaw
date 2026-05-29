@@ -32,9 +32,12 @@ Interface
     >>> result = v.score(prompt, cheap_answer)
     >>> result.score, result.accepted        # float in [0, 1], bool
 
-The ``reference_answer`` and ``expect_json`` arguments are accepted for
-parity with ``HeuristicVerifier`` but are currently ignored — the
-trained model scores ``(prompt, cheap_answer)`` only.
+The ``reference_answer`` argument, when provided, is folded into the
+structured ``text_pair`` the cross-encoder was trained on (see
+``score()``). When ``None``, an empty ``EXPENSIVE:`` block is
+substituted, matching the production backend's behaviour. The
+``expect_json`` argument is accepted for parity with
+``HeuristicVerifier`` but is currently ignored by the trained model.
 
 Dependencies
 ------------
@@ -219,10 +222,16 @@ class TrainedVerifier:
     ) -> TrainedScore:
         """Score how acceptable ``cheap_answer`` is for ``prompt``.
 
-        ``reference_answer`` and ``expect_json`` are accepted for
-        interface parity with ``HeuristicVerifier`` and are currently
-        ignored by the trained model. The cross-encoder was trained
-        on ``(prompt, cheap_answer)`` pairs only.
+        The cross-encoder was trained on inputs of the form
+        ``(prompt, "CHEAP:\\n{cheap}\\n\\nEXPENSIVE:\\n{reference}")``.
+        ``reference_answer`` is folded into the structured ``text_pair``
+        when provided; when ``None`` an empty ``EXPENSIVE:`` block is
+        substituted, matching the production backend at
+        ``getnadir.dev/backend/app/services/verifier_model.py``.
+
+        ``expect_json`` is accepted for interface parity with
+        ``HeuristicVerifier`` and is currently ignored by the trained
+        model.
         """
         self._ensure_loaded()
 
@@ -240,9 +249,17 @@ class TrainedVerifier:
 
         import torch
 
+        # Match the training format used by the production backend
+        # (getnadir.dev/backend/app/services/verifier_model.py) and
+        # documented on the HuggingFace model card. Without the
+        # ``CHEAP:``/``EXPENSIVE:`` wrapper the scores drift against
+        # the calibrated tau=0.80 acceptance threshold.
+        text_pair = (
+            f"CHEAP:\n{cheap}\n\nEXPENSIVE:\n{(reference_answer or '').strip()}"
+        )
         enc = self._tokenizer(
             prompt or "",
-            cheap,
+            text_pair,
             truncation=True,
             max_length=_MAX_SEQ_LEN,
             padding=False,
