@@ -76,6 +76,14 @@ telemetry = [
     "opentelemetry-exporter-otlp-proto-grpc>=1.20.0",
     "opentelemetry-instrumentation-fastapi>=0.41b0",
 ]
+trained = [
+    # Optional dependency for the TrainedVerifier (DeBERTa-v3-small
+    # cross-encoder loaded from NadirRouter/cascade-verifier-v1).
+    # The heuristic verifier remains the default for the cascade,
+    # so users who do not want the transformer stack pay nothing.
+    "transformers>=4.40",
+    "torch>=2.0",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
