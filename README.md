@@ -59,6 +59,54 @@ SIMPLE  "Write a docstring"         → gemini-flash    $0.0002
 
 > **Your keys. Your models. No middleman.** NadirClaw runs locally and routes directly to providers. No third-party proxy, no subsidized tokens, no platform that can pull the plug on you. [Why this matters.](docs/vs-clawrouter.md)
 
+## Benchmarks
+
+NadirClaw and Nadir Pro share the same routing architecture. The numbers
+below are from the trained classifier + DeBERTa verifier in Nadir Pro;
+the NadirClaw OSS classifier uses a simpler binary centroid that trades
+some accuracy for zero training cost. Both run the same cascade rule
+engine (`nadirclaw/cascade_rules/`).
+
+### RouterBench (held-out, n=11,420)
+
+The composed system (pre-generation classifier + post-generation
+cascade verifier, τ=0.80):
+
+| Metric | Value |
+| --- | ---: |
+| AUROC | **0.961** |
+| Expected Calibration Error (ECE) | **0.016** |
+| Quality preserved vs always-Opus | **98.3%** |
+| Catastrophic-downgrade rate | 1.7% |
+| Composed cost vs always-Opus | -60% |
+
+Full τ-sweep and per-domain breakdown is in [`MODEL_CARD.md`](MODEL_CARD.md).
+
+### RouterArena (sub_10, n=809, public leaderboard)
+
+| Metric | Value |
+| --- | ---: |
+| Composite score | **0.7118** |
+| Projected leaderboard rank | **#5** |
+| Routers below (selected) | NotDiamond-0001, Auto Router, Martian |
+
+RouterArena submission PR (live):
+[RouteWorks/RouterArena#112](https://github.com/RouteWorks/RouterArena/pull/112).
+
+### Contamination audit
+
+Zero overlap between Nadir's training corpus and either held-out set:
+
+| Held-out set | Audit run | Overlap |
+| --- | --- | --- |
+| RouterBench `0shot` | 2026-05-24 | 0 of 36,481 |
+| RouterArena `sub_10` | 2026-05-27 | 0 of 809 |
+| RouterArena `full` | 2026-05-27 | 0 of 8,399 |
+
+The audit is reproducible from this repo:
+[`verifier/contamination_audit.py`](verifier/contamination_audit.py).
+Hash recipe: `sha256(NFC(prompt).strip().casefold().utf8)`.
+
 ## Quick Start
 
 ```bash
@@ -93,7 +141,9 @@ NadirClaw is the free, open-source core. If you are routing production traffic o
 |---|---|---|
 | **License** | MIT | Proprietary |
 | **Deploy** | Self-hosted, localhost | `api.getnadir.com` or self-host via Docker |
-| **Classifier** | Binary centroid (~10ms) or opt-in 3-class DistilBERT | Trained classifier + 3-tier routing, higher accuracy |
+| **Pre-generation classifier** | Binary centroid (~10ms), opt-in DistilBERT, or **bundled** `wide_deep_asym_v3` trained checkpoint (~40ms CPU; see [`MODEL_CARD.md`](MODEL_CARD.md)) | Same trained classifier + closed-loop retraining, provider-health-aware ranking |
+| **Post-generation verifier** | Rule-based heuristic (refusal / length / JSON checks, ~1ms) | Trained DeBERTa-v3-small cross-encoder, AUROC 0.96 on RouterBench held-out |
+| **Verifier-gated cascade** | Yes (heuristic verifier) | Yes (trained verifier) |
 | **Storage** | Local JSONL + SQLite | Postgres (Supabase), multi-tenant |
 | **Dashboard** | Terminal + local web | Hosted web dashboard, per-team analytics |
 | **Cost tracking** | `nadirclaw savings` CLI | Live dashboard, monthly invoices, projected savings |
@@ -110,6 +160,8 @@ NadirClaw is the free, open-source core. If you are routing production traffic o
 - **Smart routing** — classifies prompts in ~10ms using sentence embeddings
 - **Pluggable classifier** — `binary` (default, ~10ms centroid classifier) or `distilbert` (3-class fine-tuned DistilBERT that natively predicts simple/mid/complex). Select with `NADIRCLAW_COMPLEXITY_ANALYZER`
 - **Three-tier routing** — simple / mid / complex tiers with configurable score thresholds (`NADIRCLAW_TIER_THRESHOLDS`); set `NADIRCLAW_MID_MODEL` for a cost-effective middle tier
+- **Verifier-gated cascade** — cheap model first, score the response with a rule-based heuristic verifier (refusals, truncations, JSON-format failures, ~1ms), escalate to the expensive tier when the score falls below τ=0.80. Same architecture as Nadir Pro, swap the verifier for the trained DeBERTa cross-encoder. See `nadirclaw/cascade.py`.
+- **Cascade rule engine** — declarative YAML rules drive per-prompt overrides: `force_escalate` on patterns where the verifier is unreliable (code, summarisation), `set_threshold` to raise the verifier bar on borderline domains, `force_cheap` for trivially-easy patterns, `set_max_tokens` for length budgeting. Hot-reload from disk; profiles live in `nadirclaw/cascade_rules/profiles/`.
 - **Agentic task detection** — auto-detects tool use, multi-step loops, and agent system prompts; forces complex model for agentic requests
 - **Reasoning detection** — identifies prompts needing chain-of-thought and routes to reasoning-optimized models
 - **Vision routing** — auto-detects image content in messages and routes to vision-capable models (GPT-4o, Claude, Gemini)

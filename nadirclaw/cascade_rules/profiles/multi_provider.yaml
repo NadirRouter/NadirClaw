@@ -1,0 +1,189 @@
+# Multi-provider cascade rule profile (NadirClaw, MIT).
+#
+# The default profile (`default.yaml`) is calibrated for an
+# Anthropic-only ladder (Haiku → Sonnet → Opus). Many NadirClaw users
+# point the router at a *menu* of models from different providers:
+# Google Gemini for the cheap tier, an OpenAI / Anthropic model in the
+# middle, and an Opus-class or open-weight reasoning model at the top.
+#
+# Routing across providers exposes one new failure mode that does NOT
+# show up in single-provider cascades:
+#
+#   `cheap-tier refusal / safety-quirk` — provider A's small model
+#   refuses or wraps the answer in boilerplate ("As a large language
+#   model, I cannot..."), even when provider B's small model would have
+#   answered cleanly. The heuristic verifier catches most of these via
+#   the refusal regex, but the empirical hit-rate is provider-specific.
+#   When the rest of the menu spans providers, you want to be more
+#   aggressive about escalating: a refusal on the cheap tier should not
+#   be retried on the same cheap model, it should jump to a *different
+#   provider's* mid tier.
+#
+# This profile encodes the patterns where we observed cross-provider
+# routing wins on RouterArena `sub_10` and `full` (n=8,399), where the
+# model menu included Anthropic + Google + OpenAI + a Llama-class open
+# model. The cross-provider learnings are summarised in
+# `docs/multi-provider-routing.md`.
+#
+# Load this profile via:
+#
+#     from nadirclaw.cascade_rules import load_profile
+#     engine = load_profile("multi_provider")
+#     cascade = Cascade(cheap_call, expensive_call, rule_engine=engine)
+#
+# Customise by copying this file and pointing `load_profile()` at the
+# new path. TTL-cached engines pick up file changes within 30 seconds.
+
+rules:
+  # ---------- force_escalate: cross-provider refusal patterns ----------
+  # Some cheap-tier models refuse safety-sensitive prompts that the
+  # next tier handles cleanly. We force the escalation so the cascade
+  # does not bounce on a refusal-style cheap response.
+  - name: refusal_prone_jailbreak_keywords
+    priority: 110
+    match:
+      any_of:
+        - substring: "ignore previous instructions"
+        - substring: "ignore the above"
+        - substring: "act as if you are"
+        - substring: "pretend you are"
+    action:
+      type: force_escalate
+    meta:
+      rationale: "Cheap tiers across providers handle jailbreak-shaped prompts inconsistently; mid tier is more uniform"
+
+  # ---------- force_escalate: reasoning prompts that need cross-family judgment ----------
+  # Math word problems, chain-of-thought triggers, and "show your work"
+  # prompts are where cheap-tier failure modes vary most across providers.
+  # The empirical pattern from RouterArena was that escalation pays off
+  # whenever the prompt explicitly asks for step-by-step reasoning.
+  - name: chain_of_thought_trigger
+    priority: 95
+    match:
+      any_of:
+        - substring: "step by step"
+        - substring: "step-by-step"
+        - substring: "show your work"
+        - substring: "explain your reasoning"
+        - substring: "let's think"
+    action:
+      type: force_escalate
+    meta:
+      rationale: "CoT prompts have high cross-provider variance on cheap tier; verifier AUROC ~0.7 here"
+
+  - name: math_proof_triggers
+    priority: 90
+    match:
+      any_of:
+        - substring: "prove that"
+        - substring: "derive the"
+        - regex: "\\bproof\\b"
+    action:
+      type: force_escalate
+    meta:
+      rationale: "Math proofs need consistent multi-step reasoning; escalate"
+
+  # ---------- force_escalate: code generation (shared with default profile) ----------
+  # Same rationale as `default.yaml` — verifier AUROC degrades on code.
+  # Repeated here so users who load *only* this profile still get the
+  # code-domain protection.
+  - name: code_python_triple_backtick
+    priority: 100
+    match:
+      any_of:
+        - substring: "```python"
+    action:
+      type: force_escalate
+    meta:
+      rationale: "Verifier AUROC ~0.65 on code; cross-provider cheap tiers vary in code quality"
+
+  - name: code_javascript_triple_backtick
+    priority: 100
+    match:
+      any_of:
+        - substring: "```javascript"
+    action:
+      type: force_escalate
+
+  - name: code_typescript_triple_backtick
+    priority: 100
+    match:
+      any_of:
+        - substring: "```typescript"
+    action:
+      type: force_escalate
+
+  - name: code_sql_triple_backtick
+    priority: 95
+    match:
+      any_of:
+        - substring: "```sql"
+    action:
+      type: force_escalate
+    meta:
+      rationale: "Cross-provider SQL dialects diverge; mid tier is safer"
+
+  # ---------- set_threshold: raise the verifier bar where providers disagree ----------
+  # When the verifier is borderline accepting a cheap response, the
+  # cross-provider safety margin matters more than on a same-family
+  # cascade. Raise the bar so borderline scores escalate.
+  - name: threshold_long_prompt
+    priority: 60
+    match:
+      any_of:
+        - prompt_length_min: 1500
+    action:
+      type: set_threshold
+      threshold: 0.85
+    meta:
+      rationale: "Long prompts amplify provider-specific cheap-tier weaknesses"
+
+  - name: threshold_summarize_cross_provider
+    priority: 50
+    match:
+      any_of:
+        - substring: "summarize"
+        - substring: "summarise"
+        - substring: "tl;dr"
+    action:
+      type: set_threshold
+      threshold: 0.82
+    meta:
+      rationale: "Summarisation length-control varies across providers; tighter accept bar"
+
+  - name: threshold_json_structured_output
+    priority: 50
+    match:
+      any_of:
+        - substring: "respond in json"
+        - substring: "return json"
+        - substring: "as json"
+        - substring: "json format"
+    action:
+      type: set_threshold
+      threshold: 0.85
+    meta:
+      rationale: "Cheap tiers across providers wrap JSON in prose inconsistently; tight accept bar"
+
+  # ---------- force_cheap: trivially-easy patterns where every provider succeeds ----------
+  # Where the cheap tier is reliably right across providers, accept
+  # immediately and skip the verifier round-trip.
+  - name: force_cheap_trivial_greeting
+    priority: 30
+    match:
+      any_of:
+        - regex: "^(hi|hello|hey|yo|sup)\\W*$"
+    action:
+      type: force_cheap
+    meta:
+      rationale: "Greetings: every cheap tier handles them; skip verifier latency"
+
+  - name: force_cheap_thanks_acknowledge
+    priority: 30
+    match:
+      any_of:
+        - regex: "^(thanks|thank you|ty|got it|ok|okay)\\W*$"
+    action:
+      type: force_cheap
+    meta:
+      rationale: "Acknowledgements: skip verifier"

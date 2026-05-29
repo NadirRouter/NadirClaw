@@ -1,0 +1,146 @@
+# Default cascade rule profile (NadirClaw, MIT).
+#
+# These rules encode the domains where post-hoc verifiers (both the
+# rule-based `HeuristicVerifier` shipped with NadirClaw and the trained
+# DeBERTa cross-encoder shipped in Nadir Pro) are least reliable. Held-out
+# evaluation on RouterBench showed verifier AUROC degrades sharply on
+# code generation and long-form summarisation, so on those prompts we
+# bypass the score-then-accept loop and either:
+#
+#   - force escalation to the next tier (`force_escalate`), or
+#   - raise the acceptance threshold so a borderline score does not
+#     accept the cheap answer (`set_threshold`).
+#
+# This profile is loaded automatically when no override is supplied.
+# Customise by copying this file, editing the rules, and pointing
+# `load_profile()` at the new path — TTL-cached engines pick up file
+# changes within 30 seconds.
+#
+# Rule schema is documented in `nadirclaw/cascade_rules/engine.py`.
+
+rules:
+  # ---------- force_escalate: untrusted verifier domains (code) ----------
+  - name: code_python_triple_backtick
+    priority: 100
+    match:
+      any_of:
+        - substring: "```python"
+    action:
+      type: force_escalate
+    meta:
+      rationale: "Verifier AUROC 0.65 on mbpp; escalate rather than risk a bad cheap answer"
+
+  - name: code_javascript_triple_backtick
+    priority: 100
+    match:
+      any_of:
+        - substring: "```javascript"
+    action:
+      type: force_escalate
+    meta:
+      rationale: "Code domain — verifier untrusted"
+
+  - name: code_typescript_triple_backtick
+    priority: 100
+    match:
+      any_of:
+        - substring: "```typescript"
+    action:
+      type: force_escalate
+    meta:
+      rationale: "Code domain — verifier untrusted"
+
+  - name: code_def_keyword
+    priority: 90
+    match:
+      any_of:
+        - substring: "def "
+    action:
+      type: force_escalate
+    meta:
+      rationale: "Python `def ` is a strong code signal; verifier unreliable on code"
+
+  - name: code_function_keyword
+    priority: 90
+    match:
+      any_of:
+        - substring: "function "
+    action:
+      type: force_escalate
+    meta:
+      rationale: "JS `function ` keyword; verifier unreliable on code"
+
+  # ---------- force_escalate: untrusted verifier domains (summarisation) ----
+  - name: summarize_the_following
+    priority: 80
+    match:
+      any_of:
+        - substring: "summarize the following"
+    action:
+      type: force_escalate
+    meta:
+      rationale: "consensus_summary AUROC 0.77; escalate"
+
+  - name: summarize_this
+    priority: 80
+    match:
+      any_of:
+        - substring: "summarize this"
+    action:
+      type: force_escalate
+    meta:
+      rationale: "Summarisation domain — verifier untrusted"
+
+  # ---------- set_threshold: raise the bar on borderline domains ----------
+  # Even when force_escalate did not fire, code-pattern prompts use a
+  # stricter verifier cut so borderline scores never accept.
+  - name: threshold_code_python
+    priority: 50
+    match:
+      any_of:
+        - substring: "```python"
+    action:
+      type: set_threshold
+      threshold: 0.85
+    meta:
+      rationale: "Code AUROC 0.66 — stricter verifier bar"
+
+  - name: threshold_code_javascript
+    priority: 50
+    match:
+      any_of:
+        - substring: "```javascript"
+    action:
+      type: set_threshold
+      threshold: 0.85
+
+  - name: threshold_code_def
+    priority: 50
+    match:
+      any_of:
+        - substring: "def "
+    action:
+      type: set_threshold
+      threshold: 0.85
+
+  - name: threshold_summarize
+    priority: 40
+    match:
+      any_of:
+        - substring: "summarize"
+    action:
+      type: set_threshold
+      threshold: 0.80
+    meta:
+      rationale: "Summarisation AUROC 0.78"
+
+  - name: threshold_math_solve_for
+    priority: 40
+    match:
+      any_of:
+        - substring: "solve for"
+    action:
+      type: set_threshold
+      threshold: 0.80
+    meta:
+      rationale: "Math AUROC 0.79"
