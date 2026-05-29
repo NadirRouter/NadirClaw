@@ -446,7 +446,7 @@ N-tier dispatch with the bundled 3-tier profile, or write your own.
 Schema reference: `nadirclaw/tier_config/schema.py`. Sample profiles:
 `nadirclaw/tier_config/profiles/`.
 
-### Trained verifier (NadirRouter/cascade-verifier-v1)
+### Trained verifier (nadirclaw/cascade-verifier-v1)
 
 The default `n2_default` profile escalates via the rule-based
 `HeuristicVerifier` shipped in this repo — no extra dependencies, runs
@@ -458,7 +458,7 @@ cross-encoder verifier.
 This is the frozen DeBERTa-v3-small snapshot used in the
 [RouterArena PR #112](https://github.com/RouteWorks/RouterArena/pull/112)
 submission (arena_F 0.7358). It is released under MIT as
-[`NadirRouter/cascade-verifier-v1`](https://huggingface.co/NadirRouter/cascade-verifier-v1)
+[`nadirclaw/cascade-verifier-v1`](https://huggingface.co/nadirclaw/cascade-verifier-v1)
 on HuggingFace so the RouterArena number is reproducible end-to-end
 with the open-source router.
 

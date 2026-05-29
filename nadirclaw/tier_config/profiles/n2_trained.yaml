@@ -2,7 +2,7 @@
 #
 # Same N=2 tier layout as n2_default, but routes verifier decisions
 # through the trained DeBERTa-v3-small cross-encoder released as
-# NadirRouter/cascade-verifier-v1 on HuggingFace, instead of the
+# nadirclaw/cascade-verifier-v1 on HuggingFace, instead of the
 # rule-based HeuristicVerifier.
 #
 # Use this profile to reproduce the RouterArena PR #112 result
@@ -33,7 +33,7 @@ cascade:
   # Use the trained DeBERTa-v3-small cross-encoder instead of the
   # rule-based heuristic. Loaded lazily on first cascade call.
   verifier: trained
-  verifier_model: NadirRouter/cascade-verifier-v1
+  verifier_model: nadirclaw/cascade-verifier-v1
 
 tiers:
   # ----- Cheap tier: workhorses for simple/mid prompts. -----

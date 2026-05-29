@@ -473,7 +473,7 @@ class NTierCascade:
         # `cascade.verifier` from the profile. "heuristic" (default)
         # keeps the zero-dependency rule-based verifier. "trained"
         # lazily loads the DeBERTa-v3-small cross-encoder from
-        # NadirRouter/cascade-verifier-v1 (requires the optional
+        # nadirclaw/cascade-verifier-v1 (requires the optional
         # `nadirclaw[trained]` extras).
         if verifier is not None:
             self.verifier = verifier

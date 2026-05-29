@@ -170,7 +170,7 @@ def test_trained_verifier_default_model_id():
     """The released v1 snapshot id should be the constructor default."""
     from nadirclaw.trained_verifier import DEFAULT_MODEL_ID, TrainedVerifier
 
-    assert DEFAULT_MODEL_ID == "NadirRouter/cascade-verifier-v1"
+    assert DEFAULT_MODEL_ID == "nadirclaw/cascade-verifier-v1"
     v = TrainedVerifier(threshold=0.8, device="cpu")
     assert v.model_id == DEFAULT_MODEL_ID
 
@@ -198,7 +198,7 @@ def test_n2_trained_profile_loads():
     assert profile.profile_name == "n2_trained"
     assert profile.num_tiers == 2
     assert profile.cascade.verifier == "trained"
-    assert profile.cascade.verifier_model == "NadirRouter/cascade-verifier-v1"
+    assert profile.cascade.verifier_model == "nadirclaw/cascade-verifier-v1"
     assert profile.cascade.acceptance_threshold == 0.80
 
 
