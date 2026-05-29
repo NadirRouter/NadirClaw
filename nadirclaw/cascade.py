@@ -469,7 +469,27 @@ class NTierCascade:
         self.tier_callers = dict(tier_callers)
         self.selector = TierSelector(tier_profile)
         self.threshold = float(tier_profile.cascade.acceptance_threshold)
-        self.verifier = verifier or get_heuristic_verifier(threshold=self.threshold)
+        # Pick verifier: explicit constructor arg wins; otherwise read
+        # `cascade.verifier` from the profile. "heuristic" (default)
+        # keeps the zero-dependency rule-based verifier. "trained"
+        # lazily loads the DeBERTa-v3-small cross-encoder from
+        # NadirRouter/cascade-verifier-v1 (requires the optional
+        # `nadirclaw[trained]` extras).
+        if verifier is not None:
+            self.verifier = verifier
+        elif tier_profile.cascade.verifier == "trained":
+            # Local import so the heuristic-only install path does not
+            # pull in transformers/torch at module load time.
+            from nadirclaw.trained_verifier import (  # noqa: PLC0415
+                get_trained_verifier,
+            )
+
+            self.verifier = get_trained_verifier(
+                threshold=self.threshold,
+                model_id=tier_profile.cascade.verifier_model,
+            )
+        else:
+            self.verifier = get_heuristic_verifier(threshold=self.threshold)
         self.rule_engine = rule_engine
         self._consecutive_errors: int = 0
         self._kill_switch: bool = False

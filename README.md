@@ -446,6 +446,67 @@ N-tier dispatch with the bundled 3-tier profile, or write your own.
 Schema reference: `nadirclaw/tier_config/schema.py`. Sample profiles:
 `nadirclaw/tier_config/profiles/`.
 
+### Trained verifier (NadirRouter/cascade-verifier-v1)
+
+The default `n2_default` profile escalates via the rule-based
+`HeuristicVerifier` shipped in this repo — no extra dependencies, runs
+in under 1 ms per call, catches the obvious failure modes (refusals,
+truncation, JSON parse failure). For the subtler "looks right but is
+factually wrong" tail, NadirClaw v0.19 ships an opt-in trained
+cross-encoder verifier.
+
+This is the frozen DeBERTa-v3-small snapshot used in the
+[RouterArena PR #112](https://github.com/RouteWorks/RouterArena/pull/112)
+submission (arena_F 0.7358). It is released under MIT as
+[`NadirRouter/cascade-verifier-v1`](https://huggingface.co/NadirRouter/cascade-verifier-v1)
+on HuggingFace so the RouterArena number is reproducible end-to-end
+with the open-source router.
+
+**Install with the optional extras:**
+
+```bash
+pip install nadirclaw[trained]
+```
+
+This pulls in `transformers>=4.40` and `torch>=2.0`. Users who do not
+want the transformer stack pay nothing — the heuristic remains the
+default.
+
+**Activate the trained verifier:**
+
+```bash
+export NADIRCLAW_TIERS_PROFILE=n2_trained
+```
+
+The `n2_trained` profile uses the same N=2 cascade ladder as
+`n2_default` but routes verifier decisions through the trained
+DeBERTa-v3-small cross-encoder. Weights load lazily on first cascade
+call (~500 MB checkpoint, ~10 s download into the HF cache; subsequent
+runs hit the cache).
+
+**Direct API:**
+
+```python
+from nadirclaw.trained_verifier import TrainedVerifier
+
+verifier = TrainedVerifier(threshold=0.80)
+result = verifier.score(prompt, cheap_answer)
+print(result.score, result.accepted)
+```
+
+**What is and is not released**
+
+| | OSS (NadirClaw v0.19) | Pro (Nadir hosted) |
+| --- | --- | --- |
+| Frozen verifier weights | YES (`cascade-verifier-v1`, MIT) | YES |
+| Training pipeline | NO | YES (corpus + judge + curriculum) |
+| Adaptive retraining loop | NO | YES |
+| Custom-routed quality scoring | NO | YES |
+
+The frozen snapshot is enough to reproduce the RouterArena result; the
+adaptive retraining keeps the production verifier current as new model
+families ship.
+
 ## Usage with Gemini
 
 Gemini is the default simple model. NadirClaw calls Gemini natively via the Google GenAI SDK for best performance.
