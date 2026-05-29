@@ -77,11 +77,17 @@ def _tiny_verifier(threshold: float = 0.8):
 # Interface parity with HeuristicVerifier
 # ---------------------------------------------------------------------------
 
-@pytest.mark.slow
+@pytest.mark.skipif(
+    "NADIRCLAW_RUN_SLOW_TESTS" not in __import__("os").environ,
+    reason=(
+        "Requires real DeBERTa tokenizer download (~10 MB). "
+        "Set NADIRCLAW_RUN_SLOW_TESTS=1 to enable."
+    ),
+)
 def test_trained_verifier_score_returns_struct():
     """A real forward pass on a tiny random init returns a valid
-    TrainedScore with score in [0, 1]. Marked slow because it needs to
-    actually load a tokenizer from the HF cache (~10 MB).
+    TrainedScore with score in [0, 1]. Gated behind an env var because
+    it needs to download a tokenizer from the HF cache.
     """
     v = _tiny_verifier(threshold=0.8)
     out = v.score("What is 2+2?", "4")
