@@ -248,11 +248,16 @@ class Settings:
 
     @property
     def OPTIMIZE(self) -> str:
-        """Context optimization mode: off, safe, aggressive. Default: off."""
+        """Context optimization mode: off, safe, aggressive, progressive. Default: off.
+
+        ``off`` disables compression entirely. ``safe``/``aggressive`` run the
+        single-pass pipeline; ``progressive`` runs the staged ladder that
+        escalates to Headroom only until the token budget is met.
+        """
         val = os.getenv("NADIRCLAW_OPTIMIZE", "off").lower()
-        if val not in ("off", "safe", "aggressive"):
+        if val not in ("off", "safe", "aggressive", "progressive"):
             _settings_logger.warning(
-                "Invalid NADIRCLAW_OPTIMIZE=%r — expected off|safe|aggressive. "
+                "Invalid NADIRCLAW_OPTIMIZE=%r — expected off|safe|aggressive|progressive. "
                 "Falling back to 'off'.",
                 val,
             )
@@ -266,6 +271,76 @@ class Settings:
             return max(4, int(os.getenv("NADIRCLAW_OPTIMIZE_MAX_TURNS", "40")))
         except ValueError:
             return 40
+
+    @property
+    def OPTIMIZE_BACKEND(self) -> str:
+        """Optimizer backend: native (default) or headroom (opt-in).
+
+        ``native`` runs the built-in stdlib transform pipeline. ``headroom``
+        delegates to the optional ``headroom-ai`` package and transparently
+        falls back to native when it is not installed. Default: native.
+        """
+        val = os.getenv("NADIRCLAW_OPTIMIZE_BACKEND", "native").lower()
+        if val not in ("native", "headroom"):
+            _settings_logger.warning(
+                "Invalid NADIRCLAW_OPTIMIZE_BACKEND=%r — expected native|headroom. "
+                "Falling back to 'native'.",
+                val,
+            )
+            return "native"
+        return val
+
+    @property
+    def OPTIMIZE_PROGRESSIVE(self) -> bool:
+        """Use progressive (staged) compression that escalates to Headroom only
+        when a token budget is still unmet after native transforms. Default: off."""
+        return os.getenv("NADIRCLAW_OPTIMIZE_PROGRESSIVE", "false").lower() in ("true", "1", "yes", "on")
+
+    @property
+    def OPTIMIZE_TARGET_TOKENS(self):
+        """Token budget for progressive compression. When set, escalation stops
+        as soon as the message set fits. Unset (default) → native stages only."""
+        raw = os.getenv("NADIRCLAW_OPTIMIZE_TARGET_TOKENS", "").strip()
+        if not raw:
+            return None
+        try:
+            return max(1, int(raw))
+        except ValueError:
+            return None
+
+    @property
+    def OPTIMIZE_ALLOW_LOSSY(self) -> bool:
+        """Allow the lossy ML prose stage (Headroom Kompress) in progressive
+        compression. Default: off (escalation stops at lossless/structural)."""
+        return os.getenv("NADIRCLAW_OPTIMIZE_ALLOW_LOSSY", "false").lower() in ("true", "1", "yes", "on")
+
+    @property
+    def OPTIMIZE_ALLOW_OFFLOAD(self) -> bool:
+        """Allow the native CCR offload stage (move oversized content behind a
+        ``nadir_retrieve`` handle) in progressive compression. Default: off.
+
+        NOTE: offload is only safe when the caller injects the retrieve tool
+        (``nadirclaw.ccr.retrieve_tool_def``) and serves the fetch-back loop
+        (``nadirclaw.ccr.resolve_loop``). The built-in server does NOT yet run
+        that loop, so this setting is currently consumed only by direct library
+        callers of ``compress_progressive(allow_offload=True)`` — not by
+        ``nadirclaw serve``. Enabling it without a retrieve path means the model
+        sees a marker it cannot resolve."""
+        return os.getenv("NADIRCLAW_OPTIMIZE_ALLOW_OFFLOAD", "false").lower() in ("true", "1", "yes", "on")
+
+    @property
+    def OPTIMIZE_MAX_STAGE(self) -> str:
+        """Cap on the progressive escalation ladder. Default: headroom_structural."""
+        val = os.getenv("NADIRCLAW_OPTIMIZE_MAX_STAGE", "headroom_structural").lower()
+        allowed = ("native_safe", "native_aggressive", "headroom_structural", "headroom_ml", "offload")
+        if val not in allowed:
+            _settings_logger.warning(
+                "Invalid NADIRCLAW_OPTIMIZE_MAX_STAGE=%r — expected one of %s. "
+                "Falling back to 'headroom_structural'.",
+                val, "|".join(allowed),
+            )
+            return "headroom_structural"
+        return val
 
     @property
     def CORS_ORIGINS(self) -> list[str]:

@@ -1035,7 +1035,7 @@ Options:
   --complex-model TEXT    Model for complex prompts
   --models TEXT           Comma-separated model list (legacy)
   --token TEXT            Auth token
-  --optimize [off|safe|aggressive]  Context optimization mode (default: off)
+  --optimize [off|safe|aggressive|progressive]  Context compression: off | safe | aggressive | progressive (default: off)
   --verbose               Enable debug logging
   --log-raw               Log full raw requests and responses to JSONL
 ```
@@ -1420,8 +1420,14 @@ Auth is disabled by default (local-only). Set `NADIRCLAW_AUTH_TOKEN` to require 
 | `NADIRCLAW_CONFIDENCE_THRESHOLD` | `0.06` | Classification threshold (lower = more complex) |
 | `NADIRCLAW_PORT` | `8856` | Server port |
 | `NADIRCLAW_LOG_DIR` | `~/.nadirclaw/logs` | Log directory |
-| `NADIRCLAW_OPTIMIZE` | `off` | Context optimization mode: `off`, `safe` (lossless), `aggressive` (future) |
+| `NADIRCLAW_OPTIMIZE` | `off` | Context compression: `off` (disabled), `safe` (lossless), `aggressive`, or `progressive` (staged ladder that escalates to Headroom). `off` is the master on/off switch |
 | `NADIRCLAW_OPTIMIZE_MAX_TURNS` | `40` | Max conversation turns to keep when trimming history |
+| `NADIRCLAW_OPTIMIZE_BACKEND` | `native` | Optimizer backend: `native` (built-in) or `headroom` (needs `pip install nadirclaw[headroom]`; falls back to native if absent). See [savings analysis](docs/context-optimize-savings.md#backends-native-default-vs-headroom) |
+| `NADIRCLAW_HEADROOM_KOMPRESS` | `off` | When backend is `headroom`, enable Kompress ML text compression (downloads a HuggingFace model on first use) |
+| `NADIRCLAW_OPTIMIZE_PROGRESSIVE` | `off` | Legacy alias for `NADIRCLAW_OPTIMIZE=progressive` — forces the [progressive ladder](docs/context-optimize-savings.md#progressive-staged-compression) regardless of mode. Prefer setting `NADIRCLAW_OPTIMIZE=progressive` |
+| `NADIRCLAW_OPTIMIZE_TARGET_TOKENS` | _(unset)_ | Token budget for progressive compression (e.g. the model's context window). Unset → native stages only |
+| `NADIRCLAW_OPTIMIZE_MAX_STAGE` | `headroom_structural` | Cap on the progressive ladder: `native_safe`, `native_aggressive`, `headroom_structural`, or `headroom_ml` |
+| `NADIRCLAW_OPTIMIZE_ALLOW_LOSSY` | `off` | Permit the lossy ML prose stage (`headroom_ml`) in progressive compression |
 | `NADIRCLAW_LOG_RAW` | `false` | Log full raw requests and responses (`true`/`false`) |
 | `NADIRCLAW_MODELS` | `openai-codex/gpt-5.3-codex,gemini-3-flash-preview` | Legacy model list (fallback if tier vars not set) |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | *(empty — disabled)* | OpenTelemetry collector endpoint (enables tracing) |
