@@ -4,6 +4,19 @@ All notable changes to NadirClaw will be documented in this file.
 
 ## [Unreleased]
 
+## [0.20.0] - 2026-06-12
+
+### Added
+- **Context-optimizer compression upgrades** (#65):
+  - **Pluggable backend** — `NADIRCLAW_OPTIMIZE_BACKEND` selects `native` (default, built-in stdlib pipeline) or `headroom` (opt-in, delegates to the Apache-2.0 [`headroom-ai`](https://pypi.org/project/headroom-ai/) package via `pip install nadirclaw[headroom]`). Headroom is lazy and **fail-open**: if it is not installed or raises, the optimizer transparently falls back to `native` and the request never fails. Per-request override via `optimize_backend` in the body.
+  - **Progressive (staged) compression** — `--optimize progressive` / `NADIRCLAW_OPTIMIZE=progressive` runs an escalation ladder (`native_safe → native_aggressive → headroom_structural → headroom_ml`) that **stops as soon as `NADIRCLAW_OPTIMIZE_TARGET_TOKENS` is met**. With no budget set it stops after `native_aggressive` (dependency-free, lossless); Headroom stages are skipped silently when `headroom-ai` is absent; the lossy ML stage runs only when `NADIRCLAW_OPTIMIZE_ALLOW_LOSSY` is on. Tunable via `NADIRCLAW_OPTIMIZE_MAX_STAGE`. New library entrypoint `nadirclaw.optimize.compress_progressive()`.
+  - **Columnar JSON-array packing** (`json_array_pack`, aggressive mode) — rewrites homogeneous arrays of same-keyed objects (DB results, API list responses, large tool outputs) into a header plus one value-array per row, emitting each key once. Information-lossless and deterministically reversible; ~68% vs pretty-printed JSON. Never runs in `safe` mode.
+  - **Native CCR** (`nadirclaw/ccr.py`) — deterministic offload + `nadir_retrieve` fetch-back loop that moves oversized content out of the prompt behind a retrieve handle, fully reversible because the originals are kept server-side. Library-only for now (not yet wired into `nadirclaw serve`).
+  - Apache-2.0 attribution for `headroom-ai` in `THIRD_PARTY_NOTICES.md`; docs, benchmarks, and tests (ccr, progressive, json_array_pack, backends, code-safety).
+
+### Fixed
+- **Whitespace normalization corrupted unfenced source code** — the `whitespace_normalize` transform collapsed the *leading indentation* of raw (unfenced) code arriving as file-read tool outputs, flattening nested Python/YAML/diffs into invalid syntax while reporting it as "savings". It now preserves leading indentation and only collapses interior multi-spaces, in both `safe` and `aggressive` modes (#65).
+
 ## [0.19.3] - 2026-06-12
 
 ### Fixed
