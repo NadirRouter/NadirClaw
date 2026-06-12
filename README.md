@@ -156,7 +156,7 @@ NadirClaw is the free, open-source core. If you are routing production traffic o
 
 ## Features
 
-- **Context Optimize** — compacts bloated context (JSON, tool schemas, chat history, whitespace) before dispatch, saving 30-70% input tokens with zero semantic loss. Modes: `off` (default), `safe` (lossless), `aggressive` (future). See [savings analysis](docs/context-optimize-savings.md)
+- **Context Optimize** — compacts bloated context (JSON, tool schemas, chat history, whitespace) before dispatch, saving 30-70% input tokens with zero semantic loss. Modes: `off` (default), `safe` (lossless), `aggressive` (+ columnar JSON-array packing & semantic dedup), `progressive` (staged ladder that only escalates until a token budget is met). Pluggable backend (`native` default, or opt-in `headroom`). See [savings analysis](docs/context-optimize-savings.md)
 - **Smart routing** — classifies prompts in ~10ms using sentence embeddings
 - **Pluggable classifier** — `binary` (default, ~10ms centroid classifier) or `distilbert` (3-class fine-tuned DistilBERT that natively predicts simple/mid/complex). Select with `NADIRCLAW_COMPLEXITY_ANALYZER`
 - **Three-tier routing** — simple / mid / complex tiers with configurable score thresholds (`NADIRCLAW_TIER_THRESHOLDS`); set `NADIRCLAW_MID_MODEL` for a cost-effective middle tier
@@ -1047,7 +1047,7 @@ Test context compaction on a file or stdin without running the server:
 ```bash
 nadirclaw optimize payload.json                    # dry-run with safe mode
 nadirclaw optimize payload.json --format json      # machine-readable output
-nadirclaw optimize payload.json --mode aggressive   # aggressive mode (future)
+nadirclaw optimize payload.json --mode aggressive  # + columnar JSON packing & semantic dedup
 cat messages.json | nadirclaw optimize             # pipe from stdin
 ```
 
@@ -1374,6 +1374,50 @@ On top of routing savings, Context Optimize compacts bloated payloads before the
 | OpenAPI spec context (5 endpoints) | 1,887 | 71% | $28.30 |
 
 Average: **61.5% input token reduction** across structured payloads. Enable with `--optimize safe`. See [full analysis](docs/context-optimize-savings.md).
+
+#### Modes
+
+```bash
+# Pick a mode when starting the server (or set NADIRCLAW_OPTIMIZE)
+nadirclaw serve --optimize safe          # lossless: dedup, json minify, whitespace
+nadirclaw serve --optimize aggressive    # + columnar JSON packing & semantic dedup
+nadirclaw serve --optimize progressive   # staged ladder, escalates only until budget met
+```
+
+Per request, override the mode in the body: `{"optimize": "aggressive", "messages": [...]}` (or `"off"` to disable).
+
+#### Backends — `native` (default) vs `headroom`
+
+The mode decides *how hard* to compress; the backend decides *who* runs it. `native` is the
+built-in, dependency-free pipeline. `headroom` delegates to the optional Apache-2.0
+[`headroom-ai`](https://pypi.org/project/headroom-ai/) package for statistical JSON crushing and
+content-type routing — and **transparently falls back to `native`** if it isn't installed or errors,
+so it never breaks a request.
+
+```bash
+pip install "nadirclaw[headroom]"
+NADIRCLAW_OPTIMIZE=safe NADIRCLAW_OPTIMIZE_BACKEND=headroom nadirclaw serve
+# per-request: {"optimize": "safe", "optimize_backend": "headroom", "messages": [...]}
+```
+
+#### Progressive (staged) compression
+
+`progressive` escalates through stages — `native_safe → native_aggressive → headroom_structural →
+headroom_ml` — and **stops as soon as a token budget is met**, so you only pay the cost (and
+fidelity risk) of heavier compression when lighter stages aren't enough. With no
+`NADIRCLAW_OPTIMIZE_TARGET_TOKENS` set, it stops after `native_aggressive` (dependency-free,
+lossless); Headroom stages are skipped silently if `headroom-ai` is absent, and the lossy ML stage
+only runs when explicitly allowed.
+
+```bash
+NADIRCLAW_OPTIMIZE=progressive \
+NADIRCLAW_OPTIMIZE_TARGET_TOKENS=180000 \
+NADIRCLAW_OPTIMIZE_MAX_STAGE=headroom_structural \
+nadirclaw serve
+```
+
+See the [backends & progressive reference](docs/context-optimize-savings.md#backends-native-default-vs-headroom)
+for the full ladder, the env-var table under [Configuration Reference](#configuration-reference), and safety/fallback details.
 
 ## API Endpoints
 
