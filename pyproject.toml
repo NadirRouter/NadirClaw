@@ -70,6 +70,13 @@ cascade-rules = [
     # (`load_profile`). `load_inline` works without it, so this is opt-in.
     "pyyaml>=6.0",
 ]
+headroom = [
+    # Optional context-compression backend (Apache-2.0, github.com/chopratejas/headroom).
+    # Activated with NADIRCLAW_OPTIMIZE_BACKEND=headroom. When absent, the optimizer
+    # transparently falls back to the built-in native pipeline, so this stays opt-in.
+    # Prebuilt wheels bundle the compiled Rust `_core` extension (SmartCrusher etc.).
+    "headroom-ai>=0.23.0",
+]
 telemetry = [
     "opentelemetry-api>=1.20.0",
     "opentelemetry-sdk>=1.20.0",

@@ -1418,19 +1418,36 @@ async def chat_completions(
         # Context optimization — compact messages before dispatch
         # ------------------------------------------------------------------
         optimize_mode = (request.model_extra or {}).get("optimize") or settings.OPTIMIZE
+        optimize_backend = (request.model_extra or {}).get("optimize_backend") or settings.OPTIMIZE_BACKEND
         optimization_info = None
         if optimize_mode != "off":
-            from nadirclaw.optimize import optimize_messages
-
             raw_msgs = [
                 {"role": m.role, "content": m.text_content()}
                 for m in request.messages
             ]
-            opt_result = optimize_messages(
-                raw_msgs,
-                mode=optimize_mode,
-                max_turns=settings.OPTIMIZE_MAX_TURNS,
-            )
+            # `optimize=progressive` (or the legacy NADIRCLAW_OPTIMIZE_PROGRESSIVE
+            # flag) selects the staged ladder that escalates native → headroom →
+            # lossy ML only until the token budget is met. Headroom stages are
+            # skipped if headroom-ai is not installed.
+            if optimize_mode == "progressive" or settings.OPTIMIZE_PROGRESSIVE:
+                from nadirclaw.optimize import compress_progressive
+
+                opt_result = compress_progressive(
+                    raw_msgs,
+                    target_tokens=settings.OPTIMIZE_TARGET_TOKENS,
+                    max_turns=settings.OPTIMIZE_MAX_TURNS,
+                    allow_lossy=settings.OPTIMIZE_ALLOW_LOSSY,
+                    max_stage=settings.OPTIMIZE_MAX_STAGE,
+                )
+            else:
+                from nadirclaw.optimize import optimize_messages
+
+                opt_result = optimize_messages(
+                    raw_msgs,
+                    mode=optimize_mode,
+                    max_turns=settings.OPTIMIZE_MAX_TURNS,
+                    backend=optimize_backend,
+                )
             if opt_result.tokens_saved > 0:
                 optimized_msgs = [
                     ChatMessage(role=m["role"], content=m["content"])

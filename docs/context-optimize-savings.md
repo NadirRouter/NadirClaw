@@ -37,6 +37,7 @@ Combined with smart routing, NadirClaw now saves in two ways:
 - **Tool schema deduplication** — Agent frameworks often re-send the full tool schema with every turn. NadirClaw keeps the first occurrence and replaces repeats with a short reference.
 - **Chat history trimming** — Long conversations accumulate tokens that are far from the current task. Trimming to recent turns (default: 40) keeps context relevant and cheap.
 - **Whitespace normalization** — Log dumps, stack traces, and verbose output contain runs of blank lines and spaces that carry no semantic value.
+- **Columnar JSON-array packing** (`json_array_pack`, aggressive mode) — Large arrays of same-keyed objects (DB query results, API list responses, large tool outputs) repeat every key on every row. Packing them into a header (`⟦cols=[...]⟧`) plus one value-array per row emits each key once. Information-lossless and deterministically reversible, but not byte-identical JSON, so it runs in **aggressive** mode only. On a 100-row homogeneous array this reaches ~68% vs pretty-printed JSON (vs ~45% for `json_minify` alone).
 
 ## Projected Monthly Savings (Opus 4.6)
 
@@ -56,6 +57,9 @@ All safe-mode transforms are deterministic and lossless:
 
 - JSON values roundtrip exactly (parse + compact re-serialize)
 - Code blocks inside fences (```) are never modified
+- **Leading indentation is preserved**, so raw (unfenced) source code — e.g. file-read
+  tool outputs — stays syntactically valid. Whitespace normalization only collapses
+  *interior* multi-spaces and excess blank lines, never indentation.
 - URLs are preserved character-for-character
 - Unicode and emoji roundtrip correctly
 - Deeply nested structures are handled without data loss
@@ -76,3 +80,100 @@ NADIRCLAW_OPTIMIZE=safe nadirclaw serve
 # Dry-run on a file
 nadirclaw optimize payload.json --mode safe --format json
 ```
+
+## Backends: native (default) vs headroom
+
+The optimizer has a pluggable backend, selected independently of the `off|safe|aggressive`
+mode. The mode still decides *how hard* to compress; the backend decides *who* runs it.
+
+| Backend | Default | Engine | Extra capabilities |
+|---|---|---|---|
+| `native` | ✅ | Built-in stdlib pipeline (this document) | None — pure Python, no extra deps |
+| `headroom` | opt-in | [Headroom](https://github.com/chopratejas/headroom) (Apache-2.0) | Statistical JSON-array crushing (SmartCrusher), AST-aware code compression, content-type routing |
+
+`headroom` delegates to the optional [`headroom-ai`](https://pypi.org/project/headroom-ai/)
+package. It ships **installed by default with Nadir Pro** but stays **inactive** until you
+select it. In open-source NadirClaw it is an opt-in extra:
+
+```bash
+pip install "nadirclaw[headroom]"
+```
+
+Activate it:
+
+```bash
+# Server-wide
+NADIRCLAW_OPTIMIZE=safe NADIRCLAW_OPTIMIZE_BACKEND=headroom nadirclaw serve
+
+# Per-request override (in the request body)
+{"model": "auto", "optimize": "safe", "optimize_backend": "headroom", "messages": [...]}
+```
+
+Safety and fallback:
+
+- If `headroom-ai` is not installed (or raises), the optimizer **transparently falls back
+  to `native`** and logs a one-time warning. Requests never fail because of the backend.
+- Token-savings metrics are always recomputed with NadirClaw's own estimator, so reported
+  numbers stay consistent across backends (Savings/Billing math is unaffected).
+- Headroom's ML text compressor (Kompress) downloads a HuggingFace model on first use, so
+  it is kept **disabled** by default. Opt in with `NADIRCLAW_HEADROOM_KOMPRESS=on`.
+- The fastest Headroom compressors (SmartCrusher etc.) are a compiled Rust extension bundled
+  in the prebuilt wheels. On source installs without the wheel they simply don't run, and
+  Headroom fails open — output is still correct, just less compressed.
+
+Attribution for the Apache-2.0 dependency lives in
+[`THIRD_PARTY_NOTICES.md`](../THIRD_PARTY_NOTICES.md).
+
+## Progressive (staged) compression
+
+`compress_progressive()` escalates through compression stages and **stops as soon as a
+token budget is met** — so you only pay the cost (and fidelity risk) of heavier compression
+when lighter stages aren't enough. Headroom is wired in as the middle/late tiers.
+
+The ladder, cheapest/safest first:
+
+| Stage | What runs | Loss | Needs |
+|---|---|---|---|
+| 1. `native_safe` | system/tool dedup, json minify, whitespace | lossless | — |
+| 2. `native_aggressive` | + columnar packing, semantic dedup, Pro transforms | lossless-to-semantic | — |
+| 3. `headroom_structural` | Headroom content compressors (SmartCrusher, LogCompressor, …) | high-fidelity | `headroom-ai` |
+| 4. `headroom_ml` | Headroom Kompress (ML token-dropping on prose) | lossy | `headroom-ai` + `allow_lossy` |
+
+Rules:
+
+- With **no `target_tokens`**, the ladder stops after `native_aggressive` — Headroom and the
+  lossy ML stage are never reached. Default behaviour stays dependency-free and lossless.
+- The Headroom stages are **skipped silently** when `headroom-ai` is not installed.
+- `headroom_ml` (lossy) only runs when `allow_lossy=True`.
+- Chat-history trimming always runs last as a final backstop.
+
+```python
+from nadirclaw.optimize import compress_progressive   # or nadir.optimize for Pro
+
+result = compress_progressive(
+    messages,
+    target_tokens=180_000,     # e.g. the model's context window
+    allow_lossy=False,         # set True to permit the lossy ML stage
+    max_stage="headroom_structural",
+)
+# result.optimizations_applied is prefixed with stage:<name> markers that ran
+```
+
+Enable it on the server — `progressive` is just a value of the single `optimize`
+control, alongside `off` / `safe` / `aggressive`:
+
+```bash
+# off | safe | aggressive | progressive  (off = compression disabled)
+NADIRCLAW_OPTIMIZE=progressive \
+NADIRCLAW_OPTIMIZE_TARGET_TOKENS=180000 \
+NADIRCLAW_OPTIMIZE_MAX_STAGE=headroom_structural \
+nadirclaw serve
+
+# equivalently: nadirclaw serve --optimize progressive
+# per-request:  {"optimize": "progressive", "messages": [...]}
+# turn compression off:  {"optimize": "off", ...}
+```
+
+On a logs+prose payload where native compression yields ~0%, escalating to
+`headroom_structural` reached ~90% — the escalation only spends the Headroom budget when
+native genuinely can't deliver.

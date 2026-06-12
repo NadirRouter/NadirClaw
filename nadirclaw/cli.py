@@ -39,8 +39,8 @@ def setup(reconfigure):
 @click.option("--token", default=None, help="Auth token")
 @click.option("--verbose", is_flag=True, help="Enable verbose logging")
 @click.option("--log-raw", is_flag=True, help="Log full raw requests and responses to JSONL")
-@click.option("--optimize", default=None, type=click.Choice(["off", "safe", "aggressive"]),
-              help="Context optimization mode (default: off)")
+@click.option("--optimize", default=None, type=click.Choice(["off", "safe", "aggressive", "progressive"]),
+              help="Context compression: off | safe | aggressive | progressive (default: off)")
 def serve(port, simple_model, complex_model, models, token, verbose, log_raw, optimize):
     """Start the NadirClaw router server."""
     import logging

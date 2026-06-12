@@ -13,6 +13,8 @@ has no dependency on FastAPI, Pydantic, or the rest of the server.
 from __future__ import annotations
 
 import json
+import logging
+import os
 import re
 from dataclasses import dataclass, field
 
@@ -29,6 +31,9 @@ class OptimizeResult:
     tokens_saved: int
     mode: str
     optimizations_applied: list[str] = field(default_factory=list)
+    # When progressive offload runs, maps offload-hash -> original content so the
+    # caller can inject the retrieve tool and serve the fetch-back loop (see ccr.py).
+    offload_captured: dict = field(default_factory=dict)
 
 
 # ---------------------------------------------------------------------------
@@ -248,8 +253,12 @@ def _normalize_whitespace(content: str) -> tuple[str, bool]:
         if in_code_block:
             out_lines.append(line)
             continue
-        # Collapse multi-spaces outside code blocks
-        out_lines.append(_MULTI_SPACES.sub(" ", line))
+        # Collapse interior multi-spaces but PRESERVE leading indentation —
+        # otherwise raw (unfenced) source code has its indentation flattened
+        # into invalid syntax. Leading whitespace is semantically significant
+        # (Python, YAML, diffs), so it must survive even in "safe" mode.
+        n_lead = len(line) - len(line.lstrip(" \t"))
+        out_lines.append(line[:n_lead] + _MULTI_SPACES.sub(" ", line[n_lead:]))
 
     result = "\n".join(out_lines)
     # Collapse 3+ consecutive blank lines → 2
@@ -444,9 +453,115 @@ def _semantic_dedup(
     return result, changed
 
 
+# ---------------------------------------------------------------------------
+# Transform — Homogeneous JSON-array packing (aggressive, columnar)
+# ---------------------------------------------------------------------------
+#
+# Large arrays of objects that share the same keys (DB query results, API list
+# responses, tool outputs) repeat every key on every row. Packing them into a
+# columnar table — a single header of keys plus one JSON value-array per row —
+# emits each key once instead of N times. This is *information-lossless*
+# (deterministically reversible via _unpack_table) but not byte-identical JSON,
+# so it runs in aggressive mode only, never in safe mode.
+
+_TABLE_OPEN = "⟦cols="   # ⟦cols=[...]⟧
+_TABLE_CLOSE = "⟧"       # ⟧
+_TABLE_END = "⟦end⟧"  # ⟦end⟧
+_MIN_TABLE_ROWS = 5
+
+
+def _pack_array(arr: list) -> "str | None":
+    """Pack a homogeneous list-of-dicts into a columnar table, or None if unfit.
+
+    Only packs when every element is a dict with the *identical* key set (so the
+    reverse is unambiguous) and there are at least ``_MIN_TABLE_ROWS`` rows.
+    """
+    if len(arr) < _MIN_TABLE_ROWS or not all(isinstance(x, dict) for x in arr):
+        return None
+    cols = list(arr[0].keys())
+    if len(cols) < 2:
+        return None
+    colset = set(cols)
+    for d in arr:
+        if set(d.keys()) != colset:
+            return None  # not strictly homogeneous — leave for json_minify
+    lines = [f"{_TABLE_OPEN}{json.dumps(cols, separators=(',', ':'), ensure_ascii=False)}{_TABLE_CLOSE}"]
+    for d in arr:
+        lines.append(json.dumps([d[c] for c in cols], separators=(",", ":"), ensure_ascii=False))
+    lines.append(_TABLE_END)
+    return "\n".join(lines)
+
+
+def _unpack_table(packed: str) -> list:
+    """Inverse of :func:`_pack_array` — reconstruct the exact list-of-dicts."""
+    lines = packed.split("\n")
+    header = lines[0]
+    cols = json.loads(header[len(_TABLE_OPEN):-len(_TABLE_CLOSE)])
+    rows = [json.loads(ln) for ln in lines[1:] if ln and ln != _TABLE_END]
+    return [dict(zip(cols, r)) for r in rows]
+
+
+def _pack_homogeneous_arrays(content: str) -> tuple[str, bool]:
+    """Replace embedded homogeneous JSON arrays with a compact columnar table.
+
+    Skips fenced code blocks and only replaces when the packed form is strictly
+    smaller (in tokens) than the minified array.
+    """
+    if not content or len(content) < 80 or "[" not in content:
+        return content, False
+
+    parts = re.split(r"(```[^\n]*\n.*?```)", content, flags=re.DOTALL)
+    changed = False
+    out_segments: list[str] = []
+    for seg in parts:
+        if seg.startswith("```"):
+            out_segments.append(seg)
+            continue
+        new_seg, seg_changed = _pack_segment(seg)
+        out_segments.append(new_seg)
+        changed = changed or seg_changed
+    return "".join(out_segments), changed
+
+
+def _pack_segment(text: str) -> tuple[str, bool]:
+    decoder = json.JSONDecoder()
+    result: list[str] = []
+    pos = 0
+    changed = False
+    while pos < len(text):
+        idx = text.find("[", pos)
+        if idx == -1:
+            result.append(text[pos:])
+            break
+        result.append(text[pos:idx])
+        try:
+            obj, end = decoder.raw_decode(text, idx)
+        except (json.JSONDecodeError, ValueError):
+            result.append("[")
+            pos = idx + 1
+            continue
+        packed = _pack_array(obj) if isinstance(obj, list) else None
+        if packed is not None:
+            minified = json.dumps(obj, separators=(",", ":"), ensure_ascii=False)
+            if _estimate_tokens_str(packed) < _estimate_tokens_str(minified):
+                result.append(packed)
+                changed = True
+            else:
+                result.append(text[idx:end])
+        else:
+            result.append(text[idx:end])
+        pos = end
+    return "".join(result), changed
+
+
 _SAFE_TRANSFORMS = [
     ("system_prompt_dedup", lambda msgs, **_: _dedup_system_prompts(msgs)),
     ("tool_schema_dedup", lambda msgs, **_: _dedup_tool_schemas(msgs)),
+]
+
+# Core aggressive content-level transforms (run before caller-supplied hooks).
+_AGGRESSIVE_CONTENT_TRANSFORMS = [
+    ("json_array_pack", _pack_homogeneous_arrays),
 ]
 
 # Content-level transforms (operate on individual message content strings)
@@ -456,10 +571,175 @@ _SAFE_CONTENT_TRANSFORMS = [
 ]
 
 
+# ---------------------------------------------------------------------------
+# Backend selection — native (default) or headroom (opt-in)
+# ---------------------------------------------------------------------------
+
+_headroom_warned = False
+
+
+def _resolve_backend(backend: str | None) -> str:
+    """Resolve the optimizer backend: explicit arg, else env, else ``native``."""
+    val = (backend or os.getenv("NADIRCLAW_OPTIMIZE_BACKEND", "native")).lower()
+    return val if val in ("native", "headroom") else "native"
+
+
+def _warn_headroom_once(msg: str) -> None:
+    global _headroom_warned
+    if not _headroom_warned:
+        _headroom_warned = True
+        logging.getLogger(__name__).warning(
+            "context-optimize: %s — falling back to native backend.", msg
+        )
+
+
+def _headroom_optimize(
+    messages: list[dict],
+    mode: str,
+    max_turns: int,
+    original_tokens: int,
+) -> "OptimizeResult | None":
+    """Compress via the optional ``headroom-ai`` package (Apache-2.0).
+
+    Returns ``None`` so the caller transparently falls back to the native
+    pipeline when ``headroom-ai`` is not installed or raises.  Token metrics
+    are recomputed with our own estimator so reported savings stay consistent
+    across backends (Savings/Billing math depends on a single estimator).
+    """
+    try:
+        from headroom import compress, CompressConfig
+    except Exception:
+        _warn_headroom_once("headroom-ai not installed (pip install nadirclaw[headroom])")
+        return None
+
+    try:
+        # Kompress (ML token compression) downloads a HuggingFace model on
+        # first use, so it stays opt-in behind an explicit env flag.
+        kompress_on = os.getenv("NADIRCLAW_HEADROOM_KOMPRESS", "off").lower() in (
+            "on", "1", "true", "yes",
+        )
+        cfg = CompressConfig(
+            compress_user_messages=(mode == "aggressive"),
+            kompress_model=None if kompress_on else "disabled",
+        )
+        result = compress([{**m} for m in messages], config=cfg)
+        msgs = list(result.messages)
+        # Conversation-turn trimming is ours, not headroom's — apply for parity.
+        msgs, _ = _trim_chat_history(msgs, max_turns=max_turns)
+    except Exception as exc:  # pragma: no cover — defensive; headroom itself fails open
+        _warn_headroom_once(f"headroom compress failed: {exc}")
+        return None
+
+    optimized_tokens = _estimate_tokens_messages(msgs)
+    applied = [f"headroom:{t}" for t in (getattr(result, "transforms_applied", None) or [])]
+    return OptimizeResult(
+        messages=msgs,
+        original_tokens=original_tokens,
+        optimized_tokens=optimized_tokens,
+        tokens_saved=max(0, original_tokens - optimized_tokens),
+        mode=mode,
+        optimizations_applied=applied or ["headroom"],
+    )
+
+
+# ---------------------------------------------------------------------------
+# Reusable pipeline stages (shared by optimize_messages + compress_progressive)
+# ---------------------------------------------------------------------------
+
+def _apply_content_transforms(msgs: list[dict], transforms) -> tuple[list[dict], list[str]]:
+    """Apply ``[(name, fn)]`` content-level transforms; return (msgs, applied)."""
+    applied: list[str] = []
+    for name, fn in transforms:
+        content_changed = False
+        for i, m in enumerate(msgs):
+            content = m.get("content")
+            if not isinstance(content, str) or len(content) < 10:
+                continue
+            new_content, changed = fn(content)
+            if changed:
+                msgs[i] = {**m, "content": new_content}
+                content_changed = True
+        if content_changed:
+            applied.append(name)
+    return msgs, applied
+
+
+def _apply_safe_transforms(msgs: list[dict], extra_safe_content=None) -> tuple[list[dict], list[str]]:
+    """Lossless structural transforms (system/tool-schema dedup, json minify, whitespace)."""
+    applied: list[str] = []
+    for name, fn in _SAFE_TRANSFORMS:
+        msgs, did_change = fn(msgs)
+        if did_change:
+            applied.append(name)
+    msgs, content_applied = _apply_content_transforms(
+        msgs, list(_SAFE_CONTENT_TRANSFORMS) + list(extra_safe_content or [])
+    )
+    return msgs, applied + content_applied
+
+
+def _apply_aggressive_transforms(
+    msgs: list[dict], extra_aggressive_message=None, extra_aggressive_content=None
+) -> tuple[list[dict], list[str]]:
+    """Columnar packing + caller hooks + semantic dedup (lossless-to-semantic)."""
+    applied: list[str] = []
+    msgs, a = _apply_content_transforms(msgs, list(_AGGRESSIVE_CONTENT_TRANSFORMS))
+    applied += a
+    for name, fn in (extra_aggressive_message or []):
+        msgs, did_change = fn(msgs)
+        if did_change:
+            applied.append(name)
+    msgs, a = _apply_content_transforms(msgs, list(extra_aggressive_content or []))
+    applied += a
+    msgs, did_semantic = _semantic_dedup(msgs)
+    if did_semantic:
+        applied.append("semantic_dedup")
+    return msgs, applied
+
+
+def _headroom_stage(msgs: list[dict], *, kompress: bool) -> "tuple[list[dict], list[str]] | None":
+    """Run Headroom's content compressors over the messages (optional dep).
+
+    Protections are disabled so the structural compressors (SmartCrusher,
+    LogCompressor, ...) actually engage; the lossy ML prose compressor
+    (Kompress) is gated behind *kompress*. Returns ``None`` when ``headroom-ai``
+    is unavailable or raises, so the caller can skip this stage cleanly.
+    """
+    try:
+        from headroom import compress, CompressConfig
+    except Exception:
+        _warn_headroom_once("headroom-ai not installed (pip install nadirclaw[headroom])")
+        return None
+    try:
+        cfg = CompressConfig(
+            compress_user_messages=True,
+            compress_system_messages=True,
+            protect_recent=0,
+            protect_analysis_context=False,
+            kompress_model=None if kompress else "disabled",
+        )
+        result = compress([{**m} for m in msgs], config=cfg)
+    except Exception as exc:  # pragma: no cover — headroom itself fails open
+        _warn_headroom_once(f"headroom compress failed: {exc}")
+        return None
+    seen: set[str] = set()
+    applied: list[str] = []
+    for t in (getattr(result, "transforms_applied", None) or []):
+        name = "headroom:" + (t.split(":")[0] if ":" in t else t)
+        if name not in seen:
+            seen.add(name)
+            applied.append(name)
+    return list(result.messages), applied or ["headroom"]
+
+
 def optimize_messages(
     messages: list[dict],
     mode: str = "off",
     max_turns: int = 40,
+    *,
+    backend: str | None = None,
+    extra_safe_content: "list | None" = None,
+    extra_aggressive_message: "list | None" = None,
+    extra_aggressive_content: "list | None" = None,
 ) -> OptimizeResult:
     """Optimize a list of message dicts for token reduction.
 
@@ -472,6 +752,14 @@ def optimize_messages(
         (safe + semantic deduplication via sentence embeddings).
     max_turns
         Maximum conversation turns to keep when trimming history.
+    backend
+        ``"native"`` (default — the stdlib transform pipeline) or
+        ``"headroom"`` (delegates to the optional ``headroom-ai`` package and
+        falls back to native if it is unavailable).  When ``None`` the
+        ``NADIRCLAW_OPTIMIZE_BACKEND`` env var is consulted (default native).
+    extra_safe_content, extra_aggressive_message, extra_aggressive_content
+        Optional ``[(name, fn)]`` hooks letting a superset package (Nadir Pro)
+        register additional transforms without forking this pipeline.
 
     Returns
     -------
@@ -489,36 +777,28 @@ def optimize_messages(
             mode="off",
         )
 
+    # --- Backend selection (headroom is opt-in; native is the default) ---
+    if _resolve_backend(backend) == "headroom":
+        hr = _headroom_optimize(messages, mode, max_turns, original_tokens)
+        if hr is not None:
+            return hr
+        # else: fall through to the native pipeline below
+
     applied: list[str] = []
 
     # Deep copy messages to avoid mutating input
     msgs = [{**m} for m in messages]
 
-    # --- Message-level transforms (safe) ---
-    for name, fn in _SAFE_TRANSFORMS:
-        msgs, did_change = fn(msgs)
-        if did_change:
-            applied.append(name)
-
-    # --- Content-level transforms (safe) ---
-    for name, fn in _SAFE_CONTENT_TRANSFORMS:
-        content_changed = False
-        for i, m in enumerate(msgs):
-            content = m.get("content")
-            if not isinstance(content, str) or len(content) < 10:
-                continue
-            new_content, changed = fn(content)
-            if changed:
-                msgs[i] = {**m, "content": new_content}
-                content_changed = True
-        if content_changed:
-            applied.append(name)
+    # --- Safe (lossless) transforms ---
+    msgs, a = _apply_safe_transforms(msgs, extra_safe_content)
+    applied += a
 
     # --- Aggressive-only transforms ---
     if mode == "aggressive":
-        msgs, did_semantic = _semantic_dedup(msgs)
-        if did_semantic:
-            applied.append("semantic_dedup")
+        msgs, a = _apply_aggressive_transforms(
+            msgs, extra_aggressive_message, extra_aggressive_content
+        )
+        applied += a
 
     # --- Chat history trimming ---
     msgs, did_trim = _trim_chat_history(msgs, max_turns=max_turns)
@@ -534,4 +814,136 @@ def optimize_messages(
         tokens_saved=max(0, original_tokens - optimized_tokens),
         mode=mode,
         optimizations_applied=applied,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Progressive (staged) compression
+# ---------------------------------------------------------------------------
+
+# Escalation ladder, cheapest/safest first. Headroom is the middle tier (its
+# structural compressors fill gaps native cannot — ragged JSON, big logs — and
+# its lossy ML prose compressor is later). The final tier is native CCR offload:
+# move oversized content out of the prompt behind a retrieve handle, fully
+# reversible because the caller serves it back on demand (see ccr.py).
+_PROGRESSIVE_STAGES = (
+    "native_safe", "native_aggressive", "headroom_structural", "headroom_ml", "offload",
+)
+
+
+def compress_progressive(
+    messages: list[dict],
+    *,
+    target_tokens: "int | None" = None,
+    max_turns: int = 40,
+    allow_lossy: bool = False,
+    allow_offload: bool = False,
+    max_stage: str = "native_aggressive",
+    extra_safe_content: "list | None" = None,
+    extra_aggressive_message: "list | None" = None,
+    extra_aggressive_content: "list | None" = None,
+) -> OptimizeResult:
+    """Apply escalating compression stages, stopping once a budget is met.
+
+    Stages run in order and the loop stops as soon as the message set fits
+    ``target_tokens``:
+
+      1. ``native_safe``        — lossless structural transforms
+      2. ``native_aggressive``  — + columnar packing, semantic dedup, caller hooks
+      3. ``headroom_structural``— Headroom content compressors (optional dep)
+      4. ``headroom_ml``        — Headroom Kompress (lossy ML prose)
+      5. ``offload``            — native CCR: move oversized content out of the
+                                  prompt behind a ``nadir_retrieve`` handle
+
+    Escalation rules:
+
+    - When ``target_tokens`` is ``None`` the ladder stops after ``max_stage``
+      (default ``native_aggressive``) — Headroom, lossy ML and offload are never
+      reached unless an explicit budget still isn't met. This keeps the default
+      behaviour dependency-free and lossless-to-semantic.
+    - The Headroom stages require the optional ``headroom-ai`` package and are
+      skipped silently when it is absent or errors.
+    - ``headroom_ml`` (lossy) only runs when ``allow_lossy=True``.
+    - ``offload`` only runs when ``allow_offload=True``. It is fully reversible —
+      the originals are returned in ``OptimizeResult.offload_captured`` so the
+      caller MUST inject the retrieve tool (:func:`nadirclaw.ccr.retrieve_tool_def`)
+      and serve the fetch-back loop (:func:`nadirclaw.ccr.resolve_loop`), or the
+      model cannot recover the offloaded content.
+    - Chat-history trimming always runs last as a final backstop.
+
+    Returns an :class:`OptimizeResult` whose ``mode`` is ``"progressive"`` and
+    whose ``optimizations_applied`` is prefixed with the ``stage:<name>`` markers
+    that actually ran.
+    """
+    original_tokens = _estimate_tokens_messages(messages)
+    msgs = [{**m} for m in messages]
+    applied: list[str] = []
+    stages_run: list[str] = []
+
+    ladder = list(_PROGRESSIVE_STAGES)
+    if max_stage in ladder:
+        ladder = ladder[: ladder.index(max_stage) + 1]
+    if not allow_lossy and "headroom_ml" in ladder:
+        ladder.remove("headroom_ml")
+    if not allow_offload and "offload" in ladder:
+        ladder.remove("offload")
+
+    offload_captured: dict = {}
+
+    def _fits() -> bool:
+        return target_tokens is not None and _estimate_tokens_messages(msgs) <= target_tokens
+
+    for stage in ladder:
+        if _fits():
+            break
+        # Headroom and offload stages only engage when a budget is set and unmet.
+        if stage in ("headroom_structural", "headroom_ml", "offload") and target_tokens is None:
+            break
+
+        if stage == "native_safe":
+            msgs, a = _apply_safe_transforms(msgs, extra_safe_content)
+        elif stage == "native_aggressive":
+            msgs, a = _apply_aggressive_transforms(
+                msgs, extra_aggressive_message, extra_aggressive_content
+            )
+        elif stage == "headroom_structural":
+            hr = _headroom_stage(msgs, kompress=False)
+            if hr is None:
+                continue
+            msgs, a = hr
+        elif stage == "headroom_ml":
+            hr = _headroom_stage(msgs, kompress=True)
+            if hr is None:
+                continue
+            msgs, a = hr
+        elif stage == "offload":
+            # Native CCR offload: move oversized content behind a retrieve handle.
+            from nadirclaw import ccr
+
+            msgs, captured, hashes = ccr.offload_messages(msgs)
+            if not hashes:
+                continue
+            offload_captured.update(captured)
+            a = ["offload"]
+        else:  # pragma: no cover
+            continue
+
+        applied += a
+        stages_run.append(stage)
+
+    # Final backstop — trim history if still over budget (or unconditionally
+    # when over max_turns, matching optimize_messages).
+    msgs, did_trim = _trim_chat_history(msgs, max_turns=max_turns)
+    if did_trim:
+        applied.append("chat_history_trim")
+
+    optimized_tokens = _estimate_tokens_messages(msgs)
+    return OptimizeResult(
+        messages=msgs,
+        original_tokens=original_tokens,
+        optimized_tokens=optimized_tokens,
+        tokens_saved=max(0, original_tokens - optimized_tokens),
+        mode="progressive",
+        optimizations_applied=[f"stage:{s}" for s in stages_run] + applied,
+        offload_captured=offload_captured,
     )
