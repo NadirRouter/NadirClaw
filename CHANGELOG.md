@@ -4,6 +4,11 @@ All notable changes to NadirClaw will be documented in this file.
 
 ## [Unreleased]
 
+## [0.19.3] - 2026-06-12
+
+### Fixed
+- **OpenAI OAuth login failed with `authorize_hydra_invalid_request`** — `nadirclaw auth openai login` sent `redirect_uri=http://127.0.0.1:1455/auth/callback` in the authorize request while the callback server bound and printed `localhost`. OpenAI's Hydra authorization server exact-matches `redirect_uri` against the client allow-list and rejected the `127.0.0.1` variant before the login screen. Now uses `localhost` consistently, matching the callback server and the Antigravity/Gemini flows (#67, #69).
+
 ## [0.18.0] - 2026-05-25
 
 ### Added
