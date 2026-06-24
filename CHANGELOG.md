@@ -4,6 +4,14 @@ All notable changes to NadirClaw will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+- **`/v1/messages/count_tokens` endpoint** — Anthropic-native clients (Claude Code, the official `anthropic` SDK) call `count_tokens` to size requests before sending; this previously 404'd, so clients silently fell back to approximate local token estimation. The new route resolves the model through the same router as `/v1/messages` and forwards to Anthropic's real `count_tokens`, returning `{"input_tokens": N}` verbatim. Non-billable, so it is excluded from cost/budget recording (#72).
+
+### Fixed
+- **`/v1/messages` traffic was invisible to metrics and budget** — `record_request` short-circuited on `type != "completion"`, dropping every `/v1/messages` log entry (`type="messages"`). Since Claude Code and the Anthropic SDKs talk to `/v1/messages`, all of that traffic was missing from Prometheus counters and the budget tracker. The recorder now accepts `messages` entries, and the `/v1/messages` handler computes cost via the budget tracker and stamps status/latency/token counts on both the streaming (usage recovered from the SSE `message_start`/`message_delta` events) and non-streaming paths (#71).
+- **`max_tokens` was not reconciled against the routed model's output ceiling** — when the router rewrote `model` to a tier whose max-output is lower than the client-supplied `max_tokens`, Anthropic returned an intermittent 400 that was proxied straight back. `/v1/messages` now detects a `max_tokens: N > M` 400, clamps `max_tokens` to the reported ceiling `M`, and retries once (both streaming and non-streaming), tagging the non-streaming response with `X-NadirClaw-MaxTokens-Clamped: true` (#73).
+- **`nadirclaw test` failed for Claude subscription tokens** — the command called `litellm.completion()` directly, which sends `sk-ant-oat*` subscription/OAuth tokens as `x-api-key` instead of `Authorization: Bearer` + the `oauth-2025-04-20` beta header the server uses. It now probes Anthropic models through the same OAuth path as the running server, so `nadirclaw test` reflects real server behavior (#74).
+
 ## [0.20.0] - 2026-06-12
 
 ### Added

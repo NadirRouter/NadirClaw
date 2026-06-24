@@ -85,7 +85,9 @@ _start_time = time.time()
 
 def record_request(entry: Dict[str, Any]) -> None:
     """Record metrics from a log entry dict (called from _log_request)."""
-    if entry.get("type") != "completion":
+    # Both the OpenAI-style /v1/chat/completions path ("completion") and the
+    # Anthropic-native /v1/messages path ("messages") produce billable traffic.
+    if entry.get("type") not in ("completion", "messages"):
         return
 
     model = entry.get("selected_model", "unknown")

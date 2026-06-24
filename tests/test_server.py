@@ -365,3 +365,275 @@ class TestRoutingHeaders:
         assert "X-Routed-Model" in resp.headers
         assert "X-Routed-Tier" in resp.headers
         assert "X-Complexity-Score" in resp.headers
+
+
+# ---------------------------------------------------------------------------
+# /v1/messages: usage recording (#71), count_tokens (#72), max_tokens clamp (#73)
+# ---------------------------------------------------------------------------
+
+class TestMessagesUsageHelpers:
+    """Pure helpers behind the enriched /v1/messages path."""
+
+    def test_parse_max_tokens_ceiling(self):
+        from nadirclaw.server import _parse_max_tokens_ceiling
+        assert _parse_max_tokens_ceiling(
+            "max_tokens: 100000 > 64000, which is the maximum allowed"
+        ) == 64000
+        assert _parse_max_tokens_ceiling("some other 400 error") is None
+        assert _parse_max_tokens_ceiling("") is None
+
+    def test_parse_anthropic_sse_usage(self):
+        from nadirclaw.server import _parse_anthropic_sse_usage
+        text = (
+            'event: message_start\n'
+            'data: {"type":"message_start","message":{"usage":{"input_tokens":12,"output_tokens":1}}}\n\n'
+            'event: message_delta\n'
+            'data: {"type":"message_delta","usage":{"output_tokens":34}}\n\n'
+        )
+        assert _parse_anthropic_sse_usage(text) == (12, 34)
+
+    def test_parse_anthropic_sse_usage_ignores_garbage(self):
+        from nadirclaw.server import _parse_anthropic_sse_usage
+        assert _parse_anthropic_sse_usage("data: [DONE]\n\nnot-data\n") == (None, None)
+
+    def test_record_messages_usage_populates_recordable_fields(self):
+        """The recorded entry must carry the fields record_request()/budget read."""
+        from nadirclaw.server import _record_messages_usage
+        captured = {}
+        with patch("nadirclaw.server._log_request", side_effect=lambda e: captured.update(e)):
+            _record_messages_usage(
+                {"type": "messages", "selected_model": "claude-haiku-4-5"},
+                "claude-haiku-4-5", 100, 50, status="ok", latency_ms=42,
+            )
+        assert captured["type"] == "messages"
+        assert captured["prompt_tokens"] == 100
+        assert captured["completion_tokens"] == 50
+        assert captured["total_tokens"] == 150
+        assert captured["status"] == "ok"
+        assert captured["total_latency_ms"] == 42
+        assert "cost" in captured  # budget tracker stamped a cost
+
+
+class TestMessagesUsageRecording:
+    """#71 — /v1/messages requests must reach metrics + budget."""
+
+    def test_messages_type_is_recorded_by_metrics(self):
+        """record_request must not drop type='messages' entries."""
+        from nadirclaw import metrics as metrics_mod
+        key = ("claude-haiku-4-5", "simple", "ok")
+        before = dict(metrics_mod.requests_total.items()).get(key, 0.0)
+        metrics_mod.record_request({
+            "type": "messages",
+            "selected_model": "claude-haiku-4-5",
+            "tier": "simple",
+            "status": "ok",
+            "prompt_tokens": 10,
+            "completion_tokens": 5,
+            "cost": 0.001,
+        })
+        after = dict(metrics_mod.requests_total.items()).get(key, 0.0)
+        assert after == before + 1
+
+    def test_non_streaming_records_usage(self, client):
+        import httpx
+
+        class _FakeResponse:
+            status_code = 200
+            headers = {"content-type": "application/json"}
+            def json(self):
+                return {
+                    "id": "msg_1",
+                    "content": [{"type": "text", "text": "ok"}],
+                    "usage": {"input_tokens": 11, "output_tokens": 7},
+                }
+
+        class _FakeClient:
+            def __init__(self, *a, **kw): pass
+            async def __aenter__(self): return self
+            async def __aexit__(self, *a): return False
+            async def post(self, url, headers=None, json=None):
+                return _FakeResponse()
+
+        recorded = {}
+        with patch("nadirclaw.credentials.get_credential", return_value="sk-ant-oat01-test"), \
+             patch.object(httpx, "AsyncClient", _FakeClient), \
+             patch("nadirclaw.server._log_request", side_effect=lambda e: recorded.update(e)):
+            resp = client.post("/v1/messages", json={
+                "model": "nadir-eco",
+                "max_tokens": 10,
+                "messages": [{"role": "user", "content": "hi"}],
+            })
+
+        assert resp.status_code == 200
+        assert recorded["type"] == "messages"
+        assert recorded["prompt_tokens"] == 11
+        assert recorded["completion_tokens"] == 7
+        assert recorded["status"] == "ok"
+        assert "cost" in recorded
+
+    def test_streaming_records_usage_from_sse(self, client):
+        import httpx
+
+        sse_chunks = [
+            b'event: message_start\ndata: {"type":"message_start","message":{"usage":{"input_tokens":21,"output_tokens":1}}}\n\n',
+            b'event: content_block_delta\ndata: {"type":"content_block_delta"}\n\n',
+            b'event: message_delta\ndata: {"type":"message_delta","usage":{"output_tokens":9}}\n\n',
+            b'event: message_stop\ndata: {"type":"message_stop"}\n\n',
+        ]
+
+        class _FakeStream:
+            status_code = 200
+            async def __aenter__(self): return self
+            async def __aexit__(self, *a): return False
+            async def aiter_bytes(self):
+                for c in sse_chunks:
+                    yield c
+            async def aread(self):
+                return b""
+
+        class _FakeClient:
+            def __init__(self, *a, **kw): pass
+            async def __aenter__(self): return self
+            async def __aexit__(self, *a): return False
+            def stream(self, method, url, headers=None, json=None):
+                return _FakeStream()
+
+        recorded = {}
+        with patch("nadirclaw.credentials.get_credential", return_value="sk-ant-oat01-test"), \
+             patch.object(httpx, "AsyncClient", _FakeClient), \
+             patch("nadirclaw.server._log_request", side_effect=lambda e: recorded.update(e)):
+            resp = client.post("/v1/messages", json={
+                "model": "nadir-premium",
+                "max_tokens": 10,
+                "stream": True,
+                "messages": [{"role": "user", "content": "hi"}],
+            })
+            body = resp.content  # drain the stream so the generator records usage
+
+        assert resp.status_code == 200
+        for chunk in sse_chunks:
+            assert chunk in body
+        assert recorded["type"] == "messages"
+        assert recorded["prompt_tokens"] == 21
+        assert recorded["completion_tokens"] == 9
+        assert recorded["status"] == "ok"
+
+
+class TestMaxTokensClamp:
+    """#73 — clamp max_tokens against the routed model's output ceiling."""
+
+    def test_non_streaming_clamps_and_retries_on_400(self, client):
+        import httpx
+
+        calls = []
+
+        class _Resp400:
+            status_code = 400
+            text = '{"type":"error","error":{"type":"invalid_request_error","message":"max_tokens: 100000 > 64000, which is the maximum allowed number of output tokens"}}'
+            content = text.encode()
+            headers = {"content-type": "application/json"}
+
+        class _Resp200:
+            status_code = 200
+            headers = {"content-type": "application/json"}
+            def json(self):
+                return {"id": "msg_1", "content": [{"type": "text", "text": "ok"}],
+                        "usage": {"input_tokens": 3, "output_tokens": 2}}
+
+        class _FakeClient:
+            def __init__(self, *a, **kw): pass
+            async def __aenter__(self): return self
+            async def __aexit__(self, *a): return False
+            async def post(self, url, headers=None, json=None):
+                calls.append(json.get("max_tokens"))
+                return _Resp400() if len(calls) == 1 else _Resp200()
+
+        with patch("nadirclaw.credentials.get_credential", return_value="sk-ant-oat01-test"), \
+             patch.object(httpx, "AsyncClient", _FakeClient):
+            resp = client.post("/v1/messages", json={
+                "model": "nadir-eco",
+                "max_tokens": 100000,
+                "messages": [{"role": "user", "content": "hi"}],
+            })
+
+        assert resp.status_code == 200
+        # First attempt sent the original ceiling, retry sent the clamped value.
+        assert calls == [100000, 64000]
+        assert resp.headers.get("X-NadirClaw-MaxTokens-Clamped") == "true"
+
+    def test_non_max_tokens_400_is_not_retried(self, client):
+        import httpx
+
+        calls = []
+
+        class _Resp400:
+            status_code = 400
+            text = '{"error":{"message":"some unrelated bad request"}}'
+            content = text.encode()
+            headers = {"content-type": "application/json"}
+
+        class _FakeClient:
+            def __init__(self, *a, **kw): pass
+            async def __aenter__(self): return self
+            async def __aexit__(self, *a): return False
+            async def post(self, url, headers=None, json=None):
+                calls.append(json.get("max_tokens"))
+                return _Resp400()
+
+        with patch("nadirclaw.credentials.get_credential", return_value="sk-ant-oat01-test"), \
+             patch.object(httpx, "AsyncClient", _FakeClient):
+            resp = client.post("/v1/messages", json={
+                "model": "nadir-eco",
+                "max_tokens": 100000,
+                "messages": [{"role": "user", "content": "hi"}],
+            })
+
+        assert resp.status_code == 400
+        assert len(calls) == 1  # no retry
+        assert "X-NadirClaw-MaxTokens-Clamped" not in resp.headers
+
+
+class TestCountTokensEndpoint:
+    """#72 — /v1/messages/count_tokens proxy."""
+
+    def test_missing_credential_returns_401(self, client):
+        with patch("nadirclaw.credentials.get_credential", return_value=None):
+            resp = client.post("/v1/messages/count_tokens", json={
+                "model": "nadir-eco",
+                "messages": [{"role": "user", "content": "hi"}],
+            })
+        assert resp.status_code == 401
+        assert "setup-token" in resp.json()["detail"]
+
+    def test_resolves_model_and_forwards_verbatim(self, client):
+        import httpx
+        from nadirclaw.settings import settings
+
+        captured = {}
+
+        class _FakeResponse:
+            status_code = 200
+            content = b'{"input_tokens": 42}'
+            headers = {"content-type": "application/json"}
+
+        class _FakeClient:
+            def __init__(self, *a, **kw): pass
+            async def __aenter__(self): return self
+            async def __aexit__(self, *a): return False
+            async def post(self, url, headers=None, json=None):
+                captured["url"] = url
+                captured["model"] = json.get("model")
+                return _FakeResponse()
+
+        with patch("nadirclaw.credentials.get_credential", return_value="sk-ant-oat01-test"), \
+             patch.object(httpx, "AsyncClient", _FakeClient):
+            resp = client.post("/v1/messages/count_tokens", json={
+                "model": "nadir-eco",
+                "messages": [{"role": "user", "content": "hi"}],
+            })
+
+        assert resp.status_code == 200
+        assert resp.json() == {"input_tokens": 42}
+        assert captured["url"].endswith("/v1/messages/count_tokens")
+        # routed through the same router as /v1/messages
+        assert captured["model"] == settings.SIMPLE_MODEL

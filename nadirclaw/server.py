@@ -2376,6 +2376,127 @@ def _extract_text_from_anthropic_response(payload: Dict[str, Any]) -> str:
     return text
 
 
+_ANTHROPIC_COUNT_TOKENS_UPSTREAM = "https://api.anthropic.com/v1/messages/count_tokens"
+# Anthropic 400 when the requested max_tokens exceeds the routed model's ceiling:
+#   "max_tokens: 100000 > 64000, which is the maximum allowed ..."
+_MAX_TOKENS_400_RE = re.compile(r"max_tokens:\s*(\d+)\s*>\s*(\d+)")
+
+
+def _anthropic_auth_headers(raw: Request, body: Dict[str, Any]) -> Dict[str, str]:
+    """Build upstream Anthropic headers + auth from the stored credential.
+
+    Pops ``anthropic_version`` from the body (Anthropic expects it as a header).
+    Raises 401 if no anthropic credential is configured.
+    """
+    from nadirclaw.credentials import get_credential
+
+    token = get_credential("anthropic")
+    if not token:
+        raise HTTPException(
+            status_code=401,
+            detail="No anthropic credential. Run `nadirclaw auth setup-token`.",
+        )
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "anthropic-version": body.pop("anthropic_version", None) or raw.headers.get("anthropic-version") or "2023-06-01",
+        "anthropic-beta": raw.headers.get("anthropic-beta") or _CLAUDE_OAUTH_BETA,
+        "content-type": "application/json",
+    }
+    # If the upstream token is an API key (not OAuth), switch to x-api-key.
+    if token.startswith("sk-ant-api"):
+        headers.pop("Authorization", None)
+        headers["x-api-key"] = token
+    return headers
+
+
+def _parse_max_tokens_ceiling(error_text: str) -> Optional[int]:
+    """Extract the output-token ceiling M from an Anthropic ``max_tokens: N > M`` 400."""
+    if not error_text:
+        return None
+    m = _MAX_TOKENS_400_RE.search(error_text)
+    if not m:
+        return None
+    try:
+        return int(m.group(2))
+    except (ValueError, IndexError):
+        return None
+
+
+def _parse_anthropic_sse_usage(text: str) -> Tuple[Optional[int], Optional[int]]:
+    """Pull ``(input_tokens, output_tokens)`` out of Anthropic SSE text.
+
+    ``input_tokens`` arrive in ``message_start``; ``output_tokens`` accumulate
+    and the final value lands in the last ``message_delta``. Returns the
+    best-known values seen in this slice (callers keep the last non-None).
+    """
+    input_tokens: Optional[int] = None
+    output_tokens: Optional[int] = None
+    for line in text.splitlines():
+        line = line.strip()
+        if not line.startswith("data:"):
+            continue
+        data = line[len("data:"):].strip()
+        if not data or data == "[DONE]":
+            continue
+        try:
+            evt = json.loads(data)
+        except (ValueError, TypeError):
+            continue
+        if not isinstance(evt, dict):
+            continue
+        usage = evt["message"].get("usage") if isinstance(evt.get("message"), dict) else None
+        if not isinstance(usage, dict):
+            usage = evt.get("usage")
+        if isinstance(usage, dict):
+            if usage.get("input_tokens") is not None:
+                input_tokens = usage["input_tokens"]
+            if usage.get("output_tokens") is not None:
+                output_tokens = usage["output_tokens"]
+    return input_tokens, output_tokens
+
+
+def _record_messages_usage(
+    log_entry: Dict[str, Any],
+    model: str,
+    input_tokens: int,
+    output_tokens: int,
+    *,
+    status: str = "ok",
+    latency_ms: Optional[int] = None,
+    clamped: bool = False,
+    response_preview: str = "",
+    error: Optional[str] = None,
+) -> None:
+    """Record a /v1/messages request's cost + usage so metrics and budget see it.
+
+    Mirrors the completion path: cost is computed via the budget tracker, and the
+    log entry carries the same fields ``record_request()`` reads (cost, status,
+    ``total_latency_ms``, token counts). Budget failures never break the response.
+    """
+    entry = dict(log_entry)
+    try:
+        from nadirclaw.budget import get_budget_tracker
+
+        budget_status = get_budget_tracker().record(model, input_tokens or 0, output_tokens or 0)
+        entry["cost"] = budget_status["cost"]
+        entry["daily_spend"] = budget_status["daily_spend"]
+    except Exception:  # pragma: no cover - budget tracking must never break the proxy
+        logger.exception("budget recording failed for /v1/messages")
+    entry["prompt_tokens"] = input_tokens or 0
+    entry["completion_tokens"] = output_tokens or 0
+    entry["total_tokens"] = (input_tokens or 0) + (output_tokens or 0)
+    entry["status"] = status
+    if latency_ms is not None:
+        entry["total_latency_ms"] = latency_ms
+    if clamped:
+        entry["max_tokens_clamped"] = True
+    if response_preview:
+        entry["response_preview"] = response_preview
+    if error:
+        entry["error"] = error
+    _log_request(entry)
+
+
 @app.post("/v1/messages")
 async def anthropic_messages(
     raw: Request,
@@ -2387,8 +2508,6 @@ async def anthropic_messages(
     rewrites the `model` field before forwarding upstream. Streaming
     responses are piped through SSE-byte-for-SSE-byte.
     """
-    from nadirclaw.credentials import get_credential
-
     try:
         body = await raw.json()
     except Exception as e:
@@ -2410,22 +2529,7 @@ async def anthropic_messages(
 
     body["model"] = upstream_model
 
-    token = get_credential("anthropic")
-    if not token:
-        raise HTTPException(
-            status_code=401,
-            detail="No anthropic credential. Run `nadirclaw auth setup-token`.",
-        )
-    headers = {
-        "Authorization": f"Bearer {token}",
-        "anthropic-version": body.pop("anthropic_version", None) or raw.headers.get("anthropic-version") or "2023-06-01",
-        "anthropic-beta": raw.headers.get("anthropic-beta") or _CLAUDE_OAUTH_BETA,
-        "content-type": "application/json",
-    }
-    # If the upstream token is an API key (not OAuth), switch to x-api-key.
-    if token.startswith("sk-ant-api"):
-        headers.pop("Authorization", None)
-        headers["x-api-key"] = token
+    headers = _anthropic_auth_headers(raw, body)
 
     import httpx
     from fastapi.responses import StreamingResponse
@@ -2439,52 +2543,168 @@ async def anthropic_messages(
     }
 
     if not stream:
+        start_time = time.time()
+        clamped = False
         async with httpx.AsyncClient(timeout=300) as client:
             try:
                 upstream = await client.post(_ANTHROPIC_UPSTREAM, headers=headers, json=body)
             except httpx.HTTPError as e:
-                _log_request({**log_entry, "error": f"upstream_error: {e}"})
+                _record_messages_usage(
+                    log_entry, upstream_model, 0, 0, status="error",
+                    latency_ms=int((time.time() - start_time) * 1000),
+                    error=f"upstream_error: {e}",
+                )
                 raise HTTPException(status_code=502, detail=f"upstream error: {e}")
 
+            # Reconcile max_tokens against the routed model's output ceiling (#73):
+            # on a "max_tokens: N > M" 400, clamp to M and retry once.
+            if upstream.status_code == 400:
+                ceiling = _parse_max_tokens_ceiling(upstream.text)
+                if ceiling is not None and (body.get("max_tokens") or 0) > ceiling:
+                    body["max_tokens"] = ceiling
+                    clamped = True
+                    try:
+                        upstream = await client.post(_ANTHROPIC_UPSTREAM, headers=headers, json=body)
+                    except httpx.HTTPError as e:
+                        _record_messages_usage(
+                            log_entry, upstream_model, 0, 0, status="error",
+                            latency_ms=int((time.time() - start_time) * 1000),
+                            clamped=True, error=f"upstream_error: {e}",
+                        )
+                        raise HTTPException(status_code=502, detail=f"upstream error: {e}")
+
         if upstream.status_code != 200:
-            _log_request({**log_entry, "error": f"upstream_status_{upstream.status_code}", "body": upstream.text[:500]})
-            return Response(
+            _record_messages_usage(
+                log_entry, upstream_model, 0, 0, status="error",
+                latency_ms=int((time.time() - start_time) * 1000), clamped=clamped,
+                error=f"upstream_status_{upstream.status_code}: {upstream.text[:500]}",
+            )
+            resp = Response(
                 content=upstream.content,
                 status_code=upstream.status_code,
                 media_type=upstream.headers.get("content-type", "application/json"),
             )
+            if clamped:
+                resp.headers["X-NadirClaw-MaxTokens-Clamped"] = "true"
+            return resp
 
         payload = upstream.json()
         usage = payload.get("usage", {}) if isinstance(payload, dict) else {}
-        _log_request({
-            **log_entry,
-            "prompt_tokens": usage.get("input_tokens", 0),
-            "completion_tokens": usage.get("output_tokens", 0),
-            "response_preview": _extract_text_from_anthropic_response(payload)[:200],
-        })
-        return JSONResponse(content=payload, status_code=200)
+        _record_messages_usage(
+            log_entry, upstream_model,
+            usage.get("input_tokens", 0), usage.get("output_tokens", 0),
+            status="ok", latency_ms=int((time.time() - start_time) * 1000),
+            clamped=clamped,
+            response_preview=_extract_text_from_anthropic_response(payload)[:200],
+        )
+        resp = JSONResponse(content=payload, status_code=200)
+        if clamped:
+            resp.headers["X-NadirClaw-MaxTokens-Clamped"] = "true"
+        return resp
 
-    # Streaming: pipe SSE bytes straight through.
+    # Streaming: pipe SSE bytes through, recovering usage from the event stream.
     async def proxy_stream():
+        start_time = time.time()
+        clamped = False
         async with httpx.AsyncClient(timeout=300) as client:
-            async with client.stream(
-                "POST", _ANTHROPIC_UPSTREAM, headers=headers, json=body
-            ) as upstream:
-                if upstream.status_code != 200:
-                    err_body = await upstream.aread()
-                    _log_request({
-                        **log_entry,
-                        "error": f"upstream_stream_status_{upstream.status_code}",
-                        "body": err_body[:500].decode("utf-8", errors="replace"),
-                    })
-                    yield f"event: error\ndata: {json.dumps({'type': 'error', 'error': {'type': 'upstream_error', 'message': err_body.decode('utf-8', errors='replace')[:500]}})}\n\n".encode()
-                    return
-                async for chunk in upstream.aiter_bytes():
-                    if chunk:
+            for attempt in range(2):  # at most one max_tokens clamp-retry (#73)
+                input_tokens = 0
+                output_tokens = 0
+                buffer = ""
+                async with client.stream(
+                    "POST", _ANTHROPIC_UPSTREAM, headers=headers, json=body
+                ) as upstream:
+                    if upstream.status_code != 200:
+                        err_body = await upstream.aread()
+                        err_text = err_body.decode("utf-8", errors="replace")
+                        if attempt == 0 and upstream.status_code == 400:
+                            ceiling = _parse_max_tokens_ceiling(err_text)
+                            if ceiling is not None and (body.get("max_tokens") or 0) > ceiling:
+                                body["max_tokens"] = ceiling
+                                clamped = True
+                                continue
+                        _record_messages_usage(
+                            log_entry, upstream_model, 0, 0, status="error",
+                            latency_ms=int((time.time() - start_time) * 1000), clamped=clamped,
+                            error=f"upstream_stream_status_{upstream.status_code}: {err_text[:500]}",
+                        )
+                        yield f"event: error\ndata: {json.dumps({'type': 'error', 'error': {'type': 'upstream_error', 'message': err_text[:500]}})}\n\n".encode()
+                        return
+                    async for chunk in upstream.aiter_bytes():
+                        if not chunk:
+                            continue
                         yield chunk
-        _log_request(log_entry)
+                        # Parse complete SSE events out of the buffer for usage (#71).
+                        buffer += chunk.decode("utf-8", errors="replace")
+                        while "\n\n" in buffer:
+                            event, buffer = buffer.split("\n\n", 1)
+                            i, o = _parse_anthropic_sse_usage(event)
+                            if i is not None:
+                                input_tokens = i
+                            if o is not None:
+                                output_tokens = o
+                    if buffer:
+                        i, o = _parse_anthropic_sse_usage(buffer)
+                        if i is not None:
+                            input_tokens = i
+                        if o is not None:
+                            output_tokens = o
+                    _record_messages_usage(
+                        log_entry, upstream_model, input_tokens, output_tokens,
+                        status="ok", latency_ms=int((time.time() - start_time) * 1000),
+                        clamped=clamped,
+                    )
+                    return
 
     return StreamingResponse(proxy_stream(), media_type="text/event-stream")
+
+
+@app.post("/v1/messages/count_tokens")
+async def anthropic_count_tokens(
+    raw: Request,
+    current_user: UserSession = Depends(validate_local_auth),
+):
+    """Anthropic /v1/messages/count_tokens-compatible endpoint (#72).
+
+    Anthropic-native clients (Claude Code, the official ``anthropic`` SDK) call
+    this to size requests before sending. We resolve the requested model through
+    the same router as /v1/messages and forward to Anthropic's real
+    count_tokens, returning the upstream ``{"input_tokens": N}`` verbatim. It is
+    not a billable completion, so it is excluded from cost/budget recording.
+    """
+    try:
+        body = await raw.json()
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"invalid JSON: {e}")
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail="body must be a JSON object")
+
+    requested_model = body.get("model") or ""
+    messages = body.get("messages") or []
+    if not isinstance(messages, list):
+        raise HTTPException(status_code=400, detail="messages must be an array")
+
+    chat_messages = _anthropic_messages_to_chat(messages)
+    selected_model, _ = await _resolve_messages_model(
+        requested_model, chat_messages, current_user
+    )
+    body["model"] = _strip_provider_prefix(selected_model)
+
+    headers = _anthropic_auth_headers(raw, body)
+
+    import httpx
+
+    async with httpx.AsyncClient(timeout=60) as client:
+        try:
+            upstream = await client.post(_ANTHROPIC_COUNT_TOKENS_UPSTREAM, headers=headers, json=body)
+        except httpx.HTTPError as e:
+            raise HTTPException(status_code=502, detail=f"upstream error: {e}")
+
+    return Response(
+        content=upstream.content,
+        status_code=upstream.status_code,
+        media_type=upstream.headers.get("content-type", "application/json"),
+    )
 
 
 # ---------------------------------------------------------------------------

@@ -1702,6 +1702,42 @@ def discover(scan_network):
         click.echo(f"  OLLAMA_API_BASE={instances[0]['url']}")
 
 
+def _is_anthropic_model(model: str) -> bool:
+    return model.startswith("claude") or model.startswith("anthropic/") or model.startswith("claude/")
+
+
+def _probe_anthropic_oauth(model: str, messages: list, token: str, timeout: int) -> str:
+    """Probe an Anthropic model with a subscription/OAuth token.
+
+    Mirrors the server's OAuth path (Authorization: Bearer + the
+    oauth-2025-04-20 beta header) so `nadirclaw test` exercises the same auth
+    the running server uses. Calling LiteLLM directly would instead send the
+    token as x-api-key, which Anthropic restricts for subscription tokens.
+    """
+    import httpx
+
+    model_id = model.removeprefix("anthropic/").removeprefix("claude/")
+    body = {"model": model_id, "messages": messages, "max_tokens": 10}
+    resp = httpx.post(
+        "https://api.anthropic.com/v1/messages",
+        headers={
+            "Authorization": f"Bearer {token}",
+            "anthropic-version": "2023-06-01",
+            "anthropic-beta": "oauth-2025-04-20,claude-code-20250219",
+            "content-type": "application/json",
+        },
+        json=body,
+        timeout=timeout,
+    )
+    resp.raise_for_status()
+    payload = resp.json()
+    return "".join(
+        b.get("text", "")
+        for b in payload.get("content", []) or []
+        if isinstance(b, dict) and b.get("type") == "text"
+    )
+
+
 @main.command()
 @click.option("--simple-model", default=None, help="Override simple model for this test")
 @click.option("--complex-model", default=None, help="Override complex model for this test")
@@ -1713,12 +1749,18 @@ def test(simple_model, complex_model, timeout):
     """
     import time as _time
 
+    from nadirclaw.credentials import get_credential
     from nadirclaw.settings import settings
 
     s_model = simple_model or settings.SIMPLE_MODEL
     c_model = complex_model or settings.COMPLEX_MODEL
 
     probe = [{"role": "user", "content": "Reply with the single word: ok"}]
+
+    # Subscription/OAuth tokens (sk-ant-oat*) must use Bearer + the oauth beta
+    # header, exactly as the server does — not LiteLLM's x-api-key path.
+    anthropic_token = get_credential("anthropic")
+    use_anthropic_oauth = bool(anthropic_token and "sk-ant-oat" in anthropic_token)
 
     models_to_test = [("simple", s_model)]
     if c_model != s_model:
@@ -1733,16 +1775,19 @@ def test(simple_model, complex_model, timeout):
         click.echo(f"  {'─' * 46}")
         t0 = _time.time()
         try:
-            import litellm
+            if use_anthropic_oauth and _is_anthropic_model(model):
+                content = _probe_anthropic_oauth(model, probe, anthropic_token, timeout)
+            else:
+                import litellm
 
-            resp = litellm.completion(
-                model=model,
-                messages=probe,
-                max_tokens=10,
-                timeout=timeout,
-            )
+                resp = litellm.completion(
+                    model=model,
+                    messages=probe,
+                    max_tokens=10,
+                    timeout=timeout,
+                )
+                content = resp.choices[0].message.content or ""
             latency = int((_time.time() - t0) * 1000)
-            content = resp.choices[0].message.content or ""
             click.echo(f"  Status:   OK")
             click.echo(f"  Latency:  {latency}ms")
             click.echo(f"  Reply:    {content.strip()!r}")
