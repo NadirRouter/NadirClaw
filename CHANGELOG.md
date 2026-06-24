@@ -4,6 +4,8 @@ All notable changes to NadirClaw will be documented in this file.
 
 ## [Unreleased]
 
+## [0.21.0] - 2026-06-24
+
 ### Added
 - **`/v1/messages/count_tokens` endpoint** — Anthropic-native clients (Claude Code, the official `anthropic` SDK) call `count_tokens` to size requests before sending; this previously 404'd, so clients silently fell back to approximate local token estimation. The new route resolves the model through the same router as `/v1/messages` and forwards to Anthropic's real `count_tokens`, returning `{"input_tokens": N}` verbatim. Non-billable, so it is excluded from cost/budget recording (#72).
 
