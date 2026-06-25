@@ -740,6 +740,17 @@ nadirclaw auth anthropic login
 nadirclaw auth setup-token
 ```
 
+#### Subscription tokens and premium-model access
+
+If you authenticate with a Claude **subscription** token (`sk-ant-oat*`, from `nadirclaw auth anthropic login` or `claude setup-token`) and find that **Haiku works but Sonnet/Opus return an immediate `rate_limit_error`**, Anthropic is likely gating premium models behind the official Claude Code identity. The real client always leads its requests with a fixed identity system block; raw API/SDK callers omit it. Opt in to have NadirClaw prepend it:
+
+```bash
+export NADIRCLAW_CLAUDE_CODE_IDENTITY=1
+nadirclaw serve
+```
+
+When enabled, NadirClaw prepends `"You are Claude Code, Anthropic's official CLI for Claude."` as the first `system` block on OAuth (`sk-ant-oat*`) requests — only when not already present, preserving any system prompt you sent after it. It has **no effect on API-key (`sk-ant-api*`) credentials** and is **off by default**, since it changes the system prompt the model sees.
+
 ### What happens
 
 Claude Code sends every request to Anthropic's API. With NadirClaw in front, each prompt is classified in ~10ms:

@@ -4,6 +4,14 @@ All notable changes to NadirClaw will be documented in this file.
 
 ## [Unreleased]
 
+## [0.21.1] - 2026-06-25
+
+### Added
+- **Opt-in Claude Code identity injection for OAuth tokens** (`NADIRCLAW_CLAUDE_CODE_IDENTITY=1`) — Anthropic gates premium models (Sonnet/Opus) behind subscription/OAuth tokens (`sk-ant-oat*`) unless the request leads with the official Claude Code identity system block. The real Claude Code client always sends it; raw API/SDK callers omit it and get a bare `rate_limit_error` on those models while Haiku works (#74). When enabled, `/v1/messages` and the OAuth completion path prepend `"You are Claude Code, Anthropic's official CLI for Claude."` as the first `system` block — only for Bearer/OAuth tokens (no effect on `sk-ant-api*` keys), only when not already present, preserving any caller-supplied system prompt after it. The decision is recorded as `claude_code_identity` on the request log. Default off, since it changes the system prompt the model sees.
+
+### Fixed
+- **OAuth completion path sent `system` turns as chat messages** — the direct Anthropic OAuth call in `/v1/chat/completions` forwarded `role: "system"` messages inside the `messages` array, which Anthropic's `/v1/messages` API rejects (system must be a top-level field). System/developer turns are now collected into the top-level `system` field before forwarding (#74).
+
 ## [0.21.0] - 2026-06-24
 
 ### Added

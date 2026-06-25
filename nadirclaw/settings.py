@@ -354,6 +354,19 @@ class Settings:
         return os.getenv("NADIRCLAW_LOG_SYSTEM_PROMPTS", "").lower() in ("1", "true", "yes")
 
     @property
+    def CLAUDE_CODE_IDENTITY(self) -> bool:
+        """When True, prepend the Claude Code identity system block to Anthropic
+        OAuth (subscription / ``sk-ant-oat*``) requests.
+
+        Anthropic gates premium models (Sonnet/Opus) behind subscription tokens
+        unless the request's first system block is the official Claude Code
+        identity string — the real client always sends it, raw API callers don't.
+        Opt-in because it changes the system prompt seen by the model. No effect
+        on API-key (``sk-ant-api*``) credentials. See issue #74.
+        """
+        return os.getenv("NADIRCLAW_CLAUDE_CODE_IDENTITY", "").lower() in ("1", "true", "yes", "on")
+
+    @property
     def HSTS(self) -> bool:
         """When True, emit Strict-Transport-Security header. Opt-in for HTTPS deployments."""
         return os.getenv("NADIRCLAW_HSTS", "").lower() in ("1", "true", "yes")
