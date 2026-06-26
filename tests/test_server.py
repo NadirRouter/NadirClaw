@@ -127,6 +127,46 @@ class TestMessagesEndpointHelpers:
         assert _extract_text_from_anthropic_response(payload) == "hello world"
 
 
+class TestClaudeCodeIdentityInjection:
+    """The opt-in Claude Code identity system block injection (#74)."""
+
+    IDENTITY = "You are Claude Code, Anthropic's official CLI for Claude."
+
+    def test_inject_into_body_without_system(self):
+        from nadirclaw.server import _inject_claude_code_identity
+        body = {"model": "claude-opus-4-7", "messages": []}
+        assert _inject_claude_code_identity(body) is True
+        assert body["system"] == [{"type": "text", "text": self.IDENTITY}]
+
+    def test_inject_prepends_before_string_system(self):
+        from nadirclaw.server import _inject_claude_code_identity
+        body = {"system": "Be terse."}
+        assert _inject_claude_code_identity(body) is True
+        assert body["system"] == [
+            {"type": "text", "text": self.IDENTITY},
+            {"type": "text", "text": "Be terse."},
+        ]
+
+    def test_inject_prepends_before_block_array_system(self):
+        from nadirclaw.server import _inject_claude_code_identity
+        body = {"system": [{"type": "text", "text": "Be terse."}]}
+        assert _inject_claude_code_identity(body) is True
+        assert body["system"][0] == {"type": "text", "text": self.IDENTITY}
+        assert body["system"][1] == {"type": "text", "text": "Be terse."}
+
+    def test_inject_is_noop_when_identity_already_first(self):
+        from nadirclaw.server import _inject_claude_code_identity
+        body = {"system": [{"type": "text", "text": self.IDENTITY + " extra"}]}
+        assert _inject_claude_code_identity(body) is False
+        assert len(body["system"]) == 1
+
+    def test_inject_is_noop_when_string_system_already_identity(self):
+        from nadirclaw.server import _inject_claude_code_identity
+        body = {"system": self.IDENTITY}
+        assert _inject_claude_code_identity(body) is False
+        assert body["system"] == self.IDENTITY
+
+
 class TestMessagesEndpoint:
     """The /v1/messages Anthropic-compatible proxy endpoint."""
 
@@ -190,6 +230,71 @@ class TestMessagesEndpoint:
         assert captured["url"].endswith("/v1/messages")
         # OAuth token → Bearer header
         assert captured["auth"] == "Bearer sk-ant-oat01-test"
+
+    @staticmethod
+    def _capturing_client():
+        """Return (FakeClient, captured) recording the forwarded JSON body."""
+        import httpx
+        captured = {}
+
+        class _FakeResponse:
+            status_code = 200
+            headers = {"content-type": "application/json"}
+            def json(self):
+                return {"id": "msg_1", "model": captured.get("model"),
+                        "content": [{"type": "text", "text": "ok"}],
+                        "usage": {"input_tokens": 3, "output_tokens": 1}}
+
+        class _FakeClient:
+            def __init__(self, *a, **kw): pass
+            async def __aenter__(self): return self
+            async def __aexit__(self, *a): return False
+            async def post(self, url, headers=None, json=None):
+                captured["model"] = json.get("model")
+                captured["system"] = json.get("system")
+                captured["auth"] = headers.get("Authorization") or headers.get("x-api-key")
+                return _FakeResponse()
+
+        return httpx, _FakeClient, captured
+
+    def test_identity_injected_for_oauth_when_enabled(self, client, monkeypatch):
+        monkeypatch.setenv("NADIRCLAW_CLAUDE_CODE_IDENTITY", "1")
+        httpx, _FakeClient, captured = self._capturing_client()
+        with patch("nadirclaw.credentials.get_credential", return_value="sk-ant-oat01-test"), \
+             patch.object(httpx, "AsyncClient", _FakeClient):
+            resp = client.post("/v1/messages", json={
+                "model": "claude-opus-4-7", "max_tokens": 10,
+                "messages": [{"role": "user", "content": "hi"}],
+            })
+        assert resp.status_code == 200
+        assert captured["auth"] == "Bearer sk-ant-oat01-test"
+        assert captured["system"][0]["text"].startswith("You are Claude Code")
+
+    def test_identity_not_injected_when_disabled(self, client, monkeypatch):
+        monkeypatch.delenv("NADIRCLAW_CLAUDE_CODE_IDENTITY", raising=False)
+        httpx, _FakeClient, captured = self._capturing_client()
+        with patch("nadirclaw.credentials.get_credential", return_value="sk-ant-oat01-test"), \
+             patch.object(httpx, "AsyncClient", _FakeClient):
+            resp = client.post("/v1/messages", json={
+                "model": "claude-opus-4-7", "max_tokens": 10,
+                "messages": [{"role": "user", "content": "hi"}],
+            })
+        assert resp.status_code == 200
+        assert captured["system"] is None
+
+    def test_identity_not_injected_for_api_key_token(self, client, monkeypatch):
+        """Even with the flag on, an sk-ant-api key uses x-api-key — no injection."""
+        monkeypatch.setenv("NADIRCLAW_CLAUDE_CODE_IDENTITY", "1")
+        httpx, _FakeClient, captured = self._capturing_client()
+        with patch("nadirclaw.credentials.get_credential", return_value="sk-ant-api-test"), \
+             patch.object(httpx, "AsyncClient", _FakeClient):
+            resp = client.post("/v1/messages", json={
+                "model": "claude-opus-4-7", "max_tokens": 10,
+                "messages": [{"role": "user", "content": "hi"}],
+            })
+        assert resp.status_code == 200
+        assert captured["auth"] == "sk-ant-api-test"  # x-api-key path
+        assert captured["system"] is None
 
     def test_upstream_error_is_passed_through(self, client):
         import httpx

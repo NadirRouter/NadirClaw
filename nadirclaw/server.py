@@ -991,16 +991,31 @@ async def _call_litellm(
             if cred_provider == "anthropic" and "sk-ant-oat" in api_key:
                 import httpx
                 model_id = litellm_model.removeprefix("anthropic/")
-                anthropic_messages = [
-                    {"role": m["role"], "content": m["content"]}
-                    for m in call_kwargs.get("messages", [])
-                    if m.get("content") is not None
-                ]
+                # Anthropic /v1/messages requires system prompts as a top-level
+                # `system` field and only accepts user/assistant roles in the
+                # messages array — split system/developer turns out here.
+                system_blocks: list[str] = []
+                anthropic_messages = []
+                for m in call_kwargs.get("messages", []):
+                    if m.get("content") is None:
+                        continue
+                    if m["role"] in ("system", "developer"):
+                        content = m["content"]
+                        if isinstance(content, str):
+                            system_blocks.append(content)
+                        continue
+                    anthropic_messages.append({"role": m["role"], "content": m["content"]})
                 anthropic_body = {
                     "model": model_id,
                     "messages": anthropic_messages,
                     "max_tokens": call_kwargs.get("max_tokens", 1024),
                 }
+                if system_blocks:
+                    anthropic_body["system"] = "\n\n".join(system_blocks)
+                # OAuth tokens gate Sonnet/Opus behind the Claude Code identity
+                # block (#74); prepend it when opted in.
+                if settings.CLAUDE_CODE_IDENTITY:
+                    _inject_claude_code_identity(anthropic_body)
                 if call_kwargs.get("temperature") is not None:
                     anthropic_body["temperature"] = call_kwargs["temperature"]
                 req_extra = request.model_extra or {}
@@ -2296,6 +2311,49 @@ async def view_logs(
 _ANTHROPIC_UPSTREAM = "https://api.anthropic.com/v1/messages"
 _CLAUDE_OAUTH_BETA = "oauth-2025-04-20,claude-code-20250219"
 
+# The exact first system block the official Claude Code client sends. Anthropic
+# gates premium models (Sonnet/Opus) behind subscription OAuth tokens unless the
+# request leads with this identity string; raw API callers omit it and get a
+# bare rate_limit_error on those models (see issue #74). Opt-in via
+# settings.CLAUDE_CODE_IDENTITY — injected only for OAuth (sk-ant-oat*) tokens.
+_CLAUDE_CODE_IDENTITY = "You are Claude Code, Anthropic's official CLI for Claude."
+
+
+def _has_claude_code_identity(system: Any) -> bool:
+    """True if ``system`` already leads with the Claude Code identity block."""
+    if isinstance(system, str):
+        return system.lstrip().startswith(_CLAUDE_CODE_IDENTITY)
+    if isinstance(system, list) and system:
+        first = system[0]
+        if isinstance(first, dict):
+            return str(first.get("text", "")).lstrip().startswith(_CLAUDE_CODE_IDENTITY)
+        if isinstance(first, str):
+            return first.lstrip().startswith(_CLAUDE_CODE_IDENTITY)
+    return False
+
+
+def _inject_claude_code_identity(body: Dict[str, Any]) -> bool:
+    """Prepend the Claude Code identity block to an Anthropic ``/v1/messages`` body.
+
+    Normalizes ``system`` to the block-array form Anthropic expects and inserts
+    the identity as the first block, preserving any caller-supplied system
+    prompt after it. No-op (returns False) if the identity is already first.
+    Returns True if the body was modified.
+    """
+    system = body.get("system")
+    if _has_claude_code_identity(system):
+        return False
+    identity = {"type": "text", "text": _CLAUDE_CODE_IDENTITY}
+    if system is None:
+        body["system"] = [identity]
+    elif isinstance(system, str):
+        body["system"] = [identity, {"type": "text", "text": system}] if system else [identity]
+    elif isinstance(system, list):
+        body["system"] = [identity, *system]
+    else:
+        body["system"] = [identity]
+    return True
+
 
 def _anthropic_messages_to_chat(messages: List[Dict[str, Any]]) -> List[ChatMessage]:
     """Convert Anthropic message blocks to our internal ChatMessage shape.
@@ -2531,6 +2589,12 @@ async def anthropic_messages(
 
     headers = _anthropic_auth_headers(raw, body)
 
+    # OAuth subscription tokens (Bearer) gate Sonnet/Opus behind the Claude Code
+    # identity system block (#74). Inject it for OAuth requests when opted in.
+    identity_injected = False
+    if settings.CLAUDE_CODE_IDENTITY and "Authorization" in headers:
+        identity_injected = _inject_claude_code_identity(body)
+
     import httpx
     from fastapi.responses import StreamingResponse
 
@@ -2539,6 +2603,7 @@ async def anthropic_messages(
         "requested_model": requested_model,
         "selected_model": upstream_model,
         "streaming": stream,
+        "claude_code_identity": identity_injected,
         **analysis_info,
     }
 
