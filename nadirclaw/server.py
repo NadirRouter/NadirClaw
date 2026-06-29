@@ -24,6 +24,45 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, model_validator
 from sse_starlette.sse import EventSourceResponse
 
+
+# ---------------------------------------------------------------------------
+# Classifier input cleaner
+# ---------------------------------------------------------------------------
+# Strips configured regex patterns from user prompts *before* classification
+# so agent metadata envelopes (memory context, system notes, etc.) do not
+# inflate the complexity score.  The LLM still sees the full text --- this
+# only affects the classifier.
+# Set NADIRCLAW_CLASSIFIER_STRIP_PATTERNS in the environment.
+# ---------------------------------------------------------------------------
+_strip_regex: Optional[re.Pattern] = None
+
+def _compile_strip_regex() -> Optional[re.Pattern]:
+    """Compile the classifier strip pattern from settings, or None if empty."""
+    from nadirclaw.settings import settings as _s
+    raw = _s.CLASSIFIER_STRIP_PATTERNS
+    if not raw:
+        return None
+    try:
+        return re.compile(raw, re.DOTALL)
+    except re.error:
+        logger = logging.getLogger(__name__)
+        logger.warning(
+            "Invalid NADIRCLAW_CLASSIFIER_STRIP_PATTERNS=%r - ignoring. "
+            "Check your regex syntax.",
+            raw,
+        )
+        return None
+
+def _strip_classifier_input(text: str) -> str:
+    """Strip configured patterns from classifier input text."""
+    global _strip_regex
+    if _strip_regex is None:
+        _strip_regex = _compile_strip_regex()
+    if not _strip_regex or not text:
+        return text
+    return _strip_regex.sub('', text).strip()
+# ---------------------------------------------------------------------------
+
 import os
 
 from nadirclaw import __version__
@@ -533,6 +572,8 @@ async def _smart_route_full(
     """Smart route for full completions."""
     user_msgs = [m.text_content() for m in messages if m.role == "user"]
     prompt = user_msgs[-1] if user_msgs else ""
+    # Strip agent metadata so they do not inflate complexity score.
+    prompt = _strip_classifier_input(prompt)
     system_msg = next((m.text_content() for m in messages if m.role in ("system", "developer")), "")
     return await _smart_route_analysis(prompt, system_msg, user)
 
@@ -547,8 +588,9 @@ async def classify_prompt(
     current_user: UserSession = Depends(validate_local_auth),
 ) -> Dict[str, Any]:
     """Classify a prompt without calling any LLM."""
+    clean_prompt = _strip_classifier_input(request.prompt)
     _, analysis = await _smart_route_analysis(
-        request.prompt, request.system_message or "", current_user
+        clean_prompt, request.system_message or "", current_user
     )
 
     _log_request({
@@ -571,7 +613,8 @@ async def classify_batch(
     """Classify multiple prompts at once."""
     results = []
     for prompt in request.prompts:
-        _, analysis = await _smart_route_analysis(prompt, "", current_user)
+        clean_prompt = _strip_classifier_input(prompt)
+        _, analysis = await _smart_route_analysis(clean_prompt, "", current_user)
         results.append({
             "prompt": prompt,
             "selected_model": analysis.get("selected_model"),
