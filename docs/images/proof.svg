@@ -1,0 +1,49 @@
+<svg width="1280" height="300" viewBox="0 0 1280 300" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Proof, not promises — benchmark numbers">
+  <title>Proof, not promises — RouterBench held-out benchmarks</title>
+  <defs>
+    <style>
+      .serif { font-family: Georgia, 'Iowan Old Style', 'Palatino Linotype', 'Times New Roman', serif; }
+      .sans  { font-family: 'Helvetica Neue', 'Segoe UI', Arial, sans-serif; }
+      .lbl   { font-family: 'Helvetica Neue', 'Segoe UI', Arial, sans-serif; letter-spacing: .2em; }
+    </style>
+    <g id="spark3">
+      <line x1="0" y1="-13" x2="0" y2="13"/><line x1="-13" y1="0" x2="13" y2="0"/>
+      <line x1="-7.5" y1="-7.5" x2="7.5" y2="7.5"/><line x1="-7.5" y1="7.5" x2="7.5" y2="-7.5"/>
+    </g>
+  </defs>
+
+  <rect width="1280" height="300" fill="#F4F1EA"/>
+
+  <use href="#spark3" transform="translate(80 44) scale(0.5)" stroke="#C75D3A" stroke-width="2.4"/>
+  <text class="lbl sans" x="100" y="49" font-size="13" fill="#1E2A44">PROOF, NOT PROMISES</text>
+  <line x1="80" y1="66" x2="1200" y2="66" stroke="#E3DACA" stroke-width="1.4"/>
+
+  <!-- dividers -->
+  <line x1="370" y1="104" x2="370" y2="214" stroke="#E3DACA" stroke-width="1.4"/>
+  <line x1="650" y1="104" x2="650" y2="214" stroke="#E3DACA" stroke-width="1.4"/>
+  <line x1="930" y1="104" x2="930" y2="214" stroke="#E3DACA" stroke-width="1.4"/>
+
+  <!-- 1: cost -->
+  <text class="serif" x="80" y="170" font-size="70" fill="#C75D3A">−60%</text>
+  <text class="lbl sans" x="82" y="196" font-size="12.5" fill="#1E2A44">COST VS ALWAYS-OPUS</text>
+  <text class="serif" x="82" y="222" font-size="15.5" font-style="italic" fill="#6B6456">composed system cost</text>
+
+  <!-- 2: quality -->
+  <text class="serif" x="392" y="170" font-size="70" fill="#1E2A44">98.3%</text>
+  <text class="lbl sans" x="394" y="196" font-size="12.5" fill="#1E2A44">QUALITY PRESERVED</text>
+  <text class="serif" x="394" y="222" font-size="15.5" font-style="italic" fill="#6B6456">vs the always-Opus baseline</text>
+
+  <!-- 3: AUROC -->
+  <text class="serif" x="672" y="170" font-size="70" fill="#7FA0C8">0.961</text>
+  <text class="lbl sans" x="674" y="196" font-size="12.5" fill="#1E2A44">VERIFIER AUROC</text>
+  <text class="serif" x="674" y="222" font-size="15.5" font-style="italic" fill="#6B6456">ECE 0.016 · well-calibrated</text>
+
+  <!-- 4: overhead -->
+  <text class="serif" x="952" y="170" font-size="70" fill="#8C9A6E">~10ms</text>
+  <text class="lbl sans" x="954" y="196" font-size="12.5" fill="#1E2A44">ROUTING OVERHEAD</text>
+  <text class="serif" x="954" y="222" font-size="15.5" font-style="italic" fill="#6B6456">binary classifier, warm encoder</text>
+
+  <!-- footnote -->
+  <line x1="80" y1="256" x2="1200" y2="256" stroke="#E3DACA" stroke-width="1.4"/>
+  <text class="sans" x="80" y="282" font-size="13" fill="#9A927F">RouterBench held-out · n = 11,420 · pre-generation classifier + cascade verifier at τ = 0.80 · catastrophic-downgrade 1.7% · full τ-sweep in MODEL_CARD.md</text>
+</svg>

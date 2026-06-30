@@ -1,0 +1,91 @@
+<svg width="1280" height="440" viewBox="0 0 1280 440" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="NadirClaw architecture — a drop-in local proxy">
+  <title>NadirClaw architecture — a drop-in local proxy</title>
+  <defs>
+    <style>
+      .serif { font-family: Georgia, 'Iowan Old Style', 'Palatino Linotype', 'Times New Roman', serif; }
+      .sans  { font-family: 'Helvetica Neue', 'Segoe UI', Arial, sans-serif; }
+      .mono  { font-family: 'SF Mono', 'JetBrains Mono', Menlo, 'DejaVu Sans Mono', monospace; }
+      .lbl   { font-family: 'Helvetica Neue', 'Segoe UI', Arial, sans-serif; letter-spacing: .2em; }
+    </style>
+    <g id="spark5">
+      <line x1="0" y1="-13" x2="0" y2="13"/><line x1="-13" y1="0" x2="13" y2="0"/>
+      <line x1="-7.5" y1="-7.5" x2="7.5" y2="7.5"/><line x1="-7.5" y1="7.5" x2="7.5" y2="-7.5"/>
+    </g>
+    <marker id="arr5" markerWidth="9" markerHeight="9" refX="6" refY="4.5" orient="auto">
+      <path d="M1,1 L7,4.5 L1,8" fill="none" stroke="#9A927F" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+    </marker>
+  </defs>
+
+  <rect width="1280" height="440" fill="#F4F1EA"/>
+
+  <use href="#spark5" transform="translate(80 44) scale(0.5)" stroke="#C75D3A" stroke-width="2.4"/>
+  <text class="lbl sans" x="100" y="49" font-size="13" fill="#1E2A44">ARCHITECTURE — A DROP-IN LOCAL PROXY</text>
+  <line x1="80" y1="66" x2="1200" y2="66" stroke="#E3DACA" stroke-width="1.4"/>
+
+  <!-- your machine boundary -->
+  <rect x="56" y="104" width="768" height="296" rx="22" fill="none" stroke="#C9C0AE" stroke-width="1.6" stroke-dasharray="3 7"/>
+  <rect x="78" y="92" width="220" height="26" rx="13" fill="#F4F1EA"/>
+  <text class="lbl sans" x="92" y="110" font-size="11" fill="#8A8270">YOUR MACHINE · LOCALHOST</text>
+
+  <!-- YOUR TOOLS -->
+  <rect x="84" y="140" width="240" height="226" rx="14" fill="#FBFAF5" stroke="#E3DACA" stroke-width="1.5"/>
+  <text class="lbl sans" x="104" y="170" font-size="10.5" fill="#8A8270">YOUR TOOLS</text>
+  <line x1="104" y1="182" x2="304" y2="182" stroke="#E3DACA" stroke-width="1.2" stroke-dasharray="2 4"/>
+  <g class="serif" font-size="16" fill="#1E2A44">
+    <text x="104" y="210">Claude Code</text>
+    <text x="104" y="238">Cursor · Continue</text>
+    <text x="104" y="266">Aider · Windsurf</text>
+    <text x="104" y="294">OpenClaw · Codex</text>
+    <text x="104" y="322">Open WebUI</text>
+  </g>
+  <text class="sans" x="104" y="350" font-size="12.5" fill="#9A927F">…any OpenAI / Anthropic client</text>
+
+  <!-- arrow tools -> nadirclaw -->
+  <line x1="330" y1="253" x2="384" y2="253" stroke="#9A927F" stroke-width="1.6" marker-end="url(#arr5)"/>
+
+  <!-- NADIRCLAW -->
+  <rect x="392" y="140" width="408" height="226" rx="14" fill="#FDF3EC" stroke="#C75D3A" stroke-width="1.7"/>
+  <text class="lbl sans" x="414" y="170" font-size="10.5" fill="#C75D3A">NADIRCLAW</text>
+  <text class="mono" x="784" y="170" font-size="12" fill="#B06A4B" text-anchor="end">:8856</text>
+  <line x1="414" y1="182" x2="778" y2="182" stroke="#EAD4C6" stroke-width="1.2" stroke-dasharray="2 4"/>
+  <!-- internal pipeline -->
+  <g>
+    <rect x="414" y="198" width="364" height="40" rx="9" fill="#FBFAF5" stroke="#E3DACA" stroke-width="1.3"/>
+    <circle cx="436" cy="218" r="9" fill="#C75D3A"/><text class="mono" x="436" y="222" font-size="11" fill="#FBFAF5" text-anchor="middle">1</text>
+    <text class="serif" x="456" y="223" font-size="15.5" fill="#1E2A44">Classify</text>
+    <text class="sans" x="768" y="222" font-size="12" fill="#9A927F" text-anchor="end">~10ms · embeddings</text>
+
+    <rect x="414" y="244" width="364" height="40" rx="9" fill="#FBFAF5" stroke="#E3DACA" stroke-width="1.3"/>
+    <circle cx="436" cy="264" r="9" fill="#7FA0C8"/><text class="mono" x="436" y="268" font-size="11" fill="#FBFAF5" text-anchor="middle">2</text>
+    <text class="serif" x="456" y="269" font-size="15.5" fill="#1E2A44">Optimize context</text>
+    <text class="sans" x="768" y="268" font-size="12" fill="#9A927F" text-anchor="end">30–70% fewer tokens</text>
+
+    <rect x="414" y="290" width="364" height="40" rx="9" fill="#FBFAF5" stroke="#E3DACA" stroke-width="1.3"/>
+    <circle cx="436" cy="310" r="9" fill="#8C9A6E"/><text class="mono" x="436" y="314" font-size="11" fill="#FBFAF5" text-anchor="middle">3</text>
+    <text class="serif" x="456" y="315" font-size="15.5" fill="#1E2A44">Verify · cascade</text>
+    <text class="sans" x="768" y="314" font-size="12" fill="#9A927F" text-anchor="end">escalate if needed</text>
+  </g>
+  <text class="sans" x="414" y="352" font-size="12.5" fill="#9A927F">logs · metrics · budgets — local JSONL + SQLite</text>
+
+  <!-- arrow nadirclaw -> providers, crossing boundary -->
+  <line x1="806" y1="253" x2="884" y2="253" stroke="#9A927F" stroke-width="1.6" marker-end="url(#arr5)"/>
+  <text class="serif" x="845" y="240" font-size="13" font-style="italic" fill="#B06A4B" text-anchor="middle">direct</text>
+  <text class="sans" x="845" y="276" font-size="11" fill="#9A927F" text-anchor="middle">your keys</text>
+
+  <!-- PROVIDERS -->
+  <rect x="892" y="140" width="328" height="226" rx="14" fill="#FBFAF5" stroke="#E3DACA" stroke-width="1.5"/>
+  <text class="lbl sans" x="912" y="170" font-size="10.5" fill="#8A8270">PROVIDERS</text>
+  <line x1="912" y1="182" x2="1200" y2="182" stroke="#E3DACA" stroke-width="1.2" stroke-dasharray="2 4"/>
+  <g class="serif" font-size="16" fill="#1E2A44">
+    <circle cx="918" cy="205" r="5" fill="#C75D3A"/><text x="934" y="210">Anthropic — Claude</text>
+    <circle cx="918" cy="233" r="5" fill="#8C9A6E"/><text x="934" y="238">OpenAI — GPT · Codex</text>
+    <circle cx="918" cy="261" r="5" fill="#7FA0C8"/><text x="934" y="266">Google — Gemini (native)</text>
+    <circle cx="918" cy="289" r="5" fill="#D9A24F"/><text x="934" y="294">Ollama — local, free</text>
+    <circle cx="918" cy="317" r="5" fill="#9A927F"/><text x="934" y="322">+ 100 more via LiteLLM</text>
+  </g>
+  <text class="sans" x="912" y="350" font-size="12.5" fill="#9A927F">vLLM · LM Studio · DeepSeek …</text>
+
+  <!-- annotation -->
+  <use href="#spark5" transform="translate(96 418) scale(0.34)" stroke="#C75D3A" stroke-width="2.6"/>
+  <text class="serif" x="110" y="424" font-size="15" font-style="italic" fill="#B06A4B">no middleman, no subsidized tokens — nothing routes through us.</text>
+</svg>

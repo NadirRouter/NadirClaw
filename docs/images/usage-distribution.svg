@@ -1,0 +1,54 @@
+<svg width="1000" height="300" viewBox="0 0 1000 300" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Where the prompts go — typical coding-assistant complexity mix">
+  <title>Where the prompts go — typical complexity mix</title>
+  <defs>
+    <style>
+      .serif { font-family: Georgia, 'Iowan Old Style', 'Palatino Linotype', 'Times New Roman', serif; }
+      .sans  { font-family: 'Helvetica Neue', 'Segoe UI', Arial, sans-serif; }
+      .lbl   { font-family: 'Helvetica Neue', 'Segoe UI', Arial, sans-serif; letter-spacing: .2em; }
+    </style>
+    <g id="spark6">
+      <line x1="0" y1="-13" x2="0" y2="13"/><line x1="-13" y1="0" x2="13" y2="0"/>
+      <line x1="-7.5" y1="-7.5" x2="7.5" y2="7.5"/><line x1="-7.5" y1="7.5" x2="7.5" y2="-7.5"/>
+    </g>
+    <clipPath id="barclip"><rect x="80" y="96" width="840" height="58" rx="12"/></clipPath>
+  </defs>
+
+  <rect width="1000" height="300" fill="#F4F1EA"/>
+
+  <use href="#spark6" transform="translate(80 44) scale(0.5)" stroke="#C75D3A" stroke-width="2.4"/>
+  <text class="lbl sans" x="100" y="49" font-size="13" fill="#1E2A44">WHERE THE PROMPTS GO</text>
+  <line x1="80" y1="66" x2="920" y2="66" stroke="#E3DACA" stroke-width="1.4"/>
+
+  <!-- stacked bar (55 / 25 / 15 / 5) -->
+  <g clip-path="url(#barclip)">
+    <rect x="80"  y="96" width="462" height="58" fill="#A9C8B7"/>
+    <rect x="544" y="96" width="210" height="58" fill="#E2C29B"/>
+    <rect x="756" y="96" width="126" height="58" fill="#C75D3A"/>
+    <rect x="884" y="96" width="42"  height="58" fill="#7FA0C8"/>
+    <rect x="540" y="96" width="4" height="58" fill="#F4F1EA"/>
+    <rect x="752" y="96" width="4" height="58" fill="#F4F1EA"/>
+    <rect x="880" y="96" width="4" height="58" fill="#F4F1EA"/>
+  </g>
+  <text class="serif" x="311" y="133" font-size="22" fill="#1E2A44" text-anchor="middle">55%</text>
+  <text class="serif" x="649" y="133" font-size="22" fill="#1E2A44" text-anchor="middle">25%</text>
+  <text class="serif" x="819" y="133" font-size="22" fill="#FBFAF5" text-anchor="middle">15%</text>
+  <text class="serif" x="905" y="133" font-size="16" fill="#FBFAF5" text-anchor="middle">5%</text>
+
+  <!-- legend -->
+  <g class="serif" font-size="16" fill="#1E2A44">
+    <circle cx="86"  cy="206" r="6" fill="#A9C8B7"/><text x="100" y="211">Simple</text>
+    <text class="sans" x="100" y="234" font-size="13" fill="#9A927F">reads, formatting · gemini-flash</text>
+
+    <circle cx="316" cy="206" r="6" fill="#E2C29B"/><text x="330" y="211">Mid</text>
+    <text class="sans" x="330" y="234" font-size="13" fill="#9A927F">focused edits · haiku-4.5</text>
+
+    <circle cx="546" cy="206" r="6" fill="#C75D3A"/><text x="560" y="211">Complex · agentic</text>
+    <text class="sans" x="560" y="234" font-size="13" fill="#9A927F">refactors, tool loops · sonnet-4.6</text>
+
+    <circle cx="826" cy="206" r="6" fill="#7FA0C8"/><text x="840" y="211">Reasoning</text>
+    <text class="sans" x="840" y="234" font-size="13" fill="#9A927F">chain-of-thought · o-series</text>
+  </g>
+
+  <line x1="80" y1="262" x2="920" y2="262" stroke="#E3DACA" stroke-width="1.4"/>
+  <text class="sans" x="80" y="286" font-size="13" fill="#9A927F">Representative coding-assistant mix — roughly 6–7 of every 10 prompts clear on a cheap model. Your numbers vary by workload.</text>
+</svg>
