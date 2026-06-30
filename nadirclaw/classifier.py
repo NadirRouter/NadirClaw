@@ -356,6 +356,17 @@ def get_classifier() -> Any:
                 "Failed to load DistilBERT classifier (%s) — falling back to binary",
                 e,
             )
+    elif kind == "morph":
+        try:
+            from nadirclaw.morph_classifier import MorphRouterClassifier
+            _active_classifier = MorphRouterClassifier()
+            logger.info("Using Morph router classifier (remote, fail-closed to binary)")
+            return _active_classifier
+        except Exception as e:
+            logger.warning(
+                "Failed to init Morph router classifier (%s) — falling back to binary",
+                e,
+            )
     _active_classifier = get_binary_classifier()
     return _active_classifier
 
@@ -376,6 +387,18 @@ def warmup() -> None:
         except Exception as e:
             logger.warning(
                 "DistilBERT warmup failed (%s) — falling back to binary classifier",
+                e,
+            )
+    elif kind == "morph":
+        try:
+            from nadirclaw.morph_classifier import MorphRouterClassifier
+            logger.info("Warming up MorphRouterClassifier (remote) ...")
+            _active_classifier = MorphRouterClassifier()
+            logger.info("MorphRouterClassifier warmup complete")
+            return
+        except Exception as e:
+            logger.warning(
+                "Morph warmup failed (%s) — falling back to binary classifier",
                 e,
             )
     logger.info("Warming up BinaryComplexityClassifier ...")

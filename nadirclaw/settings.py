@@ -170,12 +170,42 @@ class Settings:
           - "binary"     (default) — fast 2-class centroid classifier (~10ms, 22MB)
           - "distilbert"           — 3-class fine-tuned DistilBERT (~30ms, 256MB)
                                      produces simple/mid/complex tiers natively.
+          - "morph"                — Morph hosted Model Router (remote). Requires
+                                     MORPH_API_KEY. Fails closed to "binary" on any
+                                     error/timeout/missing key.
 
         Set via NADIRCLAW_COMPLEXITY_ANALYZER. The DistilBERT artifact is not
         shipped in the package — install separately or train via
         `nadir.distilbert_classifier.DistilBertClassifier()`.
         """
         return os.getenv("NADIRCLAW_COMPLEXITY_ANALYZER", "binary").strip().lower()
+
+    @property
+    def MORPH_API_KEY(self) -> str:
+        """API key for the Morph router classifier (NADIRCLAW_COMPLEXITY_ANALYZER=morph).
+
+        Read from MORPH_API_KEY. Empty means the morph classifier is unavailable
+        and routing falls back to the local binary classifier.
+        """
+        return os.getenv("MORPH_API_KEY", "").strip()
+
+    @property
+    def MORPH_API_BASE(self) -> str:
+        """Base URL for Morph's OpenAI-style router API (no trailing /router/...)."""
+        return os.getenv("MORPH_API_BASE", "https://api.morphllm.com/v1").strip()
+
+    @property
+    def MORPH_TIMEOUT_MS(self) -> int:
+        """Per-request timeout budget for the Morph router call (default 200ms).
+
+        A CLI on residential internet sees tail latency well above Morph's ~50ms
+        median; past this budget we fail closed to the local classifier rather
+        than stall the request.
+        """
+        try:
+            return max(1, int(os.getenv("MORPH_TIMEOUT_MS", "200")))
+        except ValueError:
+            return 200
 
     @property
     def FALLBACK_CHAIN(self) -> list[str]:
