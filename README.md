@@ -369,12 +369,13 @@ Gemini models are called natively via the Google GenAI SDK. All other models go 
 
 ### Complexity analyzer
 
-NadirClaw ships two prompt classifiers. Pick one with `NADIRCLAW_COMPLEXITY_ANALYZER`:
+NadirClaw ships two local prompt classifiers, plus an optional remote one. Pick one with `NADIRCLAW_COMPLEXITY_ANALYZER`:
 
 | Value | Model | Latency | Size | Output |
 |---|---|---|---|---|
 | `binary` *(default)* | Sentence-embedding centroid classifier | ~10ms | ~22MB | 2-class (simple / complex) — `mid` and `reasoning` come from rule overlays |
 | `distilbert` | Fine-tuned DistilBERT sequence classifier | ~30ms | ~256MB | 3-class (simple / mid / complex) predicted natively |
+| `morph` | [Morph hosted Model Router](https://docs.morphllm.com/sdk/components/router) (remote) | ~50ms + network | — | difficulty → simple / mid / complex via the same tier thresholds |
 
 ```bash
 # opt into the 3-class DistilBERT classifier
@@ -382,6 +383,24 @@ NADIRCLAW_COMPLEXITY_ANALYZER=distilbert
 ```
 
 The DistilBERT artifact is **not** bundled in the package — on first use it downloads (~256MB, then cached under `~/.cache/huggingface/hub/`) from the Hugging Face Hub. Override the source repo with `NADIRCLAW_DISTILBERT_REPO`. If the download fails, NadirClaw logs a warning and falls back to the binary classifier — it never crashes the router.
+
+#### Morph router (remote, opt-in)
+
+`morph` delegates the routing decision to Morph's hosted Model Router instead of a local model. It is **strictly opt-in** and requires `MORPH_API_KEY`:
+
+```bash
+NADIRCLAW_COMPLEXITY_ANALYZER=morph MORPH_API_KEY=sk-... nadirclaw serve
+```
+
+Morph returns a `difficulty` (`easy` / `medium` / `hard` / `needs_info`), which NadirClaw maps to a complexity score and then to a tier using the same `NADIRCLAW_TIER_THRESHOLDS` as the local classifiers (so `mid` only appears when `NADIRCLAW_MID_MODEL` is set). Tuning knobs:
+
+| Env var | Default | Purpose |
+|---|---|---|
+| `MORPH_API_KEY` | — | Required. Without it, routing falls back to `binary`. |
+| `MORPH_API_BASE` | `https://api.morphllm.com/v1` | Override for self-hosted/proxy gateways. |
+| `MORPH_TIMEOUT_MS` | `200` | Per-request budget; past it, fail closed to the local classifier. |
+
+**Fail-closed:** on a missing key, HTTP error, timeout, or unparseable response, NadirClaw logs once and serves that request from the local binary classifier — a Morph outage degrades routing quality, never availability. Repeated prompts within a session are served from a small in-memory cache. Note: the Morph call adds a small per-classification cost that NadirClaw's savings report does not yet subtract from net-saved (tracked as a follow-up).
 
 Test how any prompt buckets with either analyzer:
 
