@@ -60,7 +60,10 @@ def _strip_classifier_input(text: str) -> str:
         _strip_regex = _compile_strip_regex()
     if not _strip_regex or not text:
         return text
-    return _strip_regex.sub('', text).strip()
+    stripped = _strip_regex.sub('', text).strip()
+    # Guard against an over-broad pattern consuming the whole prompt: an empty
+    # classifier input would silently route everything to the cheapest tier.
+    return stripped or text
 # ---------------------------------------------------------------------------
 
 import os
