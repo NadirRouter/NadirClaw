@@ -1,14 +1,15 @@
 <p align="center">
   <a href="https://getnadir.com">
-    <img src="docs/images/banner.png" alt="NadirClaw — Cut LLM & Agent Costs 40-70%" width="100%" />
+    <img src="docs/images/banner.svg" alt="NadirClaw — the lowest viable model, verified." width="100%" />
   </a>
 </p>
 
 <h1 align="center">NadirClaw</h1>
 
 <p align="center">
-  <strong>Your simple prompts are burning premium tokens.</strong><br>
-  NadirClaw routes them to cheaper models automatically. Save 40-70% on AI API costs.
+  <strong>The lowest viable model, verified.</strong><br>
+  NadirClaw routes every prompt to the cheapest model that can reliably answer, verifies the
+  output, and escalates only when it has to. Better answers, lower cost — 40–70% lower.
 </p>
 
 <p align="center">
@@ -59,7 +60,23 @@ SIMPLE  "Write a docstring"         → gemini-flash    $0.0002
 
 > **Your keys. Your models. No middleman.** NadirClaw runs locally and routes directly to providers. No third-party proxy, no subsidized tokens, no platform that can pull the plug on you. [Why this matters.](docs/vs-clawrouter.md)
 
-## Benchmarks
+## How NadirClaw works
+
+<p align="center">
+  <img src="docs/images/how-it-works.svg" alt="How NadirClaw works — Route, Verify, Escalate" width="100%" />
+</p>
+
+Three moves, on every request:
+
+1. **Route** — a ~10ms embedding classifier predicts the *smallest* model likely to answer and sends the prompt there first. Routing modifiers (agentic tool loops, reasoning markers, vision content, long context) can override the score and force a stronger tier.
+2. **Verify** — the cheap answer is scored against quality heuristics (refusals, truncation, JSON-format failures) before it ships. Pro swaps the heuristic for a trained DeBERTa cross-encoder.
+3. **Escalate** — if the answer falls below the acceptance threshold (τ = 0.80), NadirClaw steps up to the next-best model automatically. You only pay for the big model when the small one wasn't enough.
+
+## Benchmarks — proof, not promises
+
+<p align="center">
+  <img src="docs/images/proof.svg" alt="NadirClaw benchmarks — −60% cost, 98.3% quality preserved, 0.961 verifier AUROC, ~10ms overhead" width="100%" />
+</p>
 
 NadirClaw and Nadir Pro share the same routing architecture. The numbers
 below are from the trained classifier + DeBERTa verifier in Nadir Pro;
@@ -197,10 +214,6 @@ Monitor your routing in real-time with `nadirclaw dashboard`:
 </p>
 
 Install the dashboard extras: `pip install nadirclaw[dashboard]`
-
-<p align="center">
-  <img src="docs/images/architecture.png" alt="NadirClaw Architecture" width="700" />
-</p>
 
 ## Prerequisites
 
@@ -952,7 +965,7 @@ curl http://localhost:8856/v1/chat/completions \
 ## Routing Intelligence — How NadirClaw Classifies Prompts
 
 <p align="center">
-  <img src="docs/images/routing-flow.png" alt="Routing flow" width="700" />
+  <img src="docs/images/routing-flow.svg" alt="Routing intelligence — how NadirClaw classifies a prompt" width="100%" />
 </p>
 
 Beyond basic simple/complex classification, NadirClaw applies routing modifiers that can override the base decision:
@@ -1234,33 +1247,16 @@ nadirclaw test --timeout 10
 
 ## How It Works
 
-NadirClaw sits between your application and the LLM provider as a transparent proxy:
+NadirClaw sits between your application and the LLM provider as a transparent local proxy. Your tools talk to it on `localhost`; it classifies, optimizes, verifies, and routes each request directly to the provider with your own keys — nothing passes through a third party.
 
-```
-┌─────────────────┐
-│  Your App       │
-│  (Claude Code,  │
-│   Cursor, etc)  │
-└────────┬────────┘
-         │ OpenAI API request
-         ▼
-┌─────────────────┐
-│  NadirClaw      │
-│  Classifier     │
-└────────┬────────┘
-         │ Route decision (10ms)
-         ▼
-┌─────────────────┐
-│  LLM Provider   │
-│  (Claude, GPT,  │
-│   Gemini, etc)  │
-└─────────────────┘
-```
+<p align="center">
+  <img src="docs/images/architecture.svg" alt="NadirClaw architecture — a drop-in local proxy between your tools and the providers" width="100%" />
+</p>
 
 Most LLM usage doesn't need a premium model. NadirClaw routes each prompt to the right tier automatically:
 
 <p align="center">
-  <img src="docs/images/usage-distribution.png" alt="Typical LLM usage distribution" width="500" />
+  <img src="docs/images/usage-distribution.svg" alt="Where the prompts go — typical complexity mix" width="100%" />
 </p>
 
 ### Step-by-Step

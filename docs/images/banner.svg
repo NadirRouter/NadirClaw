@@ -1,0 +1,98 @@
+<svg width="1280" height="440" viewBox="0 0 1280 440" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="NadirClaw — the lowest viable model, verified.">
+  <title>NadirClaw — the lowest viable model, verified.</title>
+  <defs>
+    <style>
+      .serif { font-family: Georgia, 'Iowan Old Style', 'Palatino Linotype', 'Times New Roman', serif; }
+      .sans  { font-family: 'Helvetica Neue', 'Segoe UI', Arial, sans-serif; }
+      .mono  { font-family: 'SF Mono', 'JetBrains Mono', Menlo, 'DejaVu Sans Mono', monospace; }
+      .lbl   { font-family: 'Helvetica Neue', 'Segoe UI', Arial, sans-serif; letter-spacing: .2em; }
+    </style>
+    <g id="spark">
+      <line x1="0" y1="-13" x2="0" y2="13"/>
+      <line x1="-13" y1="0" x2="13" y2="0"/>
+      <line x1="-7.5" y1="-7.5" x2="7.5" y2="7.5"/>
+      <line x1="-7.5" y1="7.5" x2="7.5" y2="-7.5"/>
+    </g>
+    <path id="cstar" d="M0,-15 L3.4,-3.4 L15,0 L3.4,3.4 L0,15 L-3.4,3.4 L-15,0 L-3.4,-3.4 Z"/>
+    <filter id="soft" x="-20%" y="-20%" width="140%" height="160%">
+      <feDropShadow dx="0" dy="6" stdDeviation="10" flood-color="#3a3326" flood-opacity="0.10"/>
+    </filter>
+  </defs>
+
+  <!-- paper -->
+  <rect width="1280" height="440" fill="#F4F1EA"/>
+  <!-- faint compass ring bleeding off left -->
+  <circle cx="64" cy="232" r="250" fill="none" stroke="#E7DECE" stroke-width="1.5"/>
+  <circle cx="64" cy="232" r="186" fill="none" stroke="#E7DECE" stroke-width="1.5"/>
+  <!-- scattered sparks -->
+  <use href="#spark" x="624" y="116" stroke="#C75D3A" stroke-width="2" transform="scale(0.62)" transform-origin="624 116"/>
+  <use href="#spark" x="690" y="360" stroke="#E0B7A3" stroke-width="2" transform="scale(0.4)" transform-origin="690 360"/>
+  <use href="#spark" x="40" y="392" stroke="#C9C0AE" stroke-width="2" transform="scale(0.42)" transform-origin="40 392"/>
+
+  <!-- ============ LEFT COLUMN ============ -->
+  <use href="#cstar" x="0" y="0" transform="translate(80 64) scale(0.62)" fill="#C75D3A"/>
+  <text class="lbl sans" x="100" y="69" font-size="12.5" fill="#1E2A44">OPEN SOURCE · SELF-HOSTED · YOUR KEYS</text>
+
+  <text class="serif" x="68" y="178" font-size="92" font-weight="400" fill="#1E2A44" letter-spacing="-1">nadirclaw</text>
+  <use href="#spark" x="0" y="0" transform="translate(566 112) scale(0.7)" stroke="#C75D3A" stroke-width="2.2"/>
+
+  <text class="serif" x="72" y="252" font-size="40" fill="#1E2A44">The lowest viable model,</text>
+  <text class="serif" x="72" y="304" font-size="40" font-style="italic" fill="#C75D3A">verified.</text>
+  <path d="M74 316 q 80 9 184 1" fill="none" stroke="#C75D3A" stroke-width="2.4" stroke-linecap="round" opacity="0.85"/>
+
+  <text class="serif" x="74" y="356" font-size="19" fill="#4A4636">Routes every prompt to the cheapest model that can reliably</text>
+  <text class="serif" x="74" y="384" font-size="19" fill="#4A4636">answer — then verifies the output. Runs local. Your keys.</text>
+
+  <text class="serif" x="92" y="420" font-size="17" font-style="italic" fill="#B06A4B">built to route what matters.</text>
+  <use href="#spark" x="0" y="0" transform="translate(78 414) scale(0.34)" stroke="#C75D3A" stroke-width="2.6"/>
+
+  <!-- ============ RIGHT: VERIFICATION RECEIPT ============ -->
+  <g filter="url(#soft)">
+    <rect x="722" y="60" width="486" height="320" rx="16" fill="#FBFAF5" stroke="#E3DACA" stroke-width="1.5"/>
+  </g>
+
+  <text class="lbl sans" x="748" y="100" font-size="11.5" fill="#8A8270">VERIFICATION RECEIPT</text>
+  <circle cx="1178" cy="95" r="15" fill="none" stroke="#1E2A44" stroke-width="1.4"/>
+  <use href="#cstar" x="0" y="0" transform="translate(1178 95) scale(0.42)" fill="#1E2A44"/>
+  <line x1="748" y1="118" x2="1182" y2="118" stroke="#E3DACA" stroke-width="1.4" stroke-dasharray="2 5"/>
+
+  <!-- routing path connector -->
+  <line x1="764" y1="150" x2="764" y2="288" stroke="#C9C0AE" stroke-width="1.6" stroke-dasharray="1 6" stroke-linecap="round"/>
+
+  <!-- row 1 -->
+  <circle cx="764" cy="150" r="6" fill="#FBFAF5" stroke="#1E2A44" stroke-width="1.6"/>
+  <text class="serif" x="788" y="155" font-size="17" fill="#1E2A44">gemini-flash</text>
+  <text class="sans" x="900" y="155" font-size="12" fill="#9A927F">simple</text>
+  <text class="mono" x="1182" y="155" font-size="14.5" fill="#6B6456" text-anchor="end">$0.0002</text>
+
+  <!-- row 2 -->
+  <circle cx="764" cy="196" r="6" fill="#FBFAF5" stroke="#1E2A44" stroke-width="1.6"/>
+  <text class="serif" x="788" y="201" font-size="17" fill="#1E2A44">haiku-4.5</text>
+  <text class="sans" x="900" y="201" font-size="12" fill="#9A927F">mid</text>
+  <text class="mono" x="1182" y="201" font-size="14.5" fill="#6B6456" text-anchor="end">$0.02</text>
+
+  <!-- row 3 — chosen / verified -->
+  <rect x="742" y="224" width="448" height="36" rx="10" fill="#F6E6DC"/>
+  <circle cx="764" cy="242" r="7" fill="#C75D3A" stroke="#C75D3A" stroke-width="1.6"/>
+  <path d="M760.5 242 l2.6 2.8 l5-6" fill="none" stroke="#FBFAF5" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
+  <text class="serif" x="788" y="247" font-size="17" fill="#1E2A44" font-weight="700">sonnet-4.6</text>
+  <text class="lbl sans" x="900" y="246" font-size="10.5" fill="#C75D3A">VERIFIED ✓</text>
+  <text class="mono" x="1182" y="247" font-size="14.5" fill="#1E2A44" text-anchor="end" font-weight="700">$0.06</text>
+
+  <!-- row 4 — skipped -->
+  <g opacity="0.5">
+    <circle cx="764" cy="288" r="6" fill="#FBFAF5" stroke="#1E2A44" stroke-width="1.6"/>
+    <text class="serif" x="788" y="293" font-size="17" fill="#1E2A44">opus-4.6</text>
+    <text class="sans" x="900" y="293" font-size="12" fill="#9A927F">not needed</text>
+    <text class="mono" x="1182" y="293" font-size="14.5" fill="#6B6456" text-anchor="end">$0.60</text>
+  </g>
+  <text class="serif" x="1006" y="312" font-size="13" font-style="italic" fill="#B06A4B">escalate only if needed</text>
+
+  <!-- footer -->
+  <line x1="748" y1="330" x2="1182" y2="330" stroke="#E3DACA" stroke-width="1.4"/>
+  <text class="mono" x="748" y="356" font-size="12.5" fill="#6B6456">QUALITY 98%</text>
+  <text class="mono" x="868" y="356" font-size="12.5" fill="#9A927F">·</text>
+  <text class="mono" x="884" y="356" font-size="12.5" fill="#6B6456">COST −60%</text>
+  <text class="mono" x="1000" y="356" font-size="12.5" fill="#9A927F">·</text>
+  <text class="mono" x="1016" y="356" font-size="12.5" fill="#6B6456">OVERHEAD ~10ms</text>
+</svg>

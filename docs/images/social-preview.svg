@@ -1,41 +1,47 @@
-<svg width="1280" height="640" xmlns="http://www.w3.org/2000/svg">
-  <!-- Background gradient -->
+<svg width="1280" height="640" viewBox="0 0 1280 640" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="NadirClaw — the lowest viable model, verified.">
+  <title>NadirClaw — the lowest viable model, verified.</title>
   <defs>
-    <linearGradient id="bgGradient" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" style="stop-color:#0f172a;stop-opacity:1" />
-      <stop offset="100%" style="stop-color:#1e293b;stop-opacity:1" />
-    </linearGradient>
-    <linearGradient id="textGradient" x1="0%" y1="0%" x2="100%" y2="0%">
-      <stop offset="0%" style="stop-color:#10b981;stop-opacity:1" />
-      <stop offset="100%" style="stop-color:#22d3ee;stop-opacity:1" />
-    </linearGradient>
+    <style>
+      .serif { font-family: Georgia, 'Iowan Old Style', 'Palatino Linotype', 'Times New Roman', serif; }
+      .sans  { font-family: 'Helvetica Neue', 'Segoe UI', Arial, sans-serif; }
+      .mono  { font-family: 'SF Mono', 'JetBrains Mono', Menlo, 'DejaVu Sans Mono', monospace; }
+      .lbl   { font-family: 'Helvetica Neue', 'Segoe UI', Arial, sans-serif; letter-spacing: .22em; }
+    </style>
+    <g id="s7">
+      <line x1="0" y1="-13" x2="0" y2="13"/><line x1="-13" y1="0" x2="13" y2="0"/>
+      <line x1="-7.5" y1="-7.5" x2="7.5" y2="7.5"/><line x1="-7.5" y1="7.5" x2="7.5" y2="-7.5"/>
+    </g>
+    <path id="cstar7" d="M0,-15 L3.4,-3.4 L15,0 L3.4,3.4 L0,15 L-3.4,3.4 L-15,0 L-3.4,-3.4 Z"/>
   </defs>
-  
-  <!-- Background -->
-  <rect width="1280" height="640" fill="url(#bgGradient)"/>
-  
-  <!-- Badge (top left) -->
-  <rect x="60" y="50" width="300" height="50" rx="8" fill="#1e293b" stroke="#334155" stroke-width="2"/>
-  <text x="210" y="82" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="20" fill="#94a3b8" text-anchor="middle">Open Source • MIT License</text>
-  
-  <!-- Logo emoji -->
-  <text x="640" y="200" font-family="Arial, sans-serif" font-size="120" text-anchor="middle">🪝</text>
-  
-  <!-- Title -->
-  <text x="640" y="300" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="84" font-weight="700" fill="#ffffff" text-anchor="middle">NadirClaw</text>
-  
-  <!-- Subtitle -->
-  <text x="640" y="350" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="36" fill="#94a3b8" text-anchor="middle">LLM Router for Cost Optimization</text>
-  
-  <!-- Tagline -->
-  <text x="640" y="420" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="42" font-weight="600" fill="url(#textGradient)" text-anchor="middle">Save 60% on API costs without sacrificing quality</text>
-  
-  <!-- Stats - Stat 1 -->
-  <text x="750" y="580" font-family="Arial, sans-serif" font-size="24">⚡</text>
-  <text x="790" y="580" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="24" font-weight="600" fill="#e2e8f0">&lt;10ms</text>
-  <text x="870" y="580" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="24" fill="#64748b">overhead</text>
-  
-  <!-- Stats - Stat 2 -->
-  <text x="1000" y="580" font-family="Arial, sans-serif" font-size="24">🔐</text>
-  <text x="1040" y="580" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="24" font-weight="600" fill="#e2e8f0">Self-hosted</text>
+
+  <rect width="1280" height="640" fill="#F4F1EA"/>
+  <!-- faint compass rings, top-right -->
+  <circle cx="1180" cy="120" r="220" fill="none" stroke="#E7DECE" stroke-width="1.5"/>
+  <circle cx="1180" cy="120" r="150" fill="none" stroke="#E7DECE" stroke-width="1.5"/>
+  <use href="#s7" transform="translate(150 470) scale(0.5)" stroke="#E0B7A3" stroke-width="2"/>
+  <use href="#s7" transform="translate(1110 520) scale(0.42)" stroke="#C9C0AE" stroke-width="2"/>
+
+  <!-- verifier seal -->
+  <g>
+    <circle cx="160" cy="150" r="56" fill="none" stroke="#1E2A44" stroke-width="2"/>
+    <circle cx="160" cy="150" r="46" fill="none" stroke="#E0BCA9" stroke-width="1.4"/>
+    <use href="#cstar7" transform="translate(160 138) scale(1.05)" fill="#C75D3A"/>
+    <text class="lbl sans" x="160" y="178" font-size="10" fill="#1E2A44" text-anchor="middle">VERIFIED</text>
+  </g>
+
+  <use href="#s7" transform="translate(252 122) scale(0.5)" stroke="#C75D3A" stroke-width="2.4"/>
+  <text class="lbl sans" x="276" y="128" font-size="15" fill="#1E2A44">OPEN-SOURCE LLM ROUTER · SELF-HOSTED</text>
+
+  <text class="serif" x="92" y="320" font-size="148" fill="#1E2A44" letter-spacing="-2">nadirclaw</text>
+  <use href="#s7" transform="translate(872 232) scale(0.95)" stroke="#C75D3A" stroke-width="2.6"/>
+
+  <text class="serif" x="96" y="408" font-size="52" fill="#1E2A44">The lowest viable model, <tspan font-style="italic" fill="#C75D3A">verified.</tspan></text>
+  <path d="M730 420 q 70 9 158 1" fill="none" stroke="#C75D3A" stroke-width="3" stroke-linecap="round" opacity="0.85"/>
+
+  <text class="serif" x="96" y="466" font-size="27" fill="#4A4636">Routes every prompt to the cheapest model that can answer — then verifies it.</text>
+
+  <!-- footer strip -->
+  <line x1="96" y1="540" x2="1184" y2="540" stroke="#E3DACA" stroke-width="1.5"/>
+  <text class="mono" x="96" y="582" font-size="22" fill="#1E2A44">getnadir.com</text>
+  <text class="serif" x="1184" y="582" font-size="22" font-style="italic" fill="#B06A4B" text-anchor="end">−60% cost · 98% quality preserved · ~10ms</text>
 </svg>
