@@ -139,7 +139,7 @@ NadirClaw is the free, open-source core. If you are routing production traffic o
 
 |  | NadirClaw (Free, OSS) | [Nadir Pro](https://getnadir.com) (Hosted) |
 |---|---|---|
-| **License** | MIT | Proprietary |
+| **License** | PolyForm Noncommercial 1.0.0 (free for noncommercial use; commercial license via [getnadir.com](https://getnadir.com)) | Proprietary |
 | **Deploy** | Self-hosted, localhost | `api.getnadir.com` or self-host via Docker |
 | **Pre-generation classifier** | Binary centroid (~10ms), opt-in DistilBERT, or **bundled** `wide_deep_asym_v3` trained checkpoint (~40ms CPU; see [`MODEL_CARD.md`](MODEL_CARD.md)) | Same trained classifier + closed-loop retraining, provider-health-aware ranking |
 | **Post-generation verifier** | Rule-based heuristic (refusal / length / JSON checks, ~1ms) | Trained DeBERTa-v3-small cross-encoder, AUROC 0.96 on RouterBench held-out |
@@ -457,10 +457,11 @@ cross-encoder verifier.
 
 This is the frozen DeBERTa-v3-small snapshot used in the
 [RouterArena PR #112](https://github.com/RouteWorks/RouterArena/pull/112)
-submission (arena_F 0.7358). It is released under MIT as
+submission (arena_F 0.7358). It is released under the PolyForm
+Noncommercial License 1.0.0 as
 [`nadirclaw/cascade-verifier-v1`](https://huggingface.co/nadirclaw/cascade-verifier-v1)
 on HuggingFace so the RouterArena number is reproducible end-to-end
-with the open-source router.
+with the noncommercial router.
 
 **Install with the optional extras:**
 
@@ -498,7 +499,7 @@ print(result.score, result.accepted)
 
 | | OSS (NadirClaw v0.19) | Pro (Nadir hosted) |
 | --- | --- | --- |
-| Frozen verifier weights | YES (`cascade-verifier-v1`, MIT) | YES |
+| Frozen verifier weights | YES (`cascade-verifier-v1`, PolyForm Noncommercial 1.0.0) | YES |
 | Training pipeline | NO | YES (corpus + judge + curriculum) |
 | Adaptive retraining loop | NO | YES |
 | Custom-routed quality scoring | NO | YES |
@@ -1568,4 +1569,11 @@ nadirclaw/
 
 ## License
 
-MIT
+[PolyForm Noncommercial License 1.0.0](LICENSE) — free to use, modify, and
+distribute for any **noncommercial** purpose (personal projects, research,
+education, evaluation, and noncommercial organizations).
+
+**Commercial use requires a separate license.** If you want to use NadirClaw
+in or for a for-profit business, or to build or operate a paid product or
+service, get a commercial license via [getnadir.com](https://getnadir.com)
+or contact nadir@nadirclaw.com.

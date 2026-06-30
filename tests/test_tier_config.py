@@ -1,4 +1,4 @@
-"""Unit tests for the N-tier YAML configuration (NadirClaw free / MIT).
+"""Unit tests for the N-tier YAML configuration (NadirClaw free / PolyForm Noncommercial).
 
 Covers:
   - n2_default + n3_legacy bundled profiles load and validate

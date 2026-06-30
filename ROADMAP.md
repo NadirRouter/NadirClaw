@@ -99,4 +99,4 @@ To propose a new integration or feature, open a [GitHub Discussion] first.
 
 ---
 
-_Licensed under the [MIT License](LICENSE)._
+_Licensed under the [PolyForm Noncommercial License 1.0.0](LICENSE) — free for noncommercial use; commercial license via [getnadir.com](https://getnadir.com)._

@@ -1,10 +1,10 @@
-"""Trained DeBERTa-v3-small cross-encoder verifier (MIT-licensed snapshot).
+"""Trained DeBERTa-v3-small cross-encoder verifier (PolyForm Noncommercial snapshot).
 
 This is the frozen snapshot used in the Nadir RouterArena submission
 (PR #112, arena_F 0.7358). It is the same DeBERTa-v3-small cross-encoder
-that powers the Nadir Pro hosted service, released here under MIT so
-that the RouterArena result is reproducible end-to-end with the
-open-source NadirClaw router.
+that powers the Nadir Pro hosted service, released here under the
+PolyForm Noncommercial License 1.0.0 so that the RouterArena result is
+reproducible end-to-end with the noncommercial NadirClaw router.
 
 What's released
 ---------------

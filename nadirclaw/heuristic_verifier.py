@@ -1,6 +1,6 @@
 """Heuristic post-hoc response verifier for NadirClaw.
 
-This is the free / MIT-licensed companion to the verifier-gated cascade
+This is the free / PolyForm-Noncommercial-licensed companion to the verifier-gated cascade
 architecture. It scores whether a cheap model's response is "good enough"
 relative to a prompt, using rule-based checks only -- no ML weights, no
 external dependencies, no network calls. Latency is < 1 ms per call.

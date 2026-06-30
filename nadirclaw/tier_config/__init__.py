@@ -1,4 +1,4 @@
-"""N-tier YAML tier configuration for NadirClaw (free / MIT).
+"""N-tier YAML tier configuration for NadirClaw (free / PolyForm Noncommercial).
 
 The tier_config package owns the "how many tiers, with which cutoffs,
 mapped to which model pools" decision. It is the open-source half of

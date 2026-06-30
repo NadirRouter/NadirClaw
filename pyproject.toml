@@ -8,7 +8,7 @@ dynamic = ["version"]
 description = "Open-source LLM router — simple prompts to free models, complex to premium"
 readme = "README.md"
 requires-python = ">=3.10"
-license = "MIT"
+license = "PolyForm-Noncommercial-1.0.0"
 authors = [{name = "Nadir", email = "nadir@nadirclaw.com"}]
 keywords = ["llm", "router", "ai", "openai", "gemini", "anthropic", "cost-optimization", "model-routing"]
 classifiers = [

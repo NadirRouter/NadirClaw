@@ -12,8 +12,10 @@ them**, and the cascade rule engine (see `nadirclaw/cascade.py`,
 checkpoint (and its symmetric-loss companion `wide_deep_sym_v3.pt`,
 ~900 KB each) lives under `nadirclaw/models/` and is loaded
 automatically by `nadirclaw.wide_deep_classifier.get_wide_deep_classifier()`.
-The weights and code are MIT-licensed alongside the rest of the
-package. [Nadir Pro](https://getnadir.com) layers a hosted dashboard,
+The weights and code are released under the PolyForm Noncommercial
+License 1.0.0 alongside the rest of the package — free for noncommercial
+use; commercial use requires a license via [getnadir.com](https://getnadir.com).
+[Nadir Pro](https://getnadir.com) layers a hosted dashboard,
 team billing, the trained DeBERTa-v3-small cascade verifier, and
 closed-loop retraining over the same classifier.
 

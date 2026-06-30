@@ -76,4 +76,4 @@ If you're modifying OAuth flows or credential storage:
 
 ## License
 
-By contributing, you agree that your contributions will be licensed under the MIT License.
+By contributing, you agree that your contributions will be licensed under the [PolyForm Noncommercial License 1.0.0](LICENSE), the same license as the project. You also grant Nadir a perpetual, irrevocable right to license your contributions under separate commercial terms, so that NadirClaw can continue to be offered both as free noncommercial software and as a commercially licensed product.

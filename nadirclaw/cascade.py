@@ -1,4 +1,4 @@
-"""Verifier-gated cascade dispatch for NadirClaw (free / MIT).
+"""Verifier-gated cascade dispatch for NadirClaw (free / PolyForm Noncommercial).
 
 Mirrors the architecture of `nadir.cascade_router` from Nadir Pro, but
 uses the rule-based `HeuristicVerifier` instead of the proprietary

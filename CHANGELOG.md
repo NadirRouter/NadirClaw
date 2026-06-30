@@ -4,6 +4,9 @@ All notable changes to NadirClaw will be documented in this file.
 
 ## [Unreleased]
 
+### Changed
+- **License changed from MIT to the PolyForm Noncommercial License 1.0.0.** NadirClaw is now free for any noncommercial use (personal, research, education, evaluation, and noncommercial organizations). Commercial use requires a separate commercial license, available via [getnadir.com](https://getnadir.com). This applies to new versions; releases previously published under MIT remain available under MIT. The bundled `wide_deep_asym_v3` classifier weights and the `cascade-verifier-v1` snapshot are now released under the same noncommercial terms.
+
 ## [0.21.1] - 2026-06-25
 
 ### Added

@@ -1,4 +1,4 @@
-"""Unit tests for the cascade rule engine (NadirClaw free / MIT).
+"""Unit tests for the cascade rule engine (NadirClaw free / PolyForm Noncommercial).
 
 Tests exercise:
   - YAML loading + parsing of every condition type and action type

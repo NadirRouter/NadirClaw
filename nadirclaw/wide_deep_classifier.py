@@ -1,4 +1,4 @@
-"""Wide-and-Deep asymmetric pre-generation classifier (NadirClaw, MIT).
+"""Wide-and-Deep asymmetric pre-generation classifier (NadirClaw, PolyForm Noncommercial).
 
 This is the open-source counterpart to the Wide&Deep analyzer that
 powers Nadir's production routing. The trained weights (~900 KB,
