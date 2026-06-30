@@ -600,6 +600,10 @@ NADIRCLAW_COMPLEX_MODEL=claude-sonnet-4-5-20250929 \
 nadirclaw serve
 ```
 
+For a fully worked example — env vars plus a `models.local.json` pricing
+override for a hosted third-party gateway — see
+[Routing NadirClaw at a custom OpenAI-compatible gateway](docs/providers/starveri.md).
+
 ## Usage with OpenClaw
 
 [OpenClaw](https://openclaw.dev) is a personal AI assistant that bridges messaging services to AI coding agents. NadirClaw integrates as a model provider so OpenClaw's requests are automatically routed to the right model.
