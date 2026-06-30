@@ -553,5 +553,25 @@ class Settings:
             return Path(val).expanduser()
         return None
 
+    @property
+    def CLASSIFIER_STRIP_PATTERNS(self) -> str:
+        """Regex patterns to strip from user prompts *before* classification.
+
+        Agent frameworks often wrap the human's actual prompt in a structured
+        envelope (metadata, memory context, system notes, etc.) that does not
+        reflect the complexity of the request.  Stripping these blocks lets
+        the classifier see the user's actual intent.
+
+        Set this to a regex using Python's ``re`` syntax; ``re.DOTALL`` is
+        applied internally.  Example for typical envelope patterns::
+
+            <envelope>.*?(?:</envelope>|\\Z)|\\[system note:.*?\\]
+
+        Default: empty string = no stripping.
+        """
+        return os.getenv("NADIRCLAW_CLASSIFIER_STRIP_PATTERNS", "")
+
+
+
 
 settings = Settings()
