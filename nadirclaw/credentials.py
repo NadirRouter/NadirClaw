@@ -25,6 +25,7 @@ _ENV_VAR_MAP = {
     "google": "GOOGLE_API_KEY",
     "cohere": "COHERE_API_KEY",
     "mistral": "MISTRAL_API_KEY",
+    "minimax": "MINIMAX_API_KEY",
 }
 
 # Alternative env vars checked as fallback (order matters)
@@ -49,6 +50,7 @@ _MODEL_PROVIDER_PATTERNS = {
     "ollama/": "ollama",
     "cohere/": "cohere",
     "mistral/": "mistral",
+    "minimax/": "minimax",
     "together_ai/": "together_ai",
     "replicate/": "replicate",
 }

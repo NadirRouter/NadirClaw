@@ -43,6 +43,7 @@ def tmp_credentials(tmp_path, monkeypatch):
     for var in (
         "ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GOOGLE_API_KEY",
         "GEMINI_API_KEY", "COHERE_API_KEY", "MISTRAL_API_KEY",
+        "MINIMAX_API_KEY",
     ):
         monkeypatch.delenv(var, raising=False)
     return creds_file
@@ -133,6 +134,11 @@ class TestEnvFallback:
         monkeypatch.setenv("GEMINI_API_KEY", "AIza-gemini")
         assert get_credential("google") == "AIza-gemini"
 
+    def test_minimax_env(self, monkeypatch):
+        monkeypatch.setenv("MINIMAX_API_KEY", "mm-from-env")
+        assert get_credential("minimax") == "mm-from-env"
+        assert get_credential_source("minimax") == "env"
+
 
 # ---------------------------------------------------------------------------
 # Provider detection
@@ -149,6 +155,7 @@ class TestDetectProvider:
         ("gemini/gemini-3-flash", "google"),
         ("ollama/llama3", "ollama"),
         ("openai-codex/gpt-5.3-codex", "openai-codex"),
+        ("minimax/MiniMax-M3", "minimax"),
         ("unknown-model", None),
     ])
     def test_detect_provider(self, model, expected):
