@@ -101,6 +101,10 @@ class TestResolveAlias:
         assert resolve_alias("deepseek-v4-pro") == "deepseek/deepseek-v4-pro"
         assert resolve_alias("deepseek-r1") == "deepseek/deepseek-reasoner"
 
+    def test_minimax(self):
+        assert resolve_alias("minimax") == "minimax/MiniMax-M3"
+        assert resolve_alias("minimax-m3") == "minimax/MiniMax-M3"
+
 
 # ---------------------------------------------------------------------------
 # detect_agentic
@@ -455,6 +459,10 @@ class TestEstimateCost:
         cost = estimate_cost("deepseek/deepseek-v4-pro", 1_000_000, 1_000_000)
         assert cost == pytest.approx(5.22)
 
+    def test_minimax_m3_cost(self):
+        cost = estimate_cost("minimax/MiniMax-M3", 1_000_000, 1_000_000)
+        assert cost == pytest.approx(3.0)
+
     def test_unknown_model(self):
         assert estimate_cost("unknown-xyz", 1000, 500) is None
 
@@ -690,6 +698,7 @@ class TestHasVision:
         assert has_vision("gpt-4o") is True
         assert has_vision("claude-sonnet-4-5-20250929") is True
         assert has_vision("gemini-2.5-pro") is True
+        assert has_vision("minimax/MiniMax-M3") is True
 
     def test_non_vision_models(self):
         assert has_vision("deepseek/deepseek-chat") is False
