@@ -1,6 +1,6 @@
 # Third-Party Notices
 
-NadirClaw is MIT-licensed. It can optionally use the following third-party
+NadirClaw is licensed under the PolyForm Noncommercial License 1.0.0. It can optionally use the following third-party
 components, declared as opt-in extras. Their licenses and attributions are
 reproduced here.
 
