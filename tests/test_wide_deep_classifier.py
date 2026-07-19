@@ -35,15 +35,17 @@ from nadirclaw.wide_deep_classifier import (  # noqa: E402  (after importorskip)
 def test_bundled_paths_exist():
     """Both checkpoints must be present on disk after a normal install."""
     paths = bundled_model_paths()
-    assert set(paths) == {"asym", "symmetric"}
+    assert set(paths) == {"asym", "symmetric", "v3", "gate"}
     for variant, path in paths.items():
         assert os.path.exists(path), (
             f"Bundled {variant!r} checkpoint missing at {path}. "
             f"Check pyproject.toml [tool.setuptools.package-data]."
         )
-        # Sanity check: each shipped checkpoint is roughly 900 KB.
+        # Sanity check: the W&D checkpoints are ~900 KB; the gate is a small
+        # logistic (~12 KB).
         size = os.path.getsize(path)
-        assert 100_000 < size < 5_000_000, (
+        lo = 1_000 if variant == "gate" else 100_000
+        assert lo < size < 5_000_000, (
             f"Checkpoint {variant!r} at {path} has suspicious size: {size} bytes"
         )
 
@@ -151,3 +153,69 @@ def test_invalid_args():
 def test_missing_checkpoint_path():
     with pytest.raises(FileNotFoundError):
         WideDeepClassifier(model_path="/nonexistent/no_such_checkpoint.pt")
+
+
+# ---------------------------------------------------------------------------
+# v3+gate — the 0.22 default: v3 head + Neyman-Pearson complex gate + head
+# medium/simple split at τ=0.12. Gate is ON by default for the v3 variant.
+# ---------------------------------------------------------------------------
+def test_default_variant_is_v3_with_gate(monkeypatch):
+    """The shipped default is v3 with the complex gate enabled at τ=0.12."""
+    monkeypatch.delenv("NADIR_COMPLEX_GATE", raising=False)
+    monkeypatch.delenv("NADIR_GATE_THRESHOLD", raising=False)
+    monkeypatch.delenv("NADIR_MS_SPLIT", raising=False)
+    clf = WideDeepClassifier()  # no args → v3
+    assert clf.checkpoint_variant == "v3"
+    assert clf._gate is not None
+    assert clf._ms_split == "head"
+    assert abs(clf._gate["threshold"] - 0.12) < 1e-9
+
+
+def test_v3gate_routes_trivial_to_simple(monkeypatch):
+    """The v3 head keeps a real P(simple), so a greeting routes to simple —
+    the whole point of v3+gate over the asym checkpoint (which can't)."""
+    monkeypatch.delenv("NADIR_COMPLEX_GATE", raising=False)
+    clf = WideDeepClassifier(checkpoint_variant="v3")
+    r = clf.classify("hi")
+    assert r.tier == "simple"
+    assert r.decision_rule == "complex_gate"
+
+
+def test_v3gate_routes_hard_prompt_to_complex(monkeypatch):
+    monkeypatch.delenv("NADIR_COMPLEX_GATE", raising=False)
+    clf = WideDeepClassifier(checkpoint_variant="v3")
+    r = clf.classify(
+        "Design a horizontally-scalable, exactly-once payment ledger across "
+        "three regions; discuss consensus, clock skew, and idempotency in depth."
+    )
+    assert r.tier == "complex"
+
+
+def test_gate_can_be_disabled(monkeypatch):
+    """NADIR_COMPLEX_GATE=0 falls back to the plain 3-class decode."""
+    monkeypatch.setenv("NADIR_COMPLEX_GATE", "0")
+    clf = WideDeepClassifier(checkpoint_variant="v3")
+    assert clf._gate is None
+    r = clf.classify("hi")
+    assert r.decision_rule == "argmax"
+
+
+def test_gate_off_by_default_for_asym(monkeypatch):
+    """asym/symmetric keep their legacy argmax behaviour (gate off by default)."""
+    monkeypatch.delenv("NADIR_COMPLEX_GATE", raising=False)
+    clf = WideDeepClassifier(checkpoint_variant="asym")
+    assert clf._gate is None
+
+
+def test_ms_split_companion_rollback(monkeypatch):
+    monkeypatch.delenv("NADIR_COMPLEX_GATE", raising=False)
+    monkeypatch.setenv("NADIR_MS_SPLIT", "companion")
+    clf = WideDeepClassifier(checkpoint_variant="v3")
+    assert clf._ms_split == "companion"
+    assert clf._gate is not None
+
+
+def test_gate_threshold_override(monkeypatch):
+    monkeypatch.setenv("NADIR_GATE_THRESHOLD", "0.30")
+    clf = WideDeepClassifier(checkpoint_variant="v3")
+    assert abs(clf._gate["threshold"] - 0.30) < 1e-9
