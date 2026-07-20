@@ -65,6 +65,11 @@ _PKG_DIR = os.path.dirname(os.path.abspath(__file__))
 _MODELS_DIR = os.path.join(_PKG_DIR, "models")
 _MODEL_PATH_ASYM = os.path.join(_MODELS_DIR, "wide_deep_asym_v3.pt")
 _MODEL_PATH_SYM = os.path.join(_MODELS_DIR, "wide_deep_sym_v3.pt")
+# v3 = the clean retrain (the 0.22 default). Unlike asym (which suppresses the
+# simple class) it keeps a real P(simple), so it can drive the below-gate split.
+_MODEL_PATH_V3 = os.path.join(_MODELS_DIR, "wide_deep_v3.pt")
+# Neyman-Pearson complex gate + medium/simple companion (shipped default: v1).
+_GATE_PATH = os.getenv("NADIR_GATE_PATH", os.path.join(_MODELS_DIR, "complex_gate_v1.pt"))
 
 _TIER_MAP: Dict[int, str] = {0: "simple", 1: "medium", 2: "complex"}
 _TIER_NUM: Dict[str, int] = {"simple": 1, "medium": 2, "complex": 3}
@@ -226,11 +231,12 @@ class WideDeepClassifier:
     Parameters
     ----------
     checkpoint_variant
-        ``"asym"`` (default, matches MODEL_CARD numbers) or ``"symmetric"``
-        (recovers correct simple-class behaviour under argmax decoding).
+        ``"v3"`` (default since 0.22 — the clean retrain, driven by the
+        complex gate + head medium/simple split, aka "v3+gate"), ``"asym"``
+        (the original, suppresses the simple class), or ``"symmetric"``.
     decision_rule
-        ``"argmax"`` or ``"cost_sensitive"``. Pair the ``asym`` checkpoint
-        with ``cost_sensitive`` for production-style behaviour.
+        ``"argmax"`` or ``"cost_sensitive"``. Ignored when the complex gate
+        is active (the gate replaces the 3-class decode).
     cost_lambda
         Downgrade penalty multiplier for cost-sensitive decoding. 3 is
         balanced; 20 is max-safe.
@@ -243,7 +249,7 @@ class WideDeepClassifier:
 
     def __init__(
         self,
-        checkpoint_variant: str = "asym",
+        checkpoint_variant: str = "v3",
         decision_rule: str = "argmax",
         cost_lambda: float = 3.0,
         model_path: Optional[str] = None,
@@ -251,9 +257,9 @@ class WideDeepClassifier:
         import torch
         import numpy as np
 
-        if checkpoint_variant not in ("asym", "symmetric"):
+        if checkpoint_variant not in ("asym", "symmetric", "v3"):
             raise ValueError(
-                f"checkpoint_variant must be 'asym' or 'symmetric', got {checkpoint_variant!r}"
+                f"checkpoint_variant must be 'asym', 'symmetric' or 'v3', got {checkpoint_variant!r}"
             )
         if decision_rule not in ("argmax", "cost_sensitive"):
             raise ValueError(
@@ -268,6 +274,8 @@ class WideDeepClassifier:
 
         if model_path is not None:
             path = model_path
+        elif checkpoint_variant == "v3":
+            path = _MODEL_PATH_V3
         elif checkpoint_variant == "symmetric":
             path = _MODEL_PATH_SYM
         else:
@@ -294,6 +302,37 @@ class WideDeepClassifier:
         self._encoder_name = ckpt.get("encoder", "BAAI/bge-base-en-v1.5")
         self.model_path = path
 
+        # ---- Neyman-Pearson complex gate ("v3+gate", the 0.22 default) -------
+        # The gate decides complex-vs-rest at high recall; the below-gate
+        # simple/medium split runs through the v3 head (NADIR_MS_SPLIT=head,
+        # default — more accurate than the companion LR) or the companion
+        # (NADIR_MS_SPLIT=companion). Threshold τ defaults to 0.12; the gate is
+        # ON by default for the v3 variant (disable with NADIR_COMPLEX_GATE=0)
+        # and OFF for asym/symmetric so their legacy argmax behaviour is intact.
+        self._ms_split = os.getenv("NADIR_MS_SPLIT", "head").lower()
+        if self._ms_split not in ("head", "companion"):
+            self._ms_split = "head"
+        self._gate = None
+        _gate_default = "1" if checkpoint_variant == "v3" else "0"
+        if os.getenv("NADIR_COMPLEX_GATE", _gate_default) == "1":
+            try:
+                g = torch.load(_GATE_PATH, map_location="cpu", weights_only=False)
+                thr = float(os.getenv("NADIR_GATE_THRESHOLD", "0.12"))
+                self._gate = {
+                    "coef": np.asarray(g["gate_coef"], dtype=np.float32).ravel(),
+                    "intercept": float(np.asarray(g["gate_intercept"]).ravel()[0]),
+                    "b_coef": np.asarray(g["below_coef"], dtype=np.float32).ravel(),
+                    "b_intercept": float(np.asarray(g["below_intercept"]).ravel()[0]),
+                    "threshold": thr,
+                    # medium/simple companion threshold (only used when ms_split=companion)
+                    "b_threshold": float(g.get("below_threshold", 0.5)),
+                }
+                logger.info("complex gate ENABLED (threshold %.4f, ms_split=%s)",
+                            thr, self._ms_split)
+            except Exception as e:  # pragma: no cover — fall back to plain decode
+                logger.error("complex gate requested but failed to load (%s); "
+                             "continuing WITHOUT the gate", e)
+
         logger.info(
             "WideDeepClassifier loaded (variant=%s, encoder=%s, struct_dim=%d, "
             "trained_lambda=%.1f, rule=%s, lambda=%.1f)",
@@ -310,7 +349,7 @@ class WideDeepClassifier:
     # ------------------------------------------------------------------
     def _predict_proba(
         self, prompt: str, system_prompt: str = ""
-    ) -> Tuple["np.ndarray", int]:  # type: ignore[name-defined]
+    ) -> Tuple["np.ndarray", int, "np.ndarray"]:  # type: ignore[name-defined]
         import numpy as np
         import torch
 
@@ -343,6 +382,11 @@ class WideDeepClassifier:
         struct_s = (struct_vec - self._struct_mean) / self._struct_scale
         struct_s = struct_s.reshape(1, -1)
 
+        # Gate features: [bge_normalized | struct RAW nan_to_num] (NOT scaled) —
+        # the complex gate was trained on the raw concat, not the model's scaled
+        # struct vector.
+        gate_x = np.concatenate([emb.ravel(), np.nan_to_num(struct_vec).ravel()])
+
         with torch.no_grad():
             logits = self._model(
                 torch.from_numpy(emb),
@@ -351,7 +395,7 @@ class WideDeepClassifier:
             probs = torch.softmax(logits, dim=1).cpu().numpy()[0]
 
         latency_ms = int((time.time() - t0) * 1000)
-        return probs, latency_ms
+        return probs, latency_ms, gate_x
 
     def classify(
         self, prompt: str, system_prompt: str = ""
@@ -359,15 +403,29 @@ class WideDeepClassifier:
         """Classify a single prompt; returns a :class:`ClassificationResult`."""
         import numpy as np
 
-        probs, latency_ms = self._predict_proba(prompt, system_prompt=system_prompt)
+        probs, latency_ms, gate_x = self._predict_proba(prompt, system_prompt=system_prompt)
 
-        if self.decision_rule == "cost_sensitive":
+        if self._gate is not None:
+            # Neyman-Pearson gate: keep-on-complex when P(complex) >= threshold;
+            # below the gate, the v3 head (default) or the companion LR splits
+            # medium vs simple. This REPLACES the 3-class decode.
+            z = float(gate_x @ self._gate["coef"] + self._gate["intercept"])
+            p_complex = 1.0 / (1.0 + np.exp(-z))
+            if p_complex >= self._gate["threshold"]:
+                pred_idx = 2
+            elif self._ms_split == "companion":
+                zb = float(gate_x @ self._gate["b_coef"] + self._gate["b_intercept"])
+                pred_idx = 1 if (1.0 / (1.0 + np.exp(-zb))) >= self._gate["b_threshold"] else 0
+            else:  # "head" (v3+gate default): v3 head splits medium vs simple
+                pred_idx = 1 if probs[1] >= probs[0] else 0
+        elif self.decision_rule == "cost_sensitive":
             # E[cost | j] = Σ_i P(i) * C[i, j] → argmin_j
             expected_cost = probs @ self._cost
             pred_idx = int(np.argmin(expected_cost))
         else:
             pred_idx = int(np.argmax(probs))
 
+        rule = "complex_gate" if self._gate is not None else self.decision_rule
         tier = _TIER_MAP[pred_idx]
         # Continuous-score adapter for the N-tier selector. Inlined
         # rather than imported to keep this module dependency-free at
@@ -386,7 +444,7 @@ class WideDeepClassifier:
                 "complex": float(probs[2]),
             },
             argmax_tier=_TIER_MAP[int(np.argmax(probs))],
-            decision_rule=self.decision_rule,
+            decision_rule=rule,
             cost_lambda=self.cost_lambda,
             latency_ms=latency_ms,
             classifier_version=self.ANALYZER_VERSION,
@@ -405,7 +463,7 @@ class WideDeepClassifier:
 # Public accessors
 # ---------------------------------------------------------------------------
 def get_wide_deep_classifier(
-    checkpoint_variant: str = "asym",
+    checkpoint_variant: str = "v3",
     decision_rule: str = "argmax",
     cost_lambda: float = 3.0,
     model_path: Optional[str] = None,
@@ -446,6 +504,8 @@ def bundled_model_paths() -> Dict[str, str]:
     return {
         "asym": _MODEL_PATH_ASYM,
         "symmetric": _MODEL_PATH_SYM,
+        "v3": _MODEL_PATH_V3,
+        "gate": _GATE_PATH,
     }
 
 

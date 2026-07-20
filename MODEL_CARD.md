@@ -8,10 +8,23 @@ NadirClaw, the open-source router in this repo, ships **the architecture
 description, the bundled trained weights, the heuristics on top of
 them**, and the cascade rule engine (see `nadirclaw/cascade.py`,
 `nadirclaw/cascade_rules/`, `nadirclaw/heuristic_verifier.py`,
-`nadirclaw/wide_deep_classifier.py`). The `wide_deep_asym_v3.pt`
-checkpoint (and its symmetric-loss companion `wide_deep_sym_v3.pt`,
-~900 KB each) lives under `nadirclaw/models/` and is loaded
-automatically by `nadirclaw.wide_deep_classifier.get_wide_deep_classifier()`.
+`nadirclaw/wide_deep_classifier.py`). Three ~900 KB checkpoints live under
+`nadirclaw/models/`: `wide_deep_v3.pt` (the clean retrain, **the default
+since 0.22**), `wide_deep_asym_v3.pt` (the original asym-loss head, which
+suppresses the simple class), and `wide_deep_sym_v3.pt` (symmetric-loss
+companion). They are loaded automatically by
+`nadirclaw.wide_deep_classifier.get_wide_deep_classifier()`.
+
+**v3+gate (default since 0.22).** The `v3` head runs under a Neyman-Pearson
+**complex gate**: a small logistic (`complex_gate_v1.pt`, ~12 KB) decides
+complex-vs-rest at high recall (threshold τ=0.12); below the gate, the v3
+head's own `P(simple)` vs `P(medium)` splits the rest (the head split — more
+accurate than the legacy companion logistic, which under-fills Medium). On a
+2,479-prompt RouterArena eval this misses 8.2% of truly-complex prompts while
+reducing cost ~41% vs always-premium. Disable with `NADIR_COMPLEX_GATE=0`;
+tune τ with `NADIR_GATE_THRESHOLD`; revert the split with
+`NADIR_MS_SPLIT=companion`. `asym`/`symmetric` keep their legacy argmax
+behaviour (gate off by default).
 The weights and code are released under the PolyForm Noncommercial
 License 1.0.0 alongside the rest of the package — free for noncommercial
 use; commercial use requires a license via [getnadir.com](https://getnadir.com).
@@ -20,10 +33,10 @@ team billing, the trained DeBERTa-v3-small cascade verifier, and
 closed-loop retraining over the same classifier.
 
 - **Router name**: `nadir`
-- **Classifier family**: wide-and-deep asymmetric (`wide_deep_asym`)
-- **Production artifact**: `wide_deep_asym_v3.pt` (bundled in NadirClaw + used in Nadir Pro)
-- **Companion artifact**: `wide_deep_sym_v3.pt` (symmetric-loss variant, fixes the asym head's simple-class collapse under argmax decoding)
-- **Card last updated**: 2026-05-27
+- **Classifier family**: wide-and-deep (`wide_deep`)
+- **Production artifact**: `wide_deep_v3.pt` + `complex_gate_v1.pt` (v3+gate, the default since 0.22; bundled in NadirClaw + deployed in Nadir Pro)
+- **Legacy artifacts**: `wide_deep_asym_v3.pt` (asym-loss, suppresses simple), `wide_deep_sym_v3.pt` (symmetric-loss companion) — both opt-in
+- **Card last updated**: 2026-07-19
 - **Schema version**: 1
 
 ---
