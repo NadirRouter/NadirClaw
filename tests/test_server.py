@@ -986,6 +986,166 @@ class TestParamReconcile:
         assert "message_start" in text
         assert "upstream_error" not in text  # the 400 never reached the client
 
+    # --- the cache only remembers fixes that happened ------------------------
+
+    def test_declined_fixer_is_not_cached(self):
+        """A fixer can match a 400 and still refuse; that must not be remembered."""
+        from nadirclaw.server import _reconcile_from_error, _MODEL_PARAM_FIXES
+        self._clear_cache()
+        # Nothing but a system turn — folding it would leave zero messages, which
+        # Anthropic rejects, so `_fold_system_messages` declines.
+        body = {"messages": [{"role": "system", "content": "only"}]}
+        assert _reconcile_from_error(body, "m", "role 'system' is not supported") == []
+        assert not _MODEL_PARAM_FIXES  # not "m needs a fold it never got"
+        self._clear_cache()
+
+    def test_reconcile_400_reports_the_clamp_separately(self):
+        """max_tokens has its own response header, so it is returned, not just logged."""
+        from nadirclaw.server import _reconcile_400
+        self._clear_cache()
+        body = {"max_tokens": 100000, "thinking": {"type": "adaptive"}}
+        fixes, clamped = _reconcile_400(
+            body, "m",
+            "max_tokens: 100000 > 64000, which is the maximum allowed. "
+            "Also, adaptive thinking is not supported on this model",
+        )
+        assert clamped is True
+        assert body["max_tokens"] == 64000
+        assert fixes == [
+            "max_tokens_clamp(64000)",
+            "thinking_downgrade(adaptive→enabled, budget=32000)",
+        ]
+
+        assert _reconcile_400({"max_tokens": 100}, "m", "unrelated") == ([], False)
+        self._clear_cache()
+
+    def test_no_fix_is_applied_on_the_final_attempt(self, client):
+        """A fix found on the last attempt would never be sent, so it is not recorded."""
+        from nadirclaw.server import _MAX_RECONCILE_ATTEMPTS
+        self._clear_cache()
+        logged = {}
+        # Four distinct fixable 400s — one more than the loop has retries for, so
+        # the fourth arrives on the final attempt and must be surfaced, not fixed.
+        httpx, _FakeClient, sent = self._fake_client([
+            "max_tokens: 100000 > 64000, which is the maximum allowed",
+            "adaptive thinking is not supported on this model",
+            "This model does not support the effort parameter.",
+            "role 'system' is not supported on this model",
+        ])
+        try:
+            with patch("nadirclaw.credentials.get_credential", return_value="sk-ant-oat01-test"), \
+                 patch("nadirclaw.server._log_request", side_effect=lambda e: logged.update(e)), \
+                 patch.object(httpx, "AsyncClient", _FakeClient):
+                resp = client.post("/v1/messages", json={
+                    "model": "nadir-eco", "max_tokens": 100000,
+                    "thinking": {"type": "adaptive"},
+                    "output_config": {"effort": "high"},
+                    "messages": [
+                        {"role": "system", "content": "sys"},
+                        {"role": "user", "content": "hi"},
+                    ],
+                })
+        finally:
+            self._clear_cache()
+
+        assert resp.status_code == 400  # the loop gave up and surfaced the error
+        assert len(sent) == _MAX_RECONCILE_ATTEMPTS
+        # Three fixes for four calls: the fold matched the last 400 but was never
+        # sent, so it is neither applied to the body nor claimed in the log.
+        assert logged["modifiers_applied"] == [
+            "max_tokens_clamp(64000)",
+            "thinking_downgrade(adaptive→enabled, budget=32000)",
+            "effort_drop(high)",
+        ]
+        assert sent[-1]["messages"][0]["role"] == "system"  # fold never happened
+
+
+class TestChatCompletionsParamReconcile:
+    """#83 — the same reconcile on the OpenAI-compatible path's Anthropic OAuth call."""
+
+    @staticmethod
+    def _clear_cache():
+        from nadirclaw.server import _MODEL_PARAM_FIXES
+        _MODEL_PARAM_FIXES.clear()
+
+    @staticmethod
+    def _fake_client(error_messages, sent):
+        class _Resp:
+            def __init__(self, message=None):
+                self.status_code = 400 if message else 200
+                self.text = (f'{{"type":"error","error":{{"message":"{message}"}}}}'
+                             if message else "{}")
+            def json(self):
+                return {"id": "msg_1", "model": "claude-haiku-4-5",
+                        "content": [{"type": "text", "text": "ok"}],
+                        "stop_reason": "end_turn",
+                        "usage": {"input_tokens": 3, "output_tokens": 2}}
+
+        remaining = list(error_messages)
+
+        class _FakeClient:
+            def __init__(self, *a, **kw): pass
+            async def __aenter__(self): return self
+            async def __aexit__(self, *a): return False
+            async def post(self, url, headers=None, json=None):
+                # Model included: an unrecognised 400 falls through to the fallback
+                # chain, so later calls can carry a different model entirely.
+                sent.append((json.get("model"), deepcopy(json.get("thinking"))))
+                return _Resp(remaining.pop(0) if remaining else None)
+
+        return _FakeClient
+
+    def test_thinking_400_is_reconciled_and_logged(self, client):
+        import httpx
+        self._clear_cache()
+        sent, logged = [], {}
+        _FakeClient = self._fake_client(
+            ["adaptive thinking is not supported on this model"], sent
+        )
+        try:
+            with patch("nadirclaw.credentials.get_credential", return_value="sk-ant-oat01-test"), \
+                 patch("nadirclaw.server._log_request", side_effect=lambda e: logged.update(e)), \
+                 patch.object(httpx, "AsyncClient", _FakeClient):
+                resp = client.post("/v1/chat/completions", json={
+                    "model": "claude-haiku-4-5", "max_tokens": 8192,
+                    "thinking": {"type": "adaptive"},
+                    "messages": [{"role": "user", "content": "reconcile probe"}],
+                })
+        finally:
+            self._clear_cache()
+
+        assert resp.status_code == 200
+        assert sent == [
+            ("claude-haiku-4-5", {"type": "adaptive"}),
+            ("claude-haiku-4-5", {"type": "enabled", "budget_tokens": 8191}),
+        ]
+        assert logged["modifiers_applied"] == [
+            "thinking_downgrade(adaptive→enabled, budget=8191)"
+        ]
+
+    def test_unknown_400_is_not_retried(self, client):
+        import httpx
+        self._clear_cache()
+        sent = []
+        _FakeClient = self._fake_client(["some unrelated bad request"], sent)
+        try:
+            with patch("nadirclaw.credentials.get_credential", return_value="sk-ant-oat01-test"), \
+                 patch.object(httpx, "AsyncClient", _FakeClient):
+                client.post("/v1/chat/completions", json={
+                    "model": "claude-haiku-4-5", "max_tokens": 8192,
+                    "thinking": {"type": "adaptive"},
+                    # A prompt no other test sends, so the response cache cannot
+                    # answer this one and hide the upstream call being counted.
+                    "messages": [{"role": "user", "content": "unknown 400 probe"}],
+                })
+        finally:
+            self._clear_cache()
+
+        # The routed model is called once and the error surfaces; anything after
+        # that is the existing fallback chain trying a different model, not a retry.
+        haiku_calls = [t for model, t in sent if model == "claude-haiku-4-5"]
+        assert haiku_calls == [{"type": "adaptive"}]
+
 
 class TestCountTokensEndpoint:
     """#72 — /v1/messages/count_tokens proxy."""

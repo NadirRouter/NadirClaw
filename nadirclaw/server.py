@@ -1071,17 +1071,29 @@ async def _call_litellm(
                     anthropic_body["tool_choice"] = req_extra["tool_choice"]
                 if req_extra.get("thinking"):
                     anthropic_body["thinking"] = req_extra["thinking"]
+                # Same bind as /v1/messages (#83): the client picked `thinking`
+                # from the router alias it can see, so the routed model may reject
+                # it. Reconcile against the 400 and retry, bounded. The system fold
+                # is already done above, so only the parameter fixers can fire here.
+                reconciled = _preapply_known_fixes(anthropic_body, model_id)
                 async with httpx.AsyncClient(timeout=120) as client:
-                    resp = await client.post(
-                        "https://api.anthropic.com/v1/messages",
-                        headers={
-                            "Authorization": f"Bearer {api_key}",
-                            "anthropic-version": "2023-06-01",
-                            "anthropic-beta": "oauth-2025-04-20,claude-code-20250219",
-                            "content-type": "application/json",
-                        },
-                        json=anthropic_body,
-                    )
+                    for attempt in range(_MAX_RECONCILE_ATTEMPTS):
+                        resp = await client.post(
+                            "https://api.anthropic.com/v1/messages",
+                            headers={
+                                "Authorization": f"Bearer {api_key}",
+                                "anthropic-version": "2023-06-01",
+                                "anthropic-beta": "oauth-2025-04-20,claude-code-20250219",
+                                "content-type": "application/json",
+                            },
+                            json=anthropic_body,
+                        )
+                        if resp.status_code != 400 or attempt == _MAX_RECONCILE_ATTEMPTS - 1:
+                            break
+                        fixes, _clamped = _reconcile_400(anthropic_body, model_id, resp.text)
+                        if not fixes:
+                            break  # nothing we know how to fix — surface the error
+                        reconciled += fixes
                 if resp.status_code != 200:
                     error_detail = resp.text
                     logger.error("Anthropic OAuth call failed (%s): %s", resp.status_code, error_detail)
@@ -1123,6 +1135,8 @@ async def _call_litellm(
                 }
                 if thinking_content:
                     result["thinking"] = thinking_content
+                if reconciled:
+                    result["modifiers_applied"] = reconciled
                 return result
             else:
                 call_kwargs["api_key"] = api_key
@@ -1707,6 +1721,13 @@ async def chat_completions(
             **req_meta,
             **(optimization_info or {}),
         }
+
+        # Parameters the routed model rejected and we rewrote (#83), so the
+        # adjustment is visible here the way it is on the /v1/messages path.
+        if response_data.get("modifiers_applied"):
+            log_entry["modifiers_applied"] = list(
+                log_entry.get("modifiers_applied") or []
+            ) + list(response_data["modifiers_applied"])
 
         if settings.LOG_RAW:
             log_entry["raw_messages"] = [
@@ -2639,9 +2660,13 @@ def _reconcile_from_error(body: Dict[str, Any], model: str, error_text: str) -> 
     for name, pattern, fixer in _PARAM_RECONCILERS:
         if not pattern.search(error_text):
             continue
-        _MODEL_PARAM_FIXES.setdefault(model, set()).add(name)
         modifier = fixer(body)
+        # Only remember a reconciler that actually rewrote something. A fixer can
+        # decline \u2014 `_fold_system_messages` refuses a body that is nothing but
+        # system turns \u2014 and caching that would make the model carry a fix it
+        # never received, so `requests.jsonl` would describe work never done.
         if modifier:
+            _MODEL_PARAM_FIXES.setdefault(model, set()).add(name)
             modifiers.append(modifier)
             logger.warning("%s rejected a parameter \u2192 %s", model, modifier)
     return modifiers
@@ -2661,6 +2686,27 @@ def _preapply_known_fixes(body: Dict[str, Any], model: str) -> list[str]:
     return modifiers
 
 
+def _reconcile_400(
+    body: Dict[str, Any], model: str, error_text: str
+) -> Tuple[list[str], bool]:
+    """Apply every fix an Anthropic 400 tells us about, in place.
+
+    Returns ``(modifiers, clamped)``. ``clamped`` reports whether ``max_tokens``
+    was lowered, which callers surface as its own header. An empty modifier list
+    means the error is not one we know how to fix, so the caller must surface it
+    rather than retry.
+    """
+    fixes: list[str] = []
+    clamped = False
+    # max_tokens above the routed model's output ceiling (#73).
+    ceiling = _parse_max_tokens_ceiling(error_text)
+    if ceiling is not None and (body.get("max_tokens") or 0) > ceiling:
+        body["max_tokens"] = ceiling
+        clamped = True
+        fixes.append(f"max_tokens_clamp({ceiling})")
+    # A parameter the routed model does not support (#83).
+    fixes += _reconcile_from_error(body, model, error_text)
+    return fixes, clamped
 
 
 def _parse_anthropic_sse_usage(text: str) -> Tuple[Optional[int], Optional[int]]:
@@ -2807,7 +2853,7 @@ async def anthropic_messages(
             # Reconcile the request against the routed model and retry, bounded:
             # max_tokens above the model's ceiling (#73), or a parameter the model
             # does not support (#83). Both are knowable only from the 400.
-            for _attempt in range(_MAX_RECONCILE_ATTEMPTS):
+            for attempt in range(_MAX_RECONCILE_ATTEMPTS):
                 try:
                     upstream = await client.post(_ANTHROPIC_UPSTREAM, headers=headers, json=body)
                 except httpx.HTTPError as e:
@@ -2820,13 +2866,12 @@ async def anthropic_messages(
                     raise HTTPException(status_code=502, detail=f"upstream error: {e}")
                 if upstream.status_code != 400:
                     break
-                fixes = []
-                ceiling = _parse_max_tokens_ceiling(upstream.text)
-                if ceiling is not None and (body.get("max_tokens") or 0) > ceiling:
-                    body["max_tokens"] = ceiling
-                    clamped = True
-                    fixes.append(f"max_tokens_clamp({ceiling})")
-                fixes += _reconcile_from_error(body, upstream_model, upstream.text)
+                # On the final attempt a fix would never be sent, so applying one
+                # would only record a modifier for work that never happened.
+                if attempt == _MAX_RECONCILE_ATTEMPTS - 1:
+                    break
+                fixes, was_clamped = _reconcile_400(body, upstream_model, upstream.text)
+                clamped = clamped or was_clamped
                 if not fixes:
                     break  # nothing we know how to fix — surface the error
                 reconciled += fixes
@@ -2884,13 +2929,8 @@ async def anthropic_messages(
                         err_body = await upstream.aread()
                         err_text = err_body.decode("utf-8", errors="replace")
                         if attempt < _MAX_RECONCILE_ATTEMPTS - 1 and upstream.status_code == 400:
-                            fixes = []
-                            ceiling = _parse_max_tokens_ceiling(err_text)
-                            if ceiling is not None and (body.get("max_tokens") or 0) > ceiling:
-                                body["max_tokens"] = ceiling
-                                clamped = True
-                                fixes.append(f"max_tokens_clamp({ceiling})")
-                            fixes += _reconcile_from_error(body, upstream_model, err_text)
+                            fixes, was_clamped = _reconcile_400(body, upstream_model, err_text)
+                            clamped = clamped or was_clamped
                             if fixes:
                                 applied += fixes
                                 continue
