@@ -24,4 +24,4 @@ jobs:
         run: pip install -e ".[dev]"
 
       - name: Run tests
-        run: pytest tests/ -v --ignore=tests/test_server.py
+        run: pytest tests/ -v
