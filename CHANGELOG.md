@@ -7,6 +7,9 @@ All notable changes to NadirClaw will be documented in this file.
 ### Changed
 - **License changed from MIT to the PolyForm Noncommercial License 1.0.0.** NadirClaw is now free for any noncommercial use (personal, research, education, evaluation, and noncommercial organizations). Commercial use requires a separate commercial license, available via [getnadir.com](https://getnadir.com). This applies to new versions; releases previously published under MIT remain available under MIT. The bundled `wide_deep_asym_v3` classifier weights and the `cascade-verifier-v1` snapshot are now released under the same noncommercial terms.
 
+### Fixed
+- **`/v1/messages` forwarded parameters the routed model cannot accept, so cheap tiers 400 on every request** — clients pick request parameters from the model id they can see, which behind the router is an alias (`nadir-auto`), so they assume the newest capabilities. When routing then selected an older, cheaper model, the request carried parameters that model rejects and every request failed (#83). The passthrough now reconciles the request against the 400 it gets back and retries within the same request, bounded to 4 attempts: `thinking: {"type":"adaptive"}` is rewritten to `{"type":"enabled","budget_tokens":N}`, an unsupported `effort` hint is dropped, and `system`/`developer` turns are folded into the top-level `system` field (the same fix already applied to the OAuth completion path in 0.21.1). Each fix is remembered per model, so the discovery costs one round trip per model per process instead of one per request. Applied fixes are recorded in `requests.jsonl` as `modifiers_applied` entries and signalled by an `X-NadirClaw-Params-Reconciled` response header. Verified against a live Anthropic subscription: `claude-haiku-4-5` went from 3 failed upstream calls per Claude Code request to a single successful one.
+
 ## [0.21.1] - 2026-06-25
 
 ### Added
