@@ -1,6 +1,7 @@
 """Tests for nadirclaw.server — health endpoint and basic API contract."""
 
 import pytest
+from copy import deepcopy
 from unittest.mock import patch
 from fastapi.testclient import TestClient
 
@@ -696,6 +697,294 @@ class TestMaxTokensClamp:
         assert resp.status_code == 400
         assert len(calls) == 1  # no retry
         assert "X-NadirClaw-MaxTokens-Clamped" not in resp.headers
+
+
+class TestParamReconcile:
+    """#83 — reconcile request parameters the routed model does not support."""
+
+    @staticmethod
+    def _clear_cache():
+        from nadirclaw.server import _MODEL_PARAM_FIXES
+        _MODEL_PARAM_FIXES.clear()
+
+    # --- individual fixers ---------------------------------------------------
+
+    def test_rewrites_adaptive_to_enabled_below_max_tokens(self):
+        from nadirclaw.server import _downgrade_adaptive_thinking
+        body = {"max_tokens": 8192, "thinking": {"type": "adaptive", "display": "omitted"}}
+        modifier = _downgrade_adaptive_thinking(body)
+        assert body["thinking"] == {
+            "type": "enabled", "budget_tokens": 8191, "display": "omitted",
+        }
+        assert modifier == "thinking_downgrade(adaptive\u2192enabled, budget=8191)"
+
+    def test_thinking_budget_is_capped(self):
+        from nadirclaw.server import _downgrade_adaptive_thinking, _MAX_THINKING_BUDGET
+        body = {"max_tokens": 200000, "thinking": {"type": "adaptive"}}
+        _downgrade_adaptive_thinking(body)
+        assert body["thinking"]["budget_tokens"] == _MAX_THINKING_BUDGET
+        assert "display" not in body["thinking"]
+
+    def test_thinking_is_dropped_when_no_budget_fits(self):
+        """budget_tokens must be >= 1024 and < max_tokens, so tiny caps leave no room."""
+        from nadirclaw.server import _downgrade_adaptive_thinking
+        body = {"max_tokens": 512, "thinking": {"type": "adaptive"}}
+        assert _downgrade_adaptive_thinking(body) == "thinking_downgrade(adaptive\u2192off)"
+        assert "thinking" not in body
+
+    def test_other_thinking_shapes_are_untouched(self):
+        from nadirclaw.server import _downgrade_adaptive_thinking
+        for thinking in ({"type": "enabled", "budget_tokens": 2000}, {"type": "disabled"}):
+            body = {"max_tokens": 8192, "thinking": dict(thinking)}
+            assert _downgrade_adaptive_thinking(body) is None
+            assert body["thinking"] == thinking
+        assert _downgrade_adaptive_thinking({"max_tokens": 8192}) is None
+
+    def test_drops_effort_from_output_config(self):
+        from nadirclaw.server import _drop_effort
+        body = {"output_config": {"effort": "high"}}
+        assert _drop_effort(body) == "effort_drop(high)"
+        assert "output_config" not in body  # emptied, so removed entirely
+
+        body = {"output_config": {"effort": "high", "other": 1}}
+        assert _drop_effort(body) == "effort_drop(high)"
+        assert body["output_config"] == {"other": 1}
+
+        body = {"effort": "low"}
+        assert _drop_effort(body) == "effort_drop(low)"
+        assert body == {}
+
+        assert _drop_effort({"output_config": {"other": 1}}) is None
+
+    def test_folds_system_messages_into_the_system_field(self):
+        from nadirclaw.server import _fold_system_messages
+        body = {
+            "system": [{"type": "text", "text": "first"}],
+            "messages": [
+                {"role": "system", "content": "from a message"},
+                {"role": "user", "content": "hi"},
+            ],
+        }
+        assert _fold_system_messages(body) == "system_role_fold(1)"
+        assert body["system"] == [
+            {"type": "text", "text": "first"},
+            {"type": "text", "text": "from a message"},
+        ]
+        assert body["messages"] == [{"role": "user", "content": "hi"}]
+
+    def test_fold_leaves_a_body_with_no_other_message(self):
+        """Anthropic needs >= 1 message, so folding the only turn would be invalid."""
+        from nadirclaw.server import _fold_system_messages
+        body = {"messages": [{"role": "system", "content": "only"}]}
+        assert _fold_system_messages(body) is None
+        assert body["messages"] == [{"role": "system", "content": "only"}]
+
+    def test_fold_is_a_noop_without_system_turns(self):
+        from nadirclaw.server import _fold_system_messages
+        body = {"messages": [{"role": "user", "content": "hi"}]}
+        assert _fold_system_messages(body) is None
+
+    # --- error matching and caching ------------------------------------------
+
+    def test_each_400_selects_its_own_fixer(self):
+        from nadirclaw.server import _reconcile_from_error, _MODEL_PARAM_FIXES
+        self._clear_cache()
+        body = {"max_tokens": 8192, "thinking": {"type": "adaptive"}}
+        assert _reconcile_from_error(body, "m", "adaptive thinking is not supported on this model")
+        assert body["thinking"]["type"] == "enabled"
+
+        body = {"output_config": {"effort": "high"}}
+        assert _reconcile_from_error(body, "m", "This model does not support the effort parameter.")
+        assert "output_config" not in body
+
+        assert _MODEL_PARAM_FIXES["m"] == {"thinking", "effort"}
+        self._clear_cache()
+
+    def test_unknown_400_matches_nothing(self):
+        from nadirclaw.server import _reconcile_from_error, _MODEL_PARAM_FIXES
+        self._clear_cache()
+        body = {"max_tokens": 8192, "thinking": {"type": "adaptive"}}
+        assert _reconcile_from_error(body, "m", "some unrelated bad request") == []
+        assert _reconcile_from_error(body, "m", "") == []
+        assert body["thinking"] == {"type": "adaptive"}  # untouched
+        assert not _MODEL_PARAM_FIXES
+
+    def test_known_fixes_are_preapplied(self):
+        from nadirclaw.server import _preapply_known_fixes, _MODEL_PARAM_FIXES
+        self._clear_cache()
+        assert _preapply_known_fixes({"max_tokens": 8192}, "m") == []
+        _MODEL_PARAM_FIXES["m"] = {"thinking", "effort"}
+        body = {"max_tokens": 8192, "thinking": {"type": "adaptive"},
+                "output_config": {"effort": "high"}}
+        modifiers = _preapply_known_fixes(body, "m")
+        assert set(modifiers) == {
+            "thinking_downgrade(adaptive\u2192enabled, budget=8191)", "effort_drop(high)",
+        }
+        assert body["thinking"]["type"] == "enabled" and "output_config" not in body
+        self._clear_cache()
+
+    def test_modifiers_are_recorded_in_the_request_log(self):
+        from nadirclaw.server import _record_messages_usage
+        captured = {}
+        with patch("nadirclaw.server._log_request", side_effect=lambda e: captured.update(e)):
+            _record_messages_usage(
+                {"type": "messages", "modifiers_applied": ["agent_role[SUBAGENT]"]},
+                "claude-haiku-4-5", 10, 5,
+                extra_modifiers=["thinking_downgrade(adaptive\u2192enabled, budget=8191)"],
+            )
+        assert captured["modifiers_applied"] == [
+            "agent_role[SUBAGENT]",
+            "thinking_downgrade(adaptive\u2192enabled, budget=8191)",
+        ]
+
+    # --- end to end through the endpoint ------------------------------------
+
+    @staticmethod
+    def _fake_client(error_messages):
+        """Fake httpx client that 400s with each message in turn, then succeeds."""
+        import httpx
+        sent = []
+        remaining = list(error_messages)
+
+        class _Resp:
+            def __init__(self, message=None):
+                self._message = message
+                self.status_code = 400 if message else 200
+                self.text = ('{"type":"error","error":{"type":"invalid_request_error",'
+                             f'"message":"{message}"}}}}') if message else "{}"
+                self.content = self.text.encode()
+                self.headers = {"content-type": "application/json"}
+            def json(self):
+                return {"id": "msg_1", "content": [{"type": "text", "text": "ok"}],
+                        "usage": {"input_tokens": 3, "output_tokens": 2}}
+
+        class _FakeClient:
+            def __init__(self, *a, **kw): pass
+            async def __aenter__(self): return self
+            async def __aexit__(self, *a): return False
+            async def post(self, url, headers=None, json=None):
+                # deep copy: the fixers mutate these structures in place
+                sent.append(deepcopy(
+                    {k: json.get(k) for k in ("thinking", "output_config", "messages")}
+                ))
+                return _Resp(remaining.pop(0) if remaining else None)
+
+        return httpx, _FakeClient, sent
+
+    def test_converges_over_successive_400s(self, client):
+        """One request absorbs every unsupported-parameter 400 and still returns 200."""
+        self._clear_cache()
+        httpx, _FakeClient, sent = self._fake_client([
+            "adaptive thinking is not supported on this model",
+            "This model does not support the effort parameter.",
+        ])
+        try:
+            with patch("nadirclaw.credentials.get_credential", return_value="sk-ant-oat01-test"), \
+                 patch.object(httpx, "AsyncClient", _FakeClient):
+                resp = client.post("/v1/messages", json={
+                    "model": "nadir-eco", "max_tokens": 8192,
+                    "thinking": {"type": "adaptive"},
+                    "output_config": {"effort": "high"},
+                    "messages": [{"role": "user", "content": "hi"}],
+                })
+        finally:
+            self._clear_cache()
+
+        assert resp.status_code == 200
+        assert len(sent) == 3
+        assert sent[0]["thinking"] == {"type": "adaptive"}
+        assert sent[1]["thinking"] == {"type": "enabled", "budget_tokens": 8191}
+        assert sent[1]["output_config"] == {"effort": "high"}
+        assert sent[2]["output_config"] is None  # effort dropped on the last attempt
+        assert resp.headers.get("X-NadirClaw-Params-Reconciled") == "true"
+
+    def test_second_request_needs_no_failed_attempt(self, client):
+        """The cache makes the fixes pre-emptive, so the retry cost is once per model."""
+        from nadirclaw.server import _MODEL_PARAM_FIXES
+        from nadirclaw.settings import settings
+        self._clear_cache()
+        _MODEL_PARAM_FIXES[settings.SIMPLE_MODEL] = {"thinking", "effort"}
+        httpx, _FakeClient, sent = self._fake_client([])
+        try:
+            with patch("nadirclaw.credentials.get_credential", return_value="sk-ant-oat01-test"), \
+                 patch.object(httpx, "AsyncClient", _FakeClient):
+                resp = client.post("/v1/messages", json={
+                    "model": "nadir-eco", "max_tokens": 8192,
+                    "thinking": {"type": "adaptive"},
+                    "output_config": {"effort": "high"},
+                    "messages": [{"role": "user", "content": "hi"}],
+                })
+        finally:
+            self._clear_cache()
+
+        assert resp.status_code == 200
+        assert len(sent) == 1  # no wasted round trip
+        assert sent[0]["thinking"] == {"type": "enabled", "budget_tokens": 8191}
+        assert sent[0]["output_config"] is None
+
+    def test_unknown_400_is_returned_without_retrying(self, client):
+        from nadirclaw.server import _MODEL_PARAM_FIXES
+        self._clear_cache()
+        httpx, _FakeClient, sent = self._fake_client(["some unrelated bad request"])
+        with patch("nadirclaw.credentials.get_credential", return_value="sk-ant-oat01-test"), \
+             patch.object(httpx, "AsyncClient", _FakeClient):
+            resp = client.post("/v1/messages", json={
+                "model": "nadir-eco", "max_tokens": 8192,
+                "thinking": {"type": "adaptive"},
+                "messages": [{"role": "user", "content": "hi"}],
+            })
+        assert resp.status_code == 400
+        assert len(sent) == 1
+        assert sent[0]["thinking"] == {"type": "adaptive"}
+        assert "X-NadirClaw-Params-Reconciled" not in resp.headers
+        assert not _MODEL_PARAM_FIXES
+
+    def test_streaming_reconciles_before_any_byte_is_sent(self, client):
+        import httpx
+        self._clear_cache()
+        sent = []
+        remaining = ["adaptive thinking is not supported on this model"]
+
+        class _Stream:
+            def __init__(self, message=None):
+                self._message = message
+                self.status_code = 400 if message else 200
+            async def aread(self):
+                return (f'{{"type":"error","error":{{"message":"{self._message}"}}}}'.encode()
+                        if self._message else b"")
+            async def aiter_bytes(self):
+                yield (b'event: message_start\ndata: {"type":"message_start","message":'
+                       b'{"usage":{"input_tokens":3,"output_tokens":1}}}\n\n')
+
+        class _Ctx:
+            def __init__(self, resp): self._resp = resp
+            async def __aenter__(self): return self._resp
+            async def __aexit__(self, *a): return False
+
+        class _FakeClient:
+            def __init__(self, *a, **kw): pass
+            async def __aenter__(self): return self
+            async def __aexit__(self, *a): return False
+            def stream(self, method, url, headers=None, json=None):
+                sent.append(json.get("thinking"))
+                return _Ctx(_Stream(remaining.pop(0) if remaining else None))
+
+        try:
+            with patch("nadirclaw.credentials.get_credential", return_value="sk-ant-oat01-test"), \
+                 patch.object(httpx, "AsyncClient", _FakeClient):
+                resp = client.post("/v1/messages", json={
+                    "model": "nadir-eco", "max_tokens": 8192, "stream": True,
+                    "thinking": {"type": "adaptive"},
+                    "messages": [{"role": "user", "content": "hi"}],
+                })
+                text = resp.text
+        finally:
+            self._clear_cache()
+
+        assert resp.status_code == 200
+        assert sent == [{"type": "adaptive"}, {"type": "enabled", "budget_tokens": 8191}]
+        assert "message_start" in text
+        assert "upstream_error" not in text  # the 400 never reached the client
 
 
 class TestCountTokensEndpoint:

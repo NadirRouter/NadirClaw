@@ -2484,6 +2484,21 @@ _ANTHROPIC_COUNT_TOKENS_UPSTREAM = "https://api.anthropic.com/v1/messages/count_
 # Anthropic 400 when the requested max_tokens exceeds the routed model's ceiling:
 #   "max_tokens: 100000 > 64000, which is the maximum allowed ..."
 _MAX_TOKENS_400_RE = re.compile(r"max_tokens:\s*(\d+)\s*>\s*(\d+)")
+# Anthropic 400s raised when a client sends a parameter the routed model does not
+# support. Clients pick these parameters from the model id they can see, which
+# behind this proxy is a router alias, so they assume the newest capabilities (#83).
+_ADAPTIVE_THINKING_400_RE = re.compile(r"adaptive thinking is not supported", re.I)
+_EFFORT_400_RE = re.compile(r"does not support the effort parameter", re.I)
+_SYSTEM_ROLE_400_RE = re.compile(r"role '?system'? is not supported", re.I)
+# Anthropic requires 1024 <= budget_tokens < max_tokens for `thinking.type=enabled`.
+_MIN_THINKING_BUDGET = 1024
+_MAX_THINKING_BUDGET = 32000
+# Upper bound on reconcile round trips for one request, so a misbehaving upstream
+# can never loop. Four covers the known fixes plus the max_tokens clamp (#73).
+_MAX_RECONCILE_ATTEMPTS = 4
+# model -> names of reconcilers it has needed, learned from upstream 400s. Cached
+# per process so the fixes cost one round trip per model, not one per request.
+_MODEL_PARAM_FIXES: Dict[str, set] = {}
 
 
 def _anthropic_auth_headers(raw: Request, body: Dict[str, Any]) -> Dict[str, str]:
@@ -2524,6 +2539,128 @@ def _parse_max_tokens_ceiling(error_text: str) -> Optional[int]:
         return int(m.group(2))
     except (ValueError, IndexError):
         return None
+
+
+def _downgrade_adaptive_thinking(body: Dict[str, Any]) -> Optional[str]:
+    """Rewrite ``thinking: {"type": "adaptive"}`` into a shape older models accept.
+
+    Models that predate adaptive thinking accept
+    ``{"type": "enabled", "budget_tokens": N}``, so rewrite to that and keep the
+    caller's intent (let the model think) instead of failing the request.
+    """
+    thinking = body.get("thinking")
+    if not isinstance(thinking, dict) or thinking.get("type") != "adaptive":
+        return None
+    max_tokens = body.get("max_tokens")
+    if not isinstance(max_tokens, int) or max_tokens <= _MIN_THINKING_BUDGET:
+        # No room for a valid budget below max_tokens, so thinking cannot be
+        # honoured at all. Drop it rather than forward a mode that must 400.
+        body.pop("thinking", None)
+        return "thinking_downgrade(adaptive\u2192off)"
+    budget = max(_MIN_THINKING_BUDGET, min(_MAX_THINKING_BUDGET, max_tokens - 1))
+    downgraded: Dict[str, Any] = {"type": "enabled", "budget_tokens": budget}
+    if thinking.get("display") is not None:
+        downgraded["display"] = thinking["display"]
+    body["thinking"] = downgraded
+    return f"thinking_downgrade(adaptive\u2192enabled, budget={budget})"
+
+
+def _drop_effort(body: Dict[str, Any]) -> Optional[str]:
+    """Remove the ``effort`` hint that older models reject.
+
+    ``effort`` only shapes how hard a model tries, so dropping it changes cost and
+    latency but never correctness — unlike failing the request outright.
+    """
+    output_config = body.get("output_config")
+    if isinstance(output_config, dict) and "effort" in output_config:
+        effort = output_config.pop("effort")
+        if not output_config:
+            body.pop("output_config", None)
+        return f"effort_drop({effort})"
+    if "effort" in body:
+        return f"effort_drop({body.pop('effort')})"
+    return None
+
+
+def _fold_system_messages(body: Dict[str, Any]) -> Optional[str]:
+    """Move ``system``/``developer`` turns out of ``messages`` into ``system``.
+
+    Newer models accept a system turn inside the messages array; older ones only
+    accept the top-level ``system`` field. Folding preserves the instructions
+    instead of dropping them.
+    """
+    messages = body.get("messages")
+    if not isinstance(messages, list):
+        return None
+    moved: list[Any] = []
+    kept: list[Any] = []
+    for message in messages:
+        if isinstance(message, dict) and message.get("role") in ("system", "developer"):
+            moved.append(message.get("content"))
+        else:
+            kept.append(message)
+    # Anthropic requires at least one message, so a body of nothing but system
+    # turns cannot be folded — leave it untouched and let the error surface.
+    if not moved or not kept:
+        return None
+    blocks: list[Any] = []
+    existing = body.get("system")
+    if isinstance(existing, str):
+        blocks.append({"type": "text", "text": existing})
+    elif isinstance(existing, list):
+        blocks.extend(existing)
+    for content in moved:
+        if isinstance(content, str):
+            blocks.append({"type": "text", "text": content})
+        elif isinstance(content, list):
+            blocks.extend(block for block in content if isinstance(block, dict))
+    body["system"] = blocks
+    body["messages"] = kept
+    return f"system_role_fold({len(moved)})"
+
+
+# (name, matching 400, fixer). Order is the order fixes are applied.
+_PARAM_RECONCILERS: Tuple[Tuple[str, Any, Any], ...] = (
+    ("thinking", _ADAPTIVE_THINKING_400_RE, _downgrade_adaptive_thinking),
+    ("effort", _EFFORT_400_RE, _drop_effort),
+    ("system_role", _SYSTEM_ROLE_400_RE, _fold_system_messages),
+)
+
+
+def _reconcile_from_error(body: Dict[str, Any], model: str, error_text: str) -> list[str]:
+    """Fix the parameter an Anthropic 400 rejected and remember it for this model.
+
+    Returns the modifier strings applied. An empty list means nothing matched, so
+    the caller must surface the error rather than retry.
+    """
+    if not error_text:
+        return []
+    modifiers = []
+    for name, pattern, fixer in _PARAM_RECONCILERS:
+        if not pattern.search(error_text):
+            continue
+        _MODEL_PARAM_FIXES.setdefault(model, set()).add(name)
+        modifier = fixer(body)
+        if modifier:
+            modifiers.append(modifier)
+            logger.warning("%s rejected a parameter \u2192 %s", model, modifier)
+    return modifiers
+
+
+def _preapply_known_fixes(body: Dict[str, Any], model: str) -> list[str]:
+    """Apply the fixes this model has already demanded, before the first call."""
+    needed = _MODEL_PARAM_FIXES.get(model)
+    if not needed:
+        return []
+    modifiers = []
+    for name, _pattern, fixer in _PARAM_RECONCILERS:
+        if name in needed:
+            modifier = fixer(body)
+            if modifier:
+                modifiers.append(modifier)
+    return modifiers
+
+
 
 
 def _parse_anthropic_sse_usage(text: str) -> Tuple[Optional[int], Optional[int]]:
@@ -2568,6 +2705,7 @@ def _record_messages_usage(
     status: str = "ok",
     latency_ms: Optional[int] = None,
     clamped: bool = False,
+    extra_modifiers: Optional[list[str]] = None,
     response_preview: str = "",
     error: Optional[str] = None,
 ) -> None:
@@ -2594,6 +2732,10 @@ def _record_messages_usage(
         entry["total_latency_ms"] = latency_ms
     if clamped:
         entry["max_tokens_clamped"] = True
+    if extra_modifiers:
+        entry["modifiers_applied"] = list(entry.get("modifiers_applied") or []) + list(
+            extra_modifiers
+        )
     if response_preview:
         entry["response_preview"] = response_preview
     if error:
@@ -2633,6 +2775,11 @@ async def anthropic_messages(
 
     body["model"] = upstream_model
 
+    # Parameters this model has already rejected are fixed up front, so the retry
+    # loop below costs one round trip per model rather than one per request (#83).
+    # The identity injection lands after this, and adds only a top-level system block.
+    reconciled: list[str] = _preapply_known_fixes(body, upstream_model)
+
     headers = _anthropic_auth_headers(raw, body)
 
     # OAuth subscription tokens (Bearer) gate Sonnet/Opus behind the Claude Code
@@ -2657,37 +2804,38 @@ async def anthropic_messages(
         start_time = time.time()
         clamped = False
         async with httpx.AsyncClient(timeout=300) as client:
-            try:
-                upstream = await client.post(_ANTHROPIC_UPSTREAM, headers=headers, json=body)
-            except httpx.HTTPError as e:
-                _record_messages_usage(
-                    log_entry, upstream_model, 0, 0, status="error",
-                    latency_ms=int((time.time() - start_time) * 1000),
-                    error=f"upstream_error: {e}",
-                )
-                raise HTTPException(status_code=502, detail=f"upstream error: {e}")
-
-            # Reconcile max_tokens against the routed model's output ceiling (#73):
-            # on a "max_tokens: N > M" 400, clamp to M and retry once.
-            if upstream.status_code == 400:
+            # Reconcile the request against the routed model and retry, bounded:
+            # max_tokens above the model's ceiling (#73), or a parameter the model
+            # does not support (#83). Both are knowable only from the 400.
+            for _attempt in range(_MAX_RECONCILE_ATTEMPTS):
+                try:
+                    upstream = await client.post(_ANTHROPIC_UPSTREAM, headers=headers, json=body)
+                except httpx.HTTPError as e:
+                    _record_messages_usage(
+                        log_entry, upstream_model, 0, 0, status="error",
+                        latency_ms=int((time.time() - start_time) * 1000),
+                        clamped=clamped, extra_modifiers=reconciled,
+                        error=f"upstream_error: {e}",
+                    )
+                    raise HTTPException(status_code=502, detail=f"upstream error: {e}")
+                if upstream.status_code != 400:
+                    break
+                fixes = []
                 ceiling = _parse_max_tokens_ceiling(upstream.text)
                 if ceiling is not None and (body.get("max_tokens") or 0) > ceiling:
                     body["max_tokens"] = ceiling
                     clamped = True
-                    try:
-                        upstream = await client.post(_ANTHROPIC_UPSTREAM, headers=headers, json=body)
-                    except httpx.HTTPError as e:
-                        _record_messages_usage(
-                            log_entry, upstream_model, 0, 0, status="error",
-                            latency_ms=int((time.time() - start_time) * 1000),
-                            clamped=True, error=f"upstream_error: {e}",
-                        )
-                        raise HTTPException(status_code=502, detail=f"upstream error: {e}")
+                    fixes.append(f"max_tokens_clamp({ceiling})")
+                fixes += _reconcile_from_error(body, upstream_model, upstream.text)
+                if not fixes:
+                    break  # nothing we know how to fix — surface the error
+                reconciled += fixes
 
         if upstream.status_code != 200:
             _record_messages_usage(
                 log_entry, upstream_model, 0, 0, status="error",
                 latency_ms=int((time.time() - start_time) * 1000), clamped=clamped,
+                extra_modifiers=reconciled,
                 error=f"upstream_status_{upstream.status_code}: {upstream.text[:500]}",
             )
             resp = Response(
@@ -2697,6 +2845,8 @@ async def anthropic_messages(
             )
             if clamped:
                 resp.headers["X-NadirClaw-MaxTokens-Clamped"] = "true"
+            if reconciled:
+                resp.headers["X-NadirClaw-Params-Reconciled"] = "true"
             return resp
 
         payload = upstream.json()
@@ -2705,20 +2855,25 @@ async def anthropic_messages(
             log_entry, upstream_model,
             usage.get("input_tokens", 0), usage.get("output_tokens", 0),
             status="ok", latency_ms=int((time.time() - start_time) * 1000),
-            clamped=clamped,
+            clamped=clamped, extra_modifiers=reconciled,
             response_preview=_extract_text_from_anthropic_response(payload)[:200],
         )
         resp = JSONResponse(content=payload, status_code=200)
         if clamped:
             resp.headers["X-NadirClaw-MaxTokens-Clamped"] = "true"
+        if reconciled:
+            resp.headers["X-NadirClaw-Params-Reconciled"] = "true"
         return resp
 
     # Streaming: pipe SSE bytes through, recovering usage from the event stream.
     async def proxy_stream():
         start_time = time.time()
         clamped = False
+        applied = list(reconciled)
         async with httpx.AsyncClient(timeout=300) as client:
-            for attempt in range(2):  # at most one max_tokens clamp-retry (#73)
+            # Same bounded reconcile loop as the non-streaming path. Retrying is safe
+            # because a non-200 status arrives before any SSE byte is forwarded.
+            for attempt in range(_MAX_RECONCILE_ATTEMPTS):
                 input_tokens = 0
                 output_tokens = 0
                 buffer = ""
@@ -2728,15 +2883,21 @@ async def anthropic_messages(
                     if upstream.status_code != 200:
                         err_body = await upstream.aread()
                         err_text = err_body.decode("utf-8", errors="replace")
-                        if attempt == 0 and upstream.status_code == 400:
+                        if attempt < _MAX_RECONCILE_ATTEMPTS - 1 and upstream.status_code == 400:
+                            fixes = []
                             ceiling = _parse_max_tokens_ceiling(err_text)
                             if ceiling is not None and (body.get("max_tokens") or 0) > ceiling:
                                 body["max_tokens"] = ceiling
                                 clamped = True
+                                fixes.append(f"max_tokens_clamp({ceiling})")
+                            fixes += _reconcile_from_error(body, upstream_model, err_text)
+                            if fixes:
+                                applied += fixes
                                 continue
                         _record_messages_usage(
                             log_entry, upstream_model, 0, 0, status="error",
                             latency_ms=int((time.time() - start_time) * 1000), clamped=clamped,
+                            extra_modifiers=applied,
                             error=f"upstream_stream_status_{upstream.status_code}: {err_text[:500]}",
                         )
                         yield f"event: error\ndata: {json.dumps({'type': 'error', 'error': {'type': 'upstream_error', 'message': err_text[:500]}})}\n\n".encode()
@@ -2763,7 +2924,7 @@ async def anthropic_messages(
                     _record_messages_usage(
                         log_entry, upstream_model, input_tokens, output_tokens,
                         status="ok", latency_ms=int((time.time() - start_time) * 1000),
-                        clamped=clamped,
+                        clamped=clamped, extra_modifiers=applied,
                     )
                     return
 
