@@ -2586,6 +2586,35 @@ def _downgrade_adaptive_thinking(body: Dict[str, Any]) -> Optional[str]:
     return f"thinking_downgrade(adaptive\u2192enabled, budget={budget})"
 
 
+def _clamp_thinking_budget(body: Dict[str, Any]) -> Optional[str]:
+    """Keep ``thinking.budget_tokens`` under ``max_tokens`` after a clamp.
+
+    Anthropic requires ``1024 <= budget_tokens < max_tokens``. Lowering
+    ``max_tokens`` to the routed model's ceiling (#73) can leave behind a budget
+    the client sized for the ceiling it thought it had, and that combination 400s
+    with an error no other reconciler matches — so the clamp that fixed one
+    parameter would strand the request on another.
+    """
+    thinking = body.get("thinking")
+    if not isinstance(thinking, dict) or thinking.get("type") != "enabled":
+        return None
+    max_tokens = body.get("max_tokens")
+    budget = thinking.get("budget_tokens")
+    if not isinstance(max_tokens, int) or not isinstance(budget, int):
+        return None
+    if budget < max_tokens:
+        return None
+    if max_tokens <= _MIN_THINKING_BUDGET:
+        # No budget below max_tokens clears Anthropic's floor, so thinking cannot
+        # be honoured at this ceiling at all. Drop it rather than 400 again.
+        body.pop("thinking", None)
+        return f"thinking_budget_drop(max_tokens={max_tokens})"
+    # Minimal intervention: the client's budget was presumably deliberate, so give
+    # it every token the new ceiling still allows rather than a conservative default.
+    thinking["budget_tokens"] = max_tokens - 1
+    return f"thinking_budget_clamp({max_tokens - 1})"
+
+
 def _drop_effort(body: Dict[str, Any]) -> Optional[str]:
     """Remove the ``effort`` hint that older models reject.
 
@@ -2706,6 +2735,11 @@ def _reconcile_400(
         fixes.append(f"max_tokens_clamp({ceiling})")
     # A parameter the routed model does not support (#83).
     fixes += _reconcile_from_error(body, model, error_text)
+    # Last, because both fixes above can move the two numbers this one relates:
+    # the clamp lowers max_tokens, and the adaptive downgrade sets budget_tokens.
+    budget_fix = _clamp_thinking_budget(body)
+    if budget_fix:
+        fixes.append(budget_fix)
     return fixes, clamped
 
 

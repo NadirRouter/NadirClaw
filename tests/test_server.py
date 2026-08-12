@@ -1019,6 +1019,50 @@ class TestParamReconcile:
         assert _reconcile_400({"max_tokens": 100}, "m", "unrelated") == ([], False)
         self._clear_cache()
 
+    def test_clamping_max_tokens_also_lowers_a_stranded_thinking_budget(self):
+        """The clamp must not leave budget_tokens >= max_tokens, which 400s again."""
+        from nadirclaw.server import _reconcile_400
+        self._clear_cache()
+        body = {"max_tokens": 100000, "thinking": {"type": "enabled", "budget_tokens": 60000}}
+        fixes, clamped = _reconcile_400(
+            body, "m", "max_tokens: 100000 > 32000, which is the maximum allowed",
+        )
+        assert clamped is True
+        assert body["max_tokens"] == 32000
+        assert body["thinking"] == {"type": "enabled", "budget_tokens": 31999}
+        assert fixes == ["max_tokens_clamp(32000)", "thinking_budget_clamp(31999)"]
+        self._clear_cache()
+
+    def test_thinking_is_dropped_when_the_clamp_leaves_no_budget_room(self):
+        from nadirclaw.server import _reconcile_400
+        self._clear_cache()
+        body = {"max_tokens": 100000, "thinking": {"type": "enabled", "budget_tokens": 60000}}
+        fixes, _clamped = _reconcile_400(
+            body, "m", "max_tokens: 100000 > 1024, which is the maximum allowed",
+        )
+        assert "thinking" not in body
+        assert fixes == ["max_tokens_clamp(1024)", "thinking_budget_drop(max_tokens=1024)"]
+        self._clear_cache()
+
+    def test_budget_clamp_leaves_a_valid_budget_alone(self):
+        from nadirclaw.server import _clamp_thinking_budget
+        for thinking in (
+            {"type": "enabled", "budget_tokens": 2000},   # already below max_tokens
+            {"type": "adaptive"},                          # carries no budget
+            {"type": "enabled"},                           # budget left to the model
+        ):
+            body = {"max_tokens": 8192, "thinking": dict(thinking)}
+            assert _clamp_thinking_budget(body) is None
+            assert body["thinking"] == thinking
+        assert _clamp_thinking_budget({"max_tokens": 8192}) is None
+
+    def test_budget_equal_to_max_tokens_is_lowered(self):
+        """Anthropic requires budget_tokens strictly below max_tokens."""
+        from nadirclaw.server import _clamp_thinking_budget
+        body = {"max_tokens": 4096, "thinking": {"type": "enabled", "budget_tokens": 4096}}
+        assert _clamp_thinking_budget(body) == "thinking_budget_clamp(4095)"
+        assert body["thinking"]["budget_tokens"] == 4095
+
     def test_no_fix_is_applied_on_the_final_attempt(self, client):
         """A fix found on the last attempt would never be sent, so it is not recorded."""
         from nadirclaw.server import _MAX_RECONCILE_ATTEMPTS
