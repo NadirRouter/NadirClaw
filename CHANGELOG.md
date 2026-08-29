@@ -4,6 +4,11 @@ All notable changes to NadirClaw will be documented in this file.
 
 ## [Unreleased]
 
+## [0.23.0] - 2026-08-29
+
+### Added
+- **`NADIRCLAW_PREFER_ENV_KEYS` — put provider env vars ahead of stored credentials.** The resolution chain runs OpenClaw stored token → NadirClaw stored token → env var, which is right on a laptop and backwards on a server: a stored personal OAuth or subscription token carries *that person's* rate limit, so every request the router proxies is billed and throttled against one human. On a machine that also runs Claude Code there was no way to override it short of deleting a credentials file the box still needs. Set the flag and the environment moves to the front, falling back to the stored credential when the relevant env var is unset. Default off, so existing installs are unchanged. `get_credential()` and `get_credential_source()` now share one `_env_credential()` implementation, so `nadirclaw status` cannot report `oauth` while the server is actually sending the env key.
+
 ### Changed
 - **License changed from MIT to the PolyForm Noncommercial License 1.0.0.** NadirClaw is now free for any noncommercial use (personal, research, education, evaluation, and noncommercial organizations). Commercial use requires a separate commercial license, available via [getnadir.com](https://getnadir.com). This applies to new versions; releases previously published under MIT remain available under MIT. The bundled `wide_deep_asym_v3` classifier weights and the `cascade-verifier-v1` snapshot are now released under the same noncommercial terms.
 
@@ -12,9 +17,11 @@ All notable changes to NadirClaw will be documented in this file.
 - **`/v1/chat/completions` had the same 400 on its Anthropic OAuth path** — the reconcile above only covered `/v1/messages`, so OpenClaw and Codex users routed to an older model still hit `adaptive thinking is not supported on this model` (#83). The direct Anthropic call behind the OpenAI-compatible endpoint now runs the same bounded reconcile loop and shares the per-model cache, and the fixes it applies are recorded as `modifiers_applied` on the request log. Two smaller corrections to the same mechanism: a reconciler that matched a 400 but declined to rewrite anything is no longer cached against the model, and the final attempt of the loop no longer applies a fix it has no round trip left to send.
 
 - **Clamping `max_tokens` could strand `thinking.budget_tokens` above it, turning one recoverable 400 into an unrecoverable one** — Anthropic requires `1024 <= budget_tokens < max_tokens`, but the reconcile loop lowered `max_tokens` to the routed model's ceiling (#73) without revisiting a thinking budget the client had sized for the ceiling it thought it had. A request with `max_tokens: 100000` and `budget_tokens: 60000` routed to a model capped lower was clamped into a body that 400s on `budget_tokens`, an error no reconciler matches, so the loop gave up and surfaced the failure. The clamp now lowers the budget to fit under the new ceiling, or drops `thinking` outright when no value clears Anthropic's 1024 floor. Reachable both from a client-supplied budget and from the adaptive downgrade above, whose budget is sized before a later attempt clamps `max_tokens`.
+- **`serve` could not start without a tty.** On first run it asked "No configuration found. Run setup wizard?" unconditionally. With no tty `click.confirm` raises `Abort` and the process exits 1, so the shipped `Dockerfile` (`CMD ["nadirclaw", "serve", "--host", "0.0.0.0"]`) could never boot a fresh container, and the same failure hit systemd units and CI. The prompt is now gated on `sys.stdin.isatty()`; headless starts fall through to the existing "Starting with defaults" path.
 
 ### Internal
 - **CI ran no server tests.** `.github/workflows/ci.yml` had excluded `tests/test_server.py` since the workflow was first added, so every test covering `/v1/messages`, `/v1/chat/completions`, routing headers, request logging, and the parameter reconcile above was skipped on every push and pull request. The exclusion is removed; the file passes on 3.10–3.12.
+
 
 ## [0.21.1] - 2026-06-25
 

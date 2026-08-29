@@ -48,7 +48,13 @@ def serve(port, simple_model, complex_model, models, token, verbose, log_raw, op
     from nadirclaw.setup import is_first_run
 
     if is_first_run():
-        if click.confirm("No configuration found. Run setup wizard?", default=True):
+        # Only ask when someone is there to answer. Under Docker, systemd or CI
+        # there is no tty, click.confirm raises Abort on EOF, and the server
+        # exits 1 instead of starting on defaults — which is what the else
+        # branch already does correctly.
+        if sys.stdin.isatty() and click.confirm(
+            "No configuration found. Run setup wizard?", default=True
+        ):
             from nadirclaw.setup import run_setup_wizard
             run_setup_wizard()
         else:
