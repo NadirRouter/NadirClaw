@@ -7,6 +7,14 @@ All notable changes to NadirClaw will be documented in this file.
 ### Changed
 - **License changed from MIT to the PolyForm Noncommercial License 1.0.0.** NadirClaw is now free for any noncommercial use (personal, research, education, evaluation, and noncommercial organizations). Commercial use requires a separate commercial license, available via [getnadir.com](https://getnadir.com). This applies to new versions; releases previously published under MIT remain available under MIT. The bundled `wide_deep_asym_v3` classifier weights and the `cascade-verifier-v1` snapshot are now released under the same noncommercial terms.
 
+## [0.23.0] - 2026-08-29
+
+### Added
+- **`NADIRCLAW_PREFER_ENV_KEYS` — put provider env vars ahead of stored credentials.** The resolution chain runs OpenClaw stored token → NadirClaw stored token → env var, which is right on a laptop and backwards on a server: a stored personal OAuth or subscription token carries *that person's* rate limit, so every request the router proxies is billed and throttled against one human. On a machine that also runs Claude Code there was no way to override it short of deleting a credentials file the box still needs. Set the flag and the environment moves to the front, falling back to the stored credential when the relevant env var is unset. Default off, so existing installs are unchanged. `get_credential()` and `get_credential_source()` now share one `_env_credential()` implementation, so `nadirclaw status` cannot report `oauth` while the server is actually sending the env key.
+
+### Fixed
+- **`serve` could not start without a tty.** On first run it asked "No configuration found. Run setup wizard?" unconditionally. With no tty `click.confirm` raises `Abort` and the process exits 1, so the shipped `Dockerfile` (`CMD ["nadirclaw", "serve", "--host", "0.0.0.0"]`) could never boot a fresh container, and the same failure hit systemd units and CI. The prompt is now gated on `sys.stdin.isatty()`; headless starts fall through to the existing "Starting with defaults" path.
+
 ## [0.21.1] - 2026-06-25
 
 ### Added
