@@ -2,6 +2,8 @@
 
 Stores provider API keys/tokens in ~/.nadirclaw/credentials.json.
 Resolution chain: OpenClaw stored token (optional) → NadirClaw stored token → env var.
+Set NADIRCLAW_PREFER_ENV_KEYS=1 to move the env var to the front — see
+_prefer_env_credentials().
 Supports OAuth tokens with automatic refresh for all providers.
 OpenClaw integration is optional — NadirClaw works standalone.
 """
@@ -397,10 +399,39 @@ def _maybe_refresh_oauth(provider: str, entry: dict) -> Optional[str]:
 
 
 
+def _prefer_env_credentials() -> bool:
+    """Whether the process environment outranks stored credentials.
+
+    Off by default: a developer box should keep using the token it logged in
+    with. A server wants the opposite. A stored personal OAuth or subscription
+    token is the wrong credential for shared traffic — it carries that person's
+    rate limit — and without this flag there is no way to override it short of
+    deleting the credentials file the same machine may need for other tools.
+    """
+    return os.getenv("NADIRCLAW_PREFER_ENV_KEYS", "").lower() in ("1", "true", "yes")
+
+
+def _env_credential(provider: str) -> Optional[str]:
+    """Provider credential from the environment: primary var, then fallbacks."""
+    env_var = _ENV_VAR_MAP.get(provider)
+    if env_var:
+        val = os.getenv(env_var, "")
+        if val:
+            return val
+
+    for fallback_var in _ENV_VAR_FALLBACKS.get(provider, []):
+        val = os.getenv(fallback_var, "")
+        if val:
+            return val
+
+    return None
+
+
 def get_credential(provider: str) -> Optional[str]:
     """Resolve a credential for a provider.
 
     Resolution order:
+      0. Environment variable, if NADIRCLAW_PREFER_ENV_KEYS is set
       1. OpenClaw stored token (~/.openclaw/agents/main/agent/auth-profiles.json)
          — with automatic OAuth refresh if expired
       1b. OpenClaw legacy (~/.openclaw/openclaw.json)
@@ -415,6 +446,12 @@ def get_credential(provider: str) -> Optional[str]:
     Returns:
         The token string, or None if no credential found.
     """
+    # 0. Environment first, when the deployment asked for it.
+    if _prefer_env_credentials():
+        token = _env_credential(provider)
+        if token:
+            return token
+
     # 1. OpenClaw auth-profiles (with auto-refresh for OAuth tokens)
     token = _check_openclaw_with_refresh(provider)
     if token:
@@ -431,20 +468,8 @@ def get_credential(provider: str) -> Optional[str]:
     if entry and entry.get("token"):
         return _maybe_refresh_oauth(provider, entry)
 
-    # 3. Environment variable (primary)
-    env_var = _ENV_VAR_MAP.get(provider)
-    if env_var:
-        val = os.getenv(env_var, "")
-        if val:
-            return val
-
-    # 4. Fallback env vars (e.g. GEMINI_API_KEY for google)
-    for fallback_var in _ENV_VAR_FALLBACKS.get(provider, []):
-        val = os.getenv(fallback_var, "")
-        if val:
-            return val
-
-    return None
+    # 3. Environment variable (primary, then fallbacks like GEMINI_API_KEY)
+    return _env_credential(provider)
 
 
 def get_gemini_oauth_config(provider: str = "google") -> Optional[dict]:
@@ -495,6 +520,10 @@ def get_credential_source(provider: str) -> Optional[str]:
 
     Returns one of: "openclaw", "oauth", "setup-token", "manual", "env", or None.
     """
+    # 0. Environment first, when the deployment asked for it.
+    if _prefer_env_credentials() and _env_credential(provider):
+        return "env"
+
     # 1. OpenClaw (auth-profiles with OAuth + legacy)
     if _check_openclaw_with_refresh(provider) or _check_openclaw(provider):
         return "openclaw"
@@ -505,15 +534,9 @@ def get_credential_source(provider: str) -> Optional[str]:
     if entry and entry.get("token"):
         return entry.get("source", "stored")
 
-    # 3. Env var (primary)
-    env_var = _ENV_VAR_MAP.get(provider)
-    if env_var and os.getenv(env_var, ""):
+    # 3. Env var (primary, then fallbacks)
+    if _env_credential(provider):
         return "env"
-
-    # 4. Fallback env vars
-    for fallback_var in _ENV_VAR_FALLBACKS.get(provider, []):
-        if os.getenv(fallback_var, ""):
-            return "env"
 
     return None
 

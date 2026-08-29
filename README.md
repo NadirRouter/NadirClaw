@@ -310,6 +310,23 @@ NadirClaw supports multiple ways to provide LLM credentials, checked in this ord
 2. **NadirClaw stored credential** (`~/.nadirclaw/credentials.json`)
 3. **Environment variable** (`GEMINI_API_KEY`, `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, etc.)
 
+#### Server deployments: `NADIRCLAW_PREFER_ENV_KEYS`
+
+On a shared server the default order is backwards. A stored personal OAuth or
+subscription token carries *that person's* rate limit, so every request the
+server proxies is billed and throttled against one human — and short of
+deleting a credentials file the machine may need for other tools, there is no
+way to override it.
+
+```bash
+NADIRCLAW_PREFER_ENV_KEYS=1 ANTHROPIC_API_KEY=sk-ant-... nadirclaw serve
+```
+
+Set it and the environment moves to the front of the chain, falling back to the
+stored credential when the relevant env var is unset. Leave it off on a laptop:
+there you want the token you logged in with. `nadirclaw status` reports `env`
+as the source when the override is what supplied the key.
+
 #### Using `nadirclaw auth` (recommended)
 
 ```bash
@@ -1495,6 +1512,7 @@ Auth is disabled by default (local-only). Set `NADIRCLAW_AUTH_TOKEN` to require 
 | `NADIRCLAW_CONFIDENCE_THRESHOLD` | `0.06` | Classification threshold (lower = more complex) |
 | `NADIRCLAW_PORT` | `8856` | Server port |
 | `NADIRCLAW_LOG_DIR` | `~/.nadirclaw/logs` | Log directory |
+| `NADIRCLAW_PREFER_ENV_KEYS` | `off` | Move provider env vars to the front of the credential chain, ahead of stored tokens. Set on servers so a personal OAuth/subscription token cannot capture shared traffic |
 | `NADIRCLAW_OPTIMIZE` | `off` | Context compression: `off` (disabled), `safe` (lossless), `aggressive`, or `progressive` (staged ladder that escalates to Headroom). `off` is the master on/off switch |
 | `NADIRCLAW_OPTIMIZE_MAX_TURNS` | `40` | Max conversation turns to keep when trimming history |
 | `NADIRCLAW_OPTIMIZE_BACKEND` | `native` | Optimizer backend: `native` (built-in) or `headroom` (needs `pip install nadirclaw[headroom]`; falls back to native if absent). See [savings analysis](docs/context-optimize-savings.md#backends-native-default-vs-headroom) |
