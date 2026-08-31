@@ -24,7 +24,11 @@ classifiers = [
 dependencies = [
     "fastapi>=0.100.0",
     "uvicorn>=0.20.0",
-    "litellm>=1.0.0",
+    "litellm>=1.0.0; python_version >= '3.11'",
+    # ponytail: litellm 1.98.0 imports typing.NotRequired (3.11+) from
+    # llms/anthropic/experimental_pass_through/context_management/editors/compact.py
+    # while still declaring Requires-Python >=3.10. Drop this cap once upstream fixes it.
+    "litellm>=1.0.0,<1.98.0; python_version < '3.11'",
     "sentence-transformers>=2.0.0",
     "numpy",
     "python-dotenv",

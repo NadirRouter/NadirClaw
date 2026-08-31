@@ -43,7 +43,7 @@ def tmp_credentials(tmp_path, monkeypatch):
     for var in (
         "ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GOOGLE_API_KEY",
         "GEMINI_API_KEY", "COHERE_API_KEY", "MISTRAL_API_KEY",
-        "MINIMAX_API_KEY",
+        "MINIMAX_API_KEY", "NADIRCLAW_PREFER_ENV_KEYS",
     ):
         monkeypatch.delenv(var, raising=False)
     return creds_file
@@ -129,6 +129,19 @@ class TestEnvFallback:
         monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-from-env")
         save_credential("anthropic", "sk-stored", source="manual")
         assert get_credential("anthropic") == "sk-stored"
+
+    def test_prefer_env_overrides_stored(self, monkeypatch):
+        monkeypatch.setenv("NADIRCLAW_PREFER_ENV_KEYS", "1")
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-from-env")
+        save_credential("anthropic", "sk-stored", source="oauth")
+        assert get_credential("anthropic") == "sk-from-env"
+        assert get_credential_source("anthropic") == "env"
+
+    def test_prefer_env_falls_back_to_stored_when_env_unset(self, monkeypatch):
+        monkeypatch.setenv("NADIRCLAW_PREFER_ENV_KEYS", "1")
+        save_credential("anthropic", "sk-stored", source="oauth")
+        assert get_credential("anthropic") == "sk-stored"
+        assert get_credential_source("anthropic") == "oauth"
 
     def test_gemini_fallback_env(self, monkeypatch):
         monkeypatch.setenv("GEMINI_API_KEY", "AIza-gemini")
