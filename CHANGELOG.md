@@ -4,6 +4,9 @@ All notable changes to NadirClaw will be documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+- **The prompt cache ignored every request parameter except the model and message text, so it could answer a request with a response that does not satisfy it** (#90). The key was `sha256(model + [role, content])`, while the request surface forwarded upstream also carries `tools`, `tool_choice`, `response_format`, `reasoning_effort`, `thinking`, `max_tokens`, `temperature`, `top_p`, `n`, and arbitrary provider extras. Two requests with the same messages therefore shared a cache entry: a plain chat answer could be served to a later request asking for `response_format: {"type": "json_schema"}` or for `tool_calls`, and a response generated under a high `max_tokens` could be served to a request that asked for a low one — silently overriding the client's contract, since the cache sits in front of the provider call. The key now includes every response-shaping field (`request_cache_params()` collects the declared ones plus everything in `model_extra` except `stream`), and message normalization keeps `tool_call_id` / `name` / `tool_calls` so tool-result turns with identical text no longer collide. Non-serializable extras fall back to `repr` rather than raising.
+
 ## [0.23.0] - 2026-08-31
 
 ### Added

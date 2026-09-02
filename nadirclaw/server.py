@@ -1587,12 +1587,13 @@ async def chat_completions(
         # ------------------------------------------------------------------
         # Prompt cache — check before calling the model
         # ------------------------------------------------------------------
-        from nadirclaw.cache import _cache_enabled, get_prompt_cache
+        from nadirclaw.cache import _cache_enabled, get_prompt_cache, request_cache_params
 
         prompt_cache = get_prompt_cache()
+        cache_params = request_cache_params(request)
         cache_hit = False
         if _cache_enabled() and not request.stream:
-            cached_response = prompt_cache.get(selected_model, request.messages)
+            cached_response = prompt_cache.get(selected_model, request.messages, cache_params)
             if cached_response is not None:
                 response_data = cached_response
                 cache_hit = True
@@ -1683,7 +1684,7 @@ async def chat_completions(
 
             # Store in prompt cache
             if _cache_enabled():
-                prompt_cache.put(selected_model, request.messages, response_data)
+                prompt_cache.put(selected_model, request.messages, response_data, cache_params)
         else:
             elapsed_ms = int((time.time() - start_time) * 1000)
             total_tokens = response_data["prompt_tokens"] + response_data["completion_tokens"]
