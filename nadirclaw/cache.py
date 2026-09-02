@@ -31,19 +31,53 @@ def _cache_max_size() -> int:
     return int(os.getenv("NADIRCLAW_CACHE_MAX_SIZE", "1000"))
 
 
-def _make_cache_key(model: str, messages: list) -> str:
-    """Build a deterministic cache key from model + messages (ignoring temperature/stream)."""
-    # Normalize messages to just role + content
-    normalized = []
-    for m in messages:
-        if hasattr(m, "role"):
-            normalized.append({"role": m.role, "content": m.text_content() if hasattr(m, "text_content") else str(m.content)})
-        elif isinstance(m, dict):
-            normalized.append({"role": m.get("role", ""), "content": m.get("content", "")})
-        else:
-            normalized.append(str(m))
+# Declared request fields that change the upstream response and so must be part
+# of the cache key. Everything else the client sends (tools, tool_choice,
+# response_format, reasoning_effort, thinking, provider extras) arrives in
+# model_extra and is included wholesale -- see request_cache_params.
+_KEYED_FIELDS = ("temperature", "top_p", "max_tokens", "n")
 
-    blob = json.dumps({"model": model or "", "messages": normalized}, sort_keys=True)
+
+def request_cache_params(request: Any) -> Dict[str, Any]:
+    """Extract every request field that shapes the response, for the cache key.
+
+    Only ``stream`` is ignored: it changes the transport, not the content, and
+    the cache is consulted on non-streaming requests only.
+    """
+    params: Dict[str, Any] = {f: getattr(request, f, None) for f in _KEYED_FIELDS}
+    extra = getattr(request, "model_extra", None) or {}
+    params.update({k: v for k, v in extra.items() if k != "stream"})
+    return {k: v for k, v in params.items() if v is not None}
+
+
+def _normalize_message(m: Any) -> Any:
+    """Reduce a message to the parts that affect the response."""
+    if hasattr(m, "role"):
+        norm = {
+            "role": m.role,
+            "content": m.text_content() if hasattr(m, "text_content") else str(m.content),
+        }
+        # tool_call_id / name / tool_calls ride along in model_extra
+        norm.update(getattr(m, "model_extra", None) or {})
+        return norm
+    if isinstance(m, dict):
+        norm = dict(m)
+        norm["content"] = m.get("content", "")
+        return norm
+    return str(m)
+
+
+def _make_cache_key(model: str, messages: list, params: Optional[Dict[str, Any]] = None) -> str:
+    """Build a deterministic cache key from model + messages + response-shaping params."""
+    blob = json.dumps(
+        {
+            "model": model or "",
+            "messages": [_normalize_message(m) for m in messages],
+            "params": params or {},
+        },
+        sort_keys=True,
+        default=str,
+    )
     return hashlib.sha256(blob.encode()).hexdigest()
 
 
@@ -58,9 +92,11 @@ class PromptCache:
         self._hits = 0
         self._misses = 0
 
-    def get(self, model: str, messages: list) -> Optional[Dict[str, Any]]:
+    def get(
+        self, model: str, messages: list, params: Optional[Dict[str, Any]] = None
+    ) -> Optional[Dict[str, Any]]:
         """Look up a cached response. Returns None on miss or expiry."""
-        key = _make_cache_key(model, messages)
+        key = _make_cache_key(model, messages, params)
         with self._lock:
             if key in self._cache:
                 ts, data = self._cache[key]
@@ -76,9 +112,15 @@ class PromptCache:
             self._misses += 1
             return None
 
-    def put(self, model: str, messages: list, response: Dict[str, Any]) -> None:
+    def put(
+        self,
+        model: str,
+        messages: list,
+        response: Dict[str, Any],
+        params: Optional[Dict[str, Any]] = None,
+    ) -> None:
         """Store a response in the cache."""
-        key = _make_cache_key(model, messages)
+        key = _make_cache_key(model, messages, params)
         with self._lock:
             if key in self._cache:
                 self._cache.move_to_end(key)
