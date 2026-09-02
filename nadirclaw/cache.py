@@ -53,10 +53,12 @@ def request_cache_params(request: Any) -> Dict[str, Any]:
 def _normalize_message(m: Any) -> Any:
     """Reduce a message to the parts that affect the response."""
     if hasattr(m, "role"):
-        norm = {
-            "role": m.role,
-            "content": m.text_content() if hasattr(m, "text_content") else str(m.content),
-        }
+        content = getattr(m, "content", None)
+        # Multi-modal content is kept whole: text_content() drops image parts, so
+        # two questions with the same wording about different images would collide.
+        if not isinstance(content, list):
+            content = m.text_content() if hasattr(m, "text_content") else str(content)
+        norm = {"role": m.role, "content": content}
         # tool_call_id / name / tool_calls ride along in model_extra
         norm.update(getattr(m, "model_extra", None) or {})
         return norm

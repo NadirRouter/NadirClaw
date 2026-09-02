@@ -60,6 +60,29 @@ class TestMakeCacheKey:
         k2 = _make_cache_key("gpt-4", [{"role": "tool", "content": "ok", "tool_call_id": "b"}])
         assert k1 != k2
 
+    def test_image_changes_key(self):
+        """Same question about a different image must not collide."""
+        from nadirclaw.server import ChatMessage
+
+        def msg(url):
+            return ChatMessage(
+                role="user",
+                content=[
+                    {"type": "text", "text": "What is in this image?"},
+                    {"type": "image_url", "image_url": {"url": url}},
+                ],
+            )
+
+        assert _make_cache_key("gpt-4", [msg("cat.png")]) != _make_cache_key("gpt-4", [msg("dog.png")])
+
+    def test_text_only_message_key_is_unchanged_by_object_form(self):
+        """A plain-text ChatMessage still keys the same as its dict form."""
+        from nadirclaw.server import ChatMessage
+
+        obj = _make_cache_key("gpt-4", [ChatMessage(role="user", content="hello")])
+        plain = _make_cache_key("gpt-4", [{"role": "user", "content": "hello"}])
+        assert obj == plain
+
 
 class TestRequestCacheParams:
     def test_extracts_declared_and_extra_fields(self):
