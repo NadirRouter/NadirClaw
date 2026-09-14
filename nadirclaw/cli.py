@@ -1658,12 +1658,71 @@ def claude_shim(action):
     click.echo("\nThen just run `claude` — the shim will start NadirClaw on demand.")
 
 
+@claude.command("read-hook")
+@click.option("--explain", is_flag=True, help="Print the decision reason to stderr")
+def claude_read_hook(explain):
+    """Claude Code PreToolUse hook: serve a structural view for oversized Python reads.
+
+    Reads one hook event on stdin and writes the decision to stdout. Registered
+    by `nadirclaw claude hook install`; not normally run by hand.
+    """
+    from nadirclaw.read_hook import run
+
+    report = run(sys.stdin, sys.stdout)
+    if explain:
+        click.echo(json.dumps(report), err=True)
+
+
+@claude.command("hook")
+@click.argument("action", type=click.Choice(["install", "uninstall", "status"]))
+def claude_hook(action):
+    """Install, remove, or check the Claude Code Read hook."""
+    from nadirclaw.claude_integration import (
+        CLAUDE_SETTINGS_FILE,
+        READ_HOOK_LABEL,
+        patch_claude_read_hook,
+        unpatch_claude_read_hook,
+    )
+
+    if action == "install":
+        path = patch_claude_read_hook()
+        click.echo(f"Registered the NadirClaw Read hook in {path}")
+        click.echo("Start a new Claude Code session for it to take effect.")
+        click.echo(
+            "Python files past Claude Code's ~25k-token read cap are now served as a "
+            "structural view with original line numbers, instead of a truncated page."
+        )
+        return
+
+    if action == "uninstall":
+        if unpatch_claude_read_hook():
+            click.echo("Removed the NadirClaw Read hook (other hooks left in place)")
+        else:
+            click.echo("No NadirClaw Read hook was installed")
+        return
+
+    installed = False
+    if CLAUDE_SETTINGS_FILE.exists():
+        try:
+            config = json.loads(CLAUDE_SETTINGS_FILE.read_text())
+        except (OSError, json.JSONDecodeError):
+            config = {}
+        entries = (config.get("hooks") or {}).get("PreToolUse") or []
+        installed = any(
+            isinstance(h, dict) and h.get("statusMessage") == READ_HOOK_LABEL
+            for entry in entries if isinstance(entry, dict)
+            for h in (entry.get("hooks") or [])
+        )
+    click.echo(f"Read hook: {'installed' if installed else 'not installed'} ({CLAUDE_SETTINGS_FILE})")
+
+
 @claude.command("uninstall")
 def claude_uninstall():
     """Remove all Claude Code integration artifacts (daemon, shim, settings entries)."""
     from nadirclaw.claude_integration import (
         uninstall_daemon,
         uninstall_shim,
+        unpatch_claude_read_hook,
         unpatch_claude_settings,
     )
 
@@ -1676,6 +1735,9 @@ def claude_uninstall():
 
     if unpatch_claude_settings():
         click.echo("Cleared ANTHROPIC_BASE_URL/ANTHROPIC_API_KEY from Claude Code settings")
+
+    if unpatch_claude_read_hook():
+        click.echo("Removed the NadirClaw Read hook from Claude Code settings")
 
     if not removed_daemon:
         click.echo("(no daemon unit was installed)")

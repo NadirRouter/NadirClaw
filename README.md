@@ -831,6 +831,39 @@ Or persist a default by setting `ANTHROPIC_MODEL` in `~/.claude/settings.json` (
 
 Streaming works as expected. In typical Claude Code usage, 40-70% of prompts are simple enough to route to a cheaper model, which translates directly to cost savings.
 
+### Structural views for oversized file reads
+
+Claude Code returns at most ~25,000 tokens per `Read` and truncates the rest, so
+a large module arrives as a partial page and everything below the cut is missing
+until the agent pages through the file. An optional hook intercepts those reads
+and answers with a declaration-level view instead — every definition, decorator,
+docstring excerpt and module constant, each tagged with its **original** source
+lines:
+
+```bash
+nadirclaw claude hook install     # register it in ~/.claude/settings.json
+nadirclaw claude hook status      # check whether it is registered
+nadirclaw claude hook uninstall   # remove it, leaving other hooks alone
+```
+
+Start a new Claude Code session for it to take effect. This is separate from the
+proxy: `optimize` and `compress` rewrite the messages array on its way to a
+provider, while this runs in the agent before the file ever enters the
+conversation, so it works whether or not you route through NadirClaw.
+
+Only whole-file reads of `.py`/`.pyi` estimated past the cap are served. Narrowed
+reads (`offset`/`limit`) are the recovery path and always pass through, as do
+other languages, unparsable syntax, files under the cap, and modules above 4 MiB,
+which would not parse inside the hook's time budget. The file is untouched on
+disk: to get exact bodies back, re-read the range you need. The view is not valid
+replacement code, and the hook says so in every response.
+
+Measured once on this repo's `nadirclaw/server.py` (2,939 lines) with Claude Code
+2.1.220 and Haiku 4.5: without the hook the read truncated and the session paged
+twice for $0.140; with it, one 23,437-character view for $0.066. Both answers
+were correct. That is a single file and a single prompt, not a general savings
+claim.
+
 ### How the proxy speaks to Claude Code
 
 NadirClaw exposes **both** API surfaces:

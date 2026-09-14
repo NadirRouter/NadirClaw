@@ -538,6 +538,113 @@ def unpatch_claude_settings(settings_path: Optional[Path] = None) -> bool:
 
 
 # ---------------------------------------------------------------------------
+# Claude Code Read hook
+# ---------------------------------------------------------------------------
+
+READ_HOOK_LABEL = "NadirClaw read hook"
+
+
+def _backup_settings(settings_path: Path) -> None:
+    backup = settings_path.with_name(
+        f"settings.backup-{datetime.now().strftime('%Y%m%d-%H%M%S')}.json"
+    )
+    shutil.copy2(settings_path, backup)
+
+
+def patch_claude_read_hook(settings_path: Optional[Path] = None) -> Path:
+    """Register the structural-view Read hook in Claude Code settings.
+
+    Other PreToolUse hooks are preserved; a previous NadirClaw entry is
+    replaced rather than duplicated, so re-running is idempotent.
+    """
+    if settings_path is None:
+        settings_path = CLAUDE_SETTINGS_FILE
+    settings_path.parent.mkdir(parents=True, exist_ok=True)
+
+    config: Dict = {}
+    if settings_path.exists():
+        try:
+            config = json.loads(settings_path.read_text())
+        except (OSError, json.JSONDecodeError):
+            config = {}
+        _backup_settings(settings_path)
+    if not isinstance(config, dict):
+        raise ValueError("Claude Code settings must be a JSON object")
+
+    hooks = config.get("hooks")
+    if not isinstance(hooks, dict):
+        hooks = {}
+    entries = hooks.get("PreToolUse")
+    if not isinstance(entries, list):
+        entries = []
+
+    preserved = []
+    for entry in entries:
+        if not isinstance(entry, dict) or not isinstance(entry.get("hooks"), list):
+            preserved.append(entry)
+            continue
+        others = [h for h in entry["hooks"]
+                  if not isinstance(h, dict) or h.get("statusMessage") != READ_HOOK_LABEL]
+        if others:
+            preserved.append(dict(entry, hooks=others))
+
+    preserved.append({"matcher": "Read", "hooks": [{
+        "type": "command",
+        "command": f"{_nadirclaw_binary()} claude read-hook",
+        "timeout": 10,
+        "statusMessage": READ_HOOK_LABEL,
+    }]})
+    hooks["PreToolUse"] = preserved
+    config["hooks"] = hooks
+
+    settings_path.write_text(json.dumps(config, indent=2) + "\n")
+    return settings_path
+
+
+def unpatch_claude_read_hook(settings_path: Optional[Path] = None) -> bool:
+    """Remove only NadirClaw's Read hook. Returns True if settings changed."""
+    if settings_path is None:
+        settings_path = CLAUDE_SETTINGS_FILE
+    if not settings_path.exists():
+        return False
+    try:
+        config = json.loads(settings_path.read_text())
+    except (OSError, json.JSONDecodeError):
+        return False
+    if not isinstance(config, dict):
+        return False
+    hooks = config.get("hooks")
+    if not isinstance(hooks, dict) or not isinstance(hooks.get("PreToolUse"), list):
+        return False
+
+    preserved, changed = [], False
+    for entry in hooks["PreToolUse"]:
+        if not isinstance(entry, dict) or not isinstance(entry.get("hooks"), list):
+            preserved.append(entry)
+            continue
+        others = [h for h in entry["hooks"]
+                  if not isinstance(h, dict) or h.get("statusMessage") != READ_HOOK_LABEL]
+        if len(others) != len(entry["hooks"]):
+            changed = True
+        if others:
+            preserved.append(dict(entry, hooks=others))
+    if not changed:
+        return False
+
+    _backup_settings(settings_path)
+    if preserved:
+        hooks["PreToolUse"] = preserved
+    else:
+        hooks.pop("PreToolUse", None)
+    if hooks:
+        config["hooks"] = hooks
+    else:
+        config.pop("hooks", None)
+    settings_path.write_text(json.dumps(config, indent=2) + "\n")
+    return True
+
+
+# ---------------------------------------------------------------------------
 # Daemon (launchd / systemd)
 # ---------------------------------------------------------------------------
 

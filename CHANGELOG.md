@@ -4,6 +4,9 @@ All notable changes to NadirClaw will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+- **`nadirclaw claude hook` — structural views for file reads Claude Code would truncate.** Claude Code serves at most ~25,000 tokens per `Read` and truncates the rest, so a large module arrives as a partial page and the agent either misses everything below the cut or pages through the file at full cost. The new opt-in `PreToolUse` hook answers those reads with a declaration-level view instead: every definition, decorator, docstring excerpt and module constant, each tagged with its original source lines. No model call, no network, no archive — the file is untouched on disk, so recovery is a narrowed re-read. This is separate from `optimize`/`compress`, which rewrite the messages array inside the proxy; the hook runs in the agent before the file enters the conversation, so it works without routing through NadirClaw. Only whole-file reads of `.py`/`.pyi` past the cap are served; narrowed reads, other languages, unparsable syntax, files under the cap and modules above 4 MiB pass through untouched. `install` preserves any other `PreToolUse` hooks and is idempotent; `uninstall` removes only NadirClaw's entry, and `nadirclaw claude uninstall` now clears it too.
+
 ## [0.23.1] - 2026-09-02
 
 ### Fixed
