@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "nadirclaw"
 dynamic = ["version"]
-description = "Open-source LLM router — simple prompts to free models, complex to premium"
+description = "Source-available LLM router: simple prompts to free models, complex to premium"
 readme = "README.md"
 requires-python = ">=3.10"
 license = "PolyForm-Noncommercial-1.0.0"

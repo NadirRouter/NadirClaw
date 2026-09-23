@@ -9,7 +9,8 @@
 <p align="center">
   <strong>The lowest viable model, verified.</strong><br>
   NadirClaw routes every prompt to the cheapest model that can reliably answer, verifies the
-  output, and escalates only when it has to. Better answers, lower cost — 40–70% lower.
+  output, and escalates only when it has to. Better answers at lower cost, and it prices every
+  routed request against your baseline so you can see what it actually saved.
 </p>
 
 <p align="center">
@@ -29,7 +30,7 @@
 </p>
 
 <p align="center">
-  <sub>Running real traffic or a team? <a href="https://getnadir.com?ref=readme-hero">Nadir Pro</a> adds a trained classifier (10-20% more savings), a live dashboard, team billing, and SSO. <strong>30-day free trial.</strong></sub>
+  <sub>Running real traffic or a team? <a href="https://getnadir.com?ref=readme-hero">Nadir Pro</a> adds a trained classifier, a live dashboard, team billing, and SSO. <strong>30-day free trial.</strong></sub>
 </p>
 
 ---
@@ -51,7 +52,7 @@ SIMPLE  "Write a docstring"         → gemini-flash    $0.0002
 3 of 5 routed cheaper · $0.549 vs $1.37 all-premium · 60% saved
 ```
 
-- **Cut AI API costs 40-70%** — real savings from day one
+- **Cut AI API costs** — how much depends on your prompt mix, so NadirClaw measures it per request
 - **~10ms classification overhead** — you won't notice it
 - **Drop-in proxy** — works with any OpenAI-compatible tool
 - **Runs locally** — your API keys never leave your machine
@@ -152,7 +153,7 @@ That's it. NadirClaw starts on `http://localhost:8856` with sensible defaults (G
 
 ## NadirClaw vs Nadir Pro
 
-NadirClaw is the free, open-source core. If you are routing production traffic or running a team, [**Nadir Pro**](https://getnadir.com) is the hosted version with more accurate routing, team features, and analytics. Same routing philosophy, zero vendor lock-in (Pro lets you BYOK and you can always fall back to NadirClaw self-hosted).
+NadirClaw is the free, source-available core, licensed under PolyForm Noncommercial (free for noncommercial use). If you are routing production traffic or running a team, [**Nadir Pro**](https://getnadir.com) is the hosted version with more accurate routing, team features, and analytics. Same routing philosophy, zero vendor lock-in (Pro lets you BYOK and you can always fall back to NadirClaw self-hosted).
 
 |  | NadirClaw (Free, OSS) | [Nadir Pro](https://getnadir.com) (Hosted) |
 |---|---|---|
@@ -829,7 +830,7 @@ claude --model nadir-free        # force the configured free / local model
 
 Or persist a default by setting `ANTHROPIC_MODEL` in `~/.claude/settings.json` (the `onboard` command does this for you). Inside a session you can also type `/model nadir-eco` as a slash command.
 
-Streaming works as expected. In typical Claude Code usage, 40-70% of prompts are simple enough to route to a cheaper model, which translates directly to cost savings.
+Streaming works as expected. In typical Claude Code usage, a large share of prompts are simple enough to route to a cheaper model, which translates directly to cost savings.
 
 ### Structural views for oversized file reads
 
@@ -1363,7 +1364,7 @@ Classification takes ~10ms on a warm encoder. The first request takes ~2-3 secon
 
 ## Cost Savings & Benchmarks — How Much Does NadirClaw Save?
 
-Real-world usage shows NadirClaw typically reduces LLM costs by 40-70% depending on your workload and model choices.
+How much NadirClaw saves depends on your prompt mix, the baseline model you are comparing against, and the models you route to. It prices every routed request against that baseline, so the figures below are measured sessions rather than a promise.
 
 ### Example: Claude Code Usage
 
