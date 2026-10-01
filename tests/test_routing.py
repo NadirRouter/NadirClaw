@@ -104,6 +104,7 @@ class TestResolveAlias:
     def test_minimax(self):
         assert resolve_alias("minimax") == "minimax/MiniMax-M3"
         assert resolve_alias("minimax-m3") == "minimax/MiniMax-M3"
+        assert resolve_alias("minimax-m2.7") == "minimax/MiniMax-M2.7"
 
 
 # ---------------------------------------------------------------------------
@@ -261,6 +262,12 @@ class TestContextWindow:
         content = "x" * 600_000
         messages = [_msg("user", content)]
         assert check_context_window("gemini-3-flash-preview", messages) is True
+
+    def test_minimax_m27_context_limit(self):
+        model = resolve_alias("minimax-m2.7")
+        assert get_context_window(model) == 204_800
+        assert check_context_window(model, [_msg("user", "x" * 204_799 * 4)]) is True
+        assert check_context_window(model, [_msg("user", "x" * 204_800 * 4)]) is False
 
 
 class TestEstimateTokenCount:
@@ -462,6 +469,10 @@ class TestEstimateCost:
     def test_minimax_m3_cost(self):
         cost = estimate_cost("minimax/MiniMax-M3", 1_000_000, 1_000_000)
         assert cost == pytest.approx(3.0)
+
+    def test_minimax_m27_cost(self):
+        assert estimate_cost("minimax/MiniMax-M2.7", 1_000_000, 0) == pytest.approx(0.3)
+        assert estimate_cost("minimax/MiniMax-M2.7", 0, 1_000_000) == pytest.approx(1.2)
 
     def test_unknown_model(self):
         assert estimate_cost("unknown-xyz", 1000, 500) is None
@@ -701,6 +712,7 @@ class TestHasVision:
         assert has_vision("minimax/MiniMax-M3") is True
 
     def test_non_vision_models(self):
+        assert has_vision("minimax/MiniMax-M2.7") is False
         assert has_vision("deepseek/deepseek-chat") is False
         assert has_vision("ollama/llama3.1:8b") is False
         assert has_vision("openai-codex/gpt-5.3-codex") is False
