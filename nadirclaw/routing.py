@@ -160,6 +160,7 @@ MODEL_REGISTRY: Dict[str, Dict[str, Any]] = {
     "deepseek/deepseek-reasoner": {"context_window": 128_000, "cost_per_m_input": 0.28, "cost_per_m_output": 0.42, "has_vision": False},
     # MiniMax
     "minimax/MiniMax-M3": {"context_window": 1_000_000, "cost_per_m_input": 0.60, "cost_per_m_output": 2.40, "has_vision": True},
+    "minimax/MiniMax-M2.7": {"context_window": 204_800, "cost_per_m_input": 0.30, "cost_per_m_output": 1.20, "has_vision": False},
     # Ollama (local, no cost, context varies by model)
     "ollama/llama3.1:8b": {"context_window": 128_000, "cost_per_m_input": 0, "cost_per_m_output": 0, "has_vision": False},
     "ollama/qwen3:32b": {"context_window": 128_000, "cost_per_m_input": 0, "cost_per_m_output": 0, "has_vision": False},
@@ -216,6 +217,7 @@ MODEL_ALIASES: Dict[str, str] = {
     "deepseek-r1": "deepseek/deepseek-reasoner",
     "minimax": "minimax/MiniMax-M3",
     "minimax-m3": "minimax/MiniMax-M3",
+    "minimax-m2.7": "minimax/MiniMax-M2.7",
     "llama": "ollama/llama3.1:8b",
 }
 
