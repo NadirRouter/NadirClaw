@@ -86,7 +86,7 @@ Training is **deliberately disjoint** from RouterBench and RouterArena.
 Sources for `wide_deep_asym_v3`:
 
 - Internal Nadir labeled batches (`backend/labeled_data/v3/...`, not
-  part of this open-source repo).
+  part of this source-available repo).
 - Prior labeled batches under `v2/`, `raw/`, `batches/`.
 
 The verifier corpus used to train the post-generation cascade verifier
