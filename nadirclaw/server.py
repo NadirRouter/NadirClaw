@@ -170,7 +170,7 @@ _rate_limiter = _RateLimiter()
 app = FastAPI(
     title="NadirClaw",
     version=__version__,
-    description="Open-source LLM router — simple prompts to free models, complex to premium",
+    description="Source-available LLM router — simple prompts to free models, complex to premium",
 )
 
 # Register web dashboard routes
@@ -3169,6 +3169,6 @@ async def root():
     return {
         "name": "NadirClaw",
         "version": __version__,
-        "description": "Open-source LLM router",
+        "description": "Source-available LLM router",
         "status": "ok",
     }

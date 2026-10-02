@@ -4,7 +4,7 @@ This card documents the architecture, training corpus, contamination
 posture, and published benchmark numbers for the pre-generation tier
 classifier that powers Nadir's routing decisions.
 
-NadirClaw, the open-source router in this repo, ships **the architecture
+NadirClaw, the source-available router in this repo, ships **the architecture
 description, the bundled trained weights, the heuristics on top of
 them**, and the cascade rule engine (see `nadirclaw/cascade.py`,
 `nadirclaw/cascade_rules/`, `nadirclaw/heuristic_verifier.py`,

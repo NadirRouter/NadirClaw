@@ -6,7 +6,7 @@
 # rule-based HeuristicVerifier.
 #
 # Use this profile to reproduce the RouterArena PR #112 result
-# (arena_F 0.7358) end-to-end with the open-source router. Requires
+# (arena_F 0.7358) end-to-end with the source-available router. Requires
 # the `trained` extras:
 #
 #   pip install nadirclaw[trained]

@@ -14,7 +14,7 @@ import click
 @click.group()
 @click.version_option(version=None, prog_name="nadirclaw", package_name="nadirclaw")
 def main():
-    """NadirClaw — Open-source LLM router."""
+    """NadirClaw — Source-available LLM router."""
     pass
 
 
