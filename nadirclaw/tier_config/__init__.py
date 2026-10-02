@@ -1,7 +1,7 @@
 """N-tier YAML tier configuration for NadirClaw (free / PolyForm Noncommercial).
 
 The tier_config package owns the "how many tiers, with which cutoffs,
-mapped to which model pools" decision. It is the open-source half of
+mapped to which model pools" decision. It is the source-available half of
 the N-tier architecture documented in ``N_TIER_ARCHITECTURE.md``: one
 continuous classifier score in [0,1] is sliced into N tiers by YAML
 cutoffs, the cascade walks adjacent tiers under the verifier, and the

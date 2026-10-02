@@ -1,6 +1,6 @@
 """Wide-and-Deep asymmetric pre-generation classifier (NadirClaw, PolyForm Noncommercial).
 
-This is the open-source counterpart to the Wide&Deep analyzer that
+This is the source-available counterpart to the Wide&Deep analyzer that
 powers Nadir's production routing. The trained weights (~900 KB,
 `wide_deep_asym_v3.pt`) are bundled in `nadirclaw/models/` so users
 get the trained classifier out of the box — no Nadir Pro account, no
