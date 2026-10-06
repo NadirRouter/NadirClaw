@@ -6,16 +6,27 @@ so any OpenAI-compatible client works out of the box.
 """
 
 import hmac
+import ipaddress
 import json
 import logging
 import os
 from typing import Any, Dict, List, Optional
 
-from fastapi import Header, HTTPException, status
+from fastapi import Header, HTTPException, Request, status
 
 from nadirclaw.settings import settings
 
 logger = logging.getLogger(__name__)
+
+
+def is_loopback(host: Optional[str]) -> bool:
+    """True for ``localhost`` and loopback IP literals (127.0.0.0/8, ::1)."""
+    if host == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(host or "").is_loopback
+    except ValueError:
+        return False
 
 
 class UserSession:
@@ -66,6 +77,7 @@ _LOCAL_USERS: Dict[str, Dict[str, Any]] = _load_local_users()
 
 
 async def validate_local_auth(
+    request: Request,
     authorization: Optional[str] = Header(None),
     x_api_key: Optional[str] = Header(None, alias="X-API-Key"),
 ) -> UserSession:
@@ -92,9 +104,18 @@ async def validate_local_auth(
             detail="Invalid token format",
         )
 
-    # If no auth token is configured, allow all requests (local-only mode)
+    # No auth token configured: serve same-machine callers only. The peer check
+    # covers a non-loopback bind; the Host check covers DNS rebinding, where a
+    # web page reaches 127.0.0.1 under its own hostname.
     configured_token = settings.AUTH_TOKEN
     if not configured_token:
+        peer = request.client.host if request.client else None
+        if not (is_loopback(peer) and is_loopback(request.url.hostname)):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Unauthenticated requests are accepted from localhost only. "
+                "Set NADIRCLAW_AUTH_TOKEN to allow other clients.",
+            )
         return UserSession(_LOCAL_USERS.get("", _default_user()))
 
     if not token:

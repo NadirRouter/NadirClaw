@@ -28,7 +28,7 @@ from nadirclaw.server import (
 
 @pytest.fixture
 def client():
-    return TestClient(app)
+    return TestClient(app, base_url="http://localhost", client=("127.0.0.1", 50000))
 
 
 def _make_request(messages, tools=None, tool_choice=None, stream=False, model="auto"):
@@ -317,7 +317,7 @@ class TestNonStreamingToolCalls:
                 {"tier": "complex"},
             )
 
-            client = TestClient(app)
+            client = TestClient(app, base_url="http://localhost", client=("127.0.0.1", 50000))
             resp = client.post(
                 "/v1/chat/completions",
                 json={
@@ -350,7 +350,7 @@ class TestNonStreamingToolCalls:
                 {"tier": "simple"},
             )
 
-            client = TestClient(app)
+            client = TestClient(app, base_url="http://localhost", client=("127.0.0.1", 50000))
             resp = client.post(
                 "/v1/chat/completions",
                 json={

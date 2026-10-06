@@ -261,10 +261,11 @@ Run NadirClaw + Ollama with zero cost, fully local:
 
 ```bash
 git clone https://github.com/doramirdor/NadirClaw.git && cd NadirClaw
+echo "NADIRCLAW_AUTH_TOKEN=$(openssl rand -hex 32)" >> .env
 docker compose up
 ```
 
-This starts Ollama and NadirClaw on port `8856`. Pull a model once it's running:
+This starts Ollama and NadirClaw on port `8856`. The container listens on all interfaces so the port can be published, which is why it will not start without `NADIRCLAW_AUTH_TOKEN`. Clients send the token as `Authorization: Bearer <token>`. Pull a model once it's running:
 
 ```bash
 docker compose exec ollama ollama pull llama3.1:8b
@@ -1130,6 +1131,7 @@ nadirclaw serve [OPTIONS]
 
 Options:
   --port INTEGER          Port to listen on (default: 8856)
+  --host TEXT             Interface to bind (default: 127.0.0.1). A non-loopback host requires an auth token
   --simple-model TEXT     Model for simple prompts
   --complex-model TEXT    Model for complex prompts
   --models TEXT           Comma-separated model list (legacy)
@@ -1503,7 +1505,7 @@ for the full ladder, the env-var table under [Configuration Reference](#configur
 
 ## API Endpoints
 
-Auth is disabled by default (local-only). Set `NADIRCLAW_AUTH_TOKEN` to require a bearer token.
+By default NadirClaw listens on `127.0.0.1` and, with no `NADIRCLAW_AUTH_TOKEN` set, accepts requests from localhost only (requests with a non-localhost `Host` header are refused too, which blocks DNS-rebinding pages). To serve other machines, set `NADIRCLAW_AUTH_TOKEN` and start with `--host 0.0.0.0`; clients then send `Authorization: Bearer <token>` or `X-API-Key: <token>`. `serve` refuses to bind a non-loopback host without a token.
 
 | Endpoint | Method | Description |
 |---|---|---|
@@ -1537,7 +1539,7 @@ Auth is disabled by default (local-only). Set `NADIRCLAW_AUTH_TOKEN` to require 
 | `NADIRCLAW_MODEL_REGISTRY_URL` | *(empty — disabled)* | Optional registry JSON URL for `nadirclaw update-models` |
 | `NADIRCLAW_MODEL_METADATA_FILE` | `~/.nadirclaw/models.json` | Generated model metadata file loaded at startup |
 | `NADIRCLAW_LOCAL_MODEL_METADATA_FILE` | `~/.nadirclaw/models.local.json` | User-managed model metadata overrides loaded after generated metadata |
-| `NADIRCLAW_AUTH_TOKEN` | *(empty — auth disabled)* | Set to require a bearer token |
+| `NADIRCLAW_AUTH_TOKEN` | *(empty: localhost-only)* | Bearer token clients must send. Required to bind a non-loopback `--host` (and so for Docker) |
 | `GEMINI_API_KEY` | -- | Google Gemini API key (also accepts `GOOGLE_API_KEY`) |
 | `ANTHROPIC_API_KEY` | -- | Anthropic API key |
 | `OPENAI_API_KEY` | -- | OpenAI API key |

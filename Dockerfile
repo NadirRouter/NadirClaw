@@ -17,4 +17,5 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=3 \
 
 EXPOSE 8856
 
+# Listening on all interfaces requires NADIRCLAW_AUTH_TOKEN; serve refuses to start without it.
 CMD ["nadirclaw", "serve", "--host", "0.0.0.0"]

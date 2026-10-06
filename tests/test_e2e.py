@@ -33,7 +33,7 @@ from fastapi.testclient import TestClient
 @pytest.fixture
 def client():
     from nadirclaw.server import app
-    return TestClient(app)
+    return TestClient(app, base_url="http://localhost", client=("127.0.0.1", 50000))
 
 
 @pytest.fixture
