@@ -33,6 +33,8 @@ def setup(reconfigure):
 
 @main.command()
 @click.option("--port", default=None, type=int, help="Port to listen on (default: 8856)")
+@click.option("--host", default="127.0.0.1", show_default=True,
+              help="Interface to bind. A non-loopback host requires an auth token")
 @click.option("--simple-model", default=None, help="Model for simple prompts")
 @click.option("--complex-model", default=None, help="Model for complex prompts")
 @click.option("--models", default=None, help="Comma-separated model list (legacy)")
@@ -41,7 +43,7 @@ def setup(reconfigure):
 @click.option("--log-raw", is_flag=True, help="Log full raw requests and responses to JSONL")
 @click.option("--optimize", default=None, type=click.Choice(["off", "safe", "aggressive", "progressive"]),
               help="Context compression: off | safe | aggressive | progressive (default: off)")
-def serve(port, simple_model, complex_model, models, token, verbose, log_raw, optimize):
+def serve(port, host, simple_model, complex_model, models, token, verbose, log_raw, optimize):
     """Start the NadirClaw router server."""
     import logging
 
@@ -76,6 +78,18 @@ def serve(port, simple_model, complex_model, models, token, verbose, log_raw, op
     if optimize:
         os.environ["NADIRCLAW_OPTIMIZE"] = optimize
 
+    # Imported only after the env overrides above: nadirclaw.auth reads the
+    # token once at import.
+    from nadirclaw.auth import is_loopback
+    from nadirclaw.settings import settings
+
+    if not is_loopback(host) and not settings.AUTH_TOKEN:
+        raise click.UsageError(
+            f"Refusing to listen on {host} without an auth token: anyone who can "
+            "reach this port could spend your provider credentials and read your "
+            "request logs. Set NADIRCLAW_AUTH_TOKEN (or pass --token), or bind 127.0.0.1."
+        )
+
     log_level = "debug" if verbose else "info"
     logging.basicConfig(
         level=getattr(logging, log_level.upper()),
@@ -85,17 +99,15 @@ def serve(port, simple_model, complex_model, models, token, verbose, log_raw, op
 
     import uvicorn
 
-    from nadirclaw.settings import settings
-
     actual_port = port or settings.PORT
-    click.echo(f"Starting NadirClaw on port {actual_port}...")
+    click.echo(f"Starting NadirClaw on {host}:{actual_port}...")
     click.echo(f"  Simple model:  {settings.SIMPLE_MODEL}")
     click.echo(f"  Complex model: {settings.COMPLEX_MODEL}")
     if settings.OPTIMIZE != "off":
         click.echo(f"  Optimize:      {settings.OPTIMIZE}")
     uvicorn.run(
         "nadirclaw.server:app",
-        host="0.0.0.0",
+        host=host,
         port=actual_port,
         log_level=log_level,
     )
