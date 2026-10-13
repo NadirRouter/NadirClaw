@@ -30,7 +30,7 @@
 </p>
 
 <p align="center">
-  <sub>Running real traffic or a team? <a href="https://getnadir.com?ref=readme-hero">Nadir Pro</a> adds a trained classifier, a live dashboard, team billing, and SSO. <strong>30-day free trial.</strong></sub>
+  <sub>Running real traffic or a team? <a href="https://getnadir.com?ref=readme-hero">Nadir Pro</a> adds a trained classifier, a live dashboard, and team billing. <strong>No base fee: you pay a share of measured savings.</strong></sub>
 </p>
 
 ---
@@ -70,13 +70,13 @@ SIMPLE  "Write a docstring"         → gemini-flash    $0.0002
 Three moves, on every request:
 
 1. **Route** — a ~10ms embedding classifier predicts the *smallest* model likely to answer and sends the prompt there first. Routing modifiers (agentic tool loops, reasoning markers, vision content, long context) can override the score and force a stronger tier.
-2. **Verify** — the cheap answer is scored against quality heuristics (refusals, truncation, JSON-format failures) before it ships. Pro swaps the heuristic for a trained DeBERTa cross-encoder.
+2. **Verify** — the cheap answer is scored against quality heuristics (refusals, truncation, JSON-format failures) before it ships. Pro swaps the heuristic for a trained reference-free verifier.
 3. **Escalate** — if the answer falls below the acceptance threshold (τ = 0.80), NadirClaw steps up to the next-best model automatically. You only pay for the big model when the small one wasn't enough.
 
-## Benchmarks — proof, not promises
+## Benchmarks
 
 <p align="center">
-  <img src="docs/images/proof.svg" alt="NadirClaw benchmarks — −60% cost, 98.3% quality preserved, 0.961 verifier AUROC, ~10ms overhead" width="100%" />
+  <img src="docs/images/proof.svg" alt="RouterBench reference-assisted research ceiling: −60% cost, 98.3% quality preserved, 0.961 verifier AUROC. Not production performance." width="100%" />
 </p>
 
 NadirClaw and Nadir Pro share the same routing architecture. The numbers
@@ -85,10 +85,18 @@ the NadirClaw OSS classifier uses a simpler binary centroid that trades
 some accuracy for zero training cost. Both run the same cascade rule
 engine (`nadirclaw/cascade_rules/`).
 
-### RouterBench (held-out, n=11,420)
+### RouterBench (held-out, n=11,420): reference-assisted research ceiling
+
+> **Read this before quoting these numbers.** This is a reference-assisted
+> research ceiling: the verifier had the expensive model's reference answer,
+> which a production cascade does not have. It is not production performance
+> and not a savings forecast. The verifier that ships in Nadir Pro is
+> reference-free and does not see a reference answer. Nadir publishes no
+> universal production savings or quality percentage until it is measured on
+> outcome-labelled customer traffic.
 
 The composed system (pre-generation classifier + post-generation
-cascade verifier, τ=0.80):
+cascade verifier, τ=0.80), with the reference answer available:
 
 | Metric | Value |
 | --- | ---: |
@@ -153,24 +161,24 @@ That's it. NadirClaw starts on `http://localhost:8856` with sensible defaults (G
 
 ## NadirClaw vs Nadir Pro
 
-NadirClaw is the free, source-available core, licensed under PolyForm Noncommercial (free for noncommercial use). If you are routing production traffic or running a team, [**Nadir Pro**](https://getnadir.com) is the hosted version with more accurate routing, team features, and analytics. Same routing philosophy, zero vendor lock-in (Pro lets you BYOK and you can always fall back to NadirClaw self-hosted).
+NadirClaw is the free, source-available core, licensed under PolyForm Noncommercial (free for noncommercial use). If you are routing production traffic or running a team, [**Nadir Pro**](https://getnadir.com?ref=readme-compare) is the hosted version with more accurate routing, team features, and analytics. Same routing philosophy, zero vendor lock-in (Pro lets you BYOK and you can always fall back to NadirClaw self-hosted).
 
 |  | NadirClaw (Free, OSS) | [Nadir Pro](https://getnadir.com) (Hosted) |
 |---|---|---|
 | **License** | PolyForm Noncommercial 1.0.0 (free for noncommercial use; commercial license via [getnadir.com](https://getnadir.com)) | Proprietary |
 | **Deploy** | Self-hosted, localhost | `api.getnadir.com` or self-host via Docker |
 | **Pre-generation classifier** | Binary centroid (~10ms), opt-in DistilBERT, or **bundled** `wide_deep_asym_v3` trained checkpoint (~40ms CPU; see [`MODEL_CARD.md`](MODEL_CARD.md)) | Same trained classifier + closed-loop retraining, provider-health-aware ranking |
-| **Post-generation verifier** | Rule-based heuristic (refusal / length / JSON checks, ~1ms) | Trained DeBERTa-v3-small cross-encoder, AUROC 0.96 on RouterBench held-out |
+| **Post-generation verifier** | Rule-based heuristic (refusal / length / JSON checks, ~1ms) | Optional trained reference-free verifier on complete non-streaming responses; streaming bypasses it, errors fail open |
 | **Verifier-gated cascade** | Yes (heuristic verifier) | Yes (trained verifier) |
 | **Storage** | Local JSONL + SQLite | Postgres (Supabase), multi-tenant |
 | **Dashboard** | Terminal + local web | Hosted web dashboard, per-team analytics |
 | **Cost tracking** | `nadirclaw savings` CLI | Live dashboard, monthly invoices, projected savings |
 | **Extras** | Context optimize, fallback chains | Everything in Free, plus semantic cache, response healing, prompt caching passthrough |
-| **Team** | None | SSO, audit logs, API key management, priority support |
-| **Billing** | N/A | Pay only on savings: 25% of first $2K, 10% above, plus $9/mo base |
+| **Team** | None | Org members, audit view, API key management, priority support (SSO on the roadmap) |
+| **Billing** | N/A | No base fee. 25% of the first $2K in measured monthly savings, 10% above ([pricing](https://getnadir.com/pricing?ref=readme-table)) |
 | **Best for** | Solo devs, self-hosters, anyone who wants the router running locally | Teams routing real traffic who want a hosted dashboard and want someone else to maintain the classifier |
 
-**Start free at [getnadir.com](https://getnadir.com/auth?mode=signup)** (15 requests/day on our keys, unlimited with BYOK). If Nadir is not saving you money, you do not pay us.
+**Start at [getnadir.com](https://getnadir.com/auth?mode=signup&ref=readme-start)** with your own provider keys (BYOK on every tier). If Nadir is not saving you money, you do not pay us.
 
 ## Features
 
