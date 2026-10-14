@@ -14,11 +14,15 @@
 </p>
 
 <p align="center">
+  NadirClaw is the source-available, self-hosted core of <a href="https://getnadir.com?ref=readme-about">Nadir</a>, the hosted LLM router built by the same team. It is licensed under PolyForm Noncommercial 1.0.0, so it is source-available, not open source.
+</p>
+
+<p align="center">
   <a href="https://pypi.org/project/nadirclaw/"><img src="https://img.shields.io/pypi/v/nadirclaw" alt="PyPI" /></a>
-  <a href="https://github.com/doramirdor/NadirClaw/actions"><img src="https://github.com/doramirdor/NadirClaw/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
+  <a href="https://github.com/NadirRouter/NadirClaw/actions"><img src="https://github.com/NadirRouter/NadirClaw/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
   <a href="https://pypi.org/project/nadirclaw/"><img src="https://img.shields.io/pypi/pyversions/nadirclaw" alt="Python" /></a>
-  <a href="LICENSE"><img src="https://img.shields.io/github/license/doramirdor/NadirClaw" alt="License" /></a>
-  <a href="https://github.com/doramirdor/NadirClaw"><img src="https://img.shields.io/github/stars/doramirdor/NadirClaw?style=social" alt="GitHub stars" /></a>
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/NadirRouter/NadirClaw" alt="License" /></a>
+  <a href="https://github.com/NadirRouter/NadirClaw"><img src="https://img.shields.io/github/stars/NadirRouter/NadirClaw?style=social" alt="GitHub stars" /></a>
 </p>
 
 <p align="center">
@@ -26,7 +30,7 @@
 </p>
 
 <p align="center">
-  <a href="https://getnadir.com?ref=readme-nav"><strong>Nadir Pro (hosted)</strong></a> · <a href="#quick-start">Quick Start</a> · <a href="#nadirclaw-vs-nadir-pro">OSS vs Pro</a> · <a href="docs/comparison.md">Comparisons</a> · <a href="https://github.com/doramirdor/nadirclaw-action">GitHub Action</a>
+  <a href="https://getnadir.com?ref=readme-nav"><strong>Nadir Pro (hosted)</strong></a> · <a href="#quick-start">Quick Start</a> · <a href="#nadirclaw-vs-nadir-pro">NadirClaw vs Pro</a> · <a href="docs/comparison.md">Comparisons</a> · <a href="https://github.com/doramirdor/nadirclaw-action">GitHub Action</a>
 </p>
 
 <p align="center">
@@ -81,7 +85,7 @@ Three moves, on every request:
 
 NadirClaw and Nadir Pro share the same routing architecture. The numbers
 below are from the trained classifier + DeBERTa verifier in Nadir Pro;
-the NadirClaw OSS classifier uses a simpler binary centroid that trades
+the NadirClaw classifier uses a simpler binary centroid that trades
 some accuracy for zero training cost. Both run the same cascade rule
 engine (`nadirclaw/cascade_rules/`).
 
@@ -142,7 +146,7 @@ pip install nadirclaw
 Or install from source:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/doramirdor/NadirClaw/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/NadirRouter/NadirClaw/main/install.sh | sh
 ```
 
 Then run the interactive setup wizard:
@@ -163,7 +167,7 @@ That's it. NadirClaw starts on `http://localhost:8856` with sensible defaults (G
 
 NadirClaw is the free, source-available core, licensed under PolyForm Noncommercial (free for noncommercial use). If you are routing production traffic or running a team, [**Nadir Pro**](https://getnadir.com?ref=readme-compare) is the hosted version with more accurate routing, team features, and analytics. Same routing philosophy, zero vendor lock-in (Pro lets you BYOK and you can always fall back to NadirClaw self-hosted).
 
-|  | NadirClaw (Free, OSS) | [Nadir Pro](https://getnadir.com) (Hosted) |
+|  | NadirClaw (source-available, self-hosted) | [Nadir Pro](https://getnadir.com) (Hosted) |
 |---|---|---|
 | **License** | PolyForm Noncommercial 1.0.0 (free for noncommercial use; commercial license via [getnadir.com](https://getnadir.com)) | Proprietary |
 | **Deploy** | Self-hosted, localhost | `api.getnadir.com` or self-host via Docker |
@@ -241,7 +245,7 @@ Install the dashboard extras: `pip install nadirclaw[dashboard]`
 ### One-line install (recommended)
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/doramirdor/NadirClaw/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/NadirRouter/NadirClaw/main/install.sh | sh
 ```
 
 This clones the repo to `~/.nadirclaw`, creates a virtual environment, installs dependencies, and adds `nadirclaw` to your PATH. Run it again to update.
@@ -249,7 +253,7 @@ This clones the repo to `~/.nadirclaw`, creates a virtual environment, installs 
 ### Manual install
 
 ```bash
-git clone https://github.com/doramirdor/NadirClaw.git
+git clone https://github.com/NadirRouter/NadirClaw.git
 cd NadirClaw
 python3 -m venv venv
 source venv/bin/activate
@@ -268,7 +272,7 @@ sudo rm -f /usr/local/bin/nadirclaw
 Run NadirClaw + Ollama with zero cost, fully local:
 
 ```bash
-git clone https://github.com/doramirdor/NadirClaw.git && cd NadirClaw
+git clone https://github.com/NadirRouter/NadirClaw.git && cd NadirClaw
 echo "NADIRCLAW_AUTH_TOKEN=$(openssl rand -hex 32)" >> .env
 docker compose up
 ```
@@ -556,7 +560,7 @@ print(result.score, result.accepted)
 
 **What is and is not released**
 
-| | OSS (NadirClaw v0.19) | Pro (Nadir hosted) |
+| | NadirClaw (v0.19+) | Pro (Nadir hosted) |
 | --- | --- | --- |
 | Frozen verifier weights | YES (`cascade-verifier-v1`, PolyForm Noncommercial 1.0.0) | YES |
 | Training pipeline | NO | YES (corpus + judge + curriculum) |
