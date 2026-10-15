@@ -470,6 +470,7 @@ async def startup():
     threading.Thread(target=_background_warmup, daemon=True, name="classifier-warmup").start()
 
     # Show config
+    credential_sources = {}
     try:
         import litellm
         litellm.set_verbose = False
@@ -501,6 +502,7 @@ async def startup():
             provider = detect_provider(model)
             if provider and provider != "ollama":
                 source = get_credential_source(provider)
+                credential_sources[provider] = source or "none"
                 if source:
                     logger.info("Credential:    %s → %s", provider, source)
                 else:
@@ -508,6 +510,10 @@ async def startup():
 
     except Exception as e:
         logger.warning("LiteLLM setup issue: %s", e)
+
+    from nadirclaw import analytics
+
+    analytics.server_started(settings, credential_sources)
 
     logger.info("Ready! Listening for requests...")
     logger.info("")
@@ -520,6 +526,9 @@ async def startup():
 def _shutdown_log_executor():
     """Drain pending log writes on SIGTERM / uvicorn shutdown."""
     _log_executor.shutdown(wait=True)
+    from nadirclaw import analytics
+
+    analytics.server_stopped()
 
 
 # ---------------------------------------------------------------------------
