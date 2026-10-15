@@ -15,7 +15,25 @@ import click
 @click.version_option(version=None, prog_name="nadirclaw", package_name="nadirclaw")
 def main():
     """NadirClaw — Source-available LLM router."""
-    pass
+    from nadirclaw.analytics import cli_command
+
+    cli_command(main, sys.argv[1:])
+
+
+@main.command()
+@click.argument("action", type=click.Choice(["status", "on", "off"]), default="status")
+def telemetry(action):
+    """Show or change anonymous usage telemetry (see README#telemetry)."""
+    from nadirclaw import analytics
+
+    if action != "status":
+        analytics.set_enabled(action == "on")
+    state = "enabled" if analytics.enabled() else "disabled"
+    click.echo(f"Telemetry {state}.")
+    if action == "on" and not analytics.enabled():
+        click.echo("NADIRCLAW_TELEMETRY or DO_NOT_TRACK in your environment overrides this.")
+    elif state == "enabled":
+        click.echo(analytics.NOTICE)
 
 
 @main.command()

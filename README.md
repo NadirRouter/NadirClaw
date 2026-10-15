@@ -1572,6 +1572,36 @@ By default NadirClaw listens on `127.0.0.1` and, with no `NADIRCLAW_AUTH_TOKEN` 
 | `NADIRCLAW_LOG_RAW` | `false` | Log full raw requests and responses (`true`/`false`) |
 | `NADIRCLAW_MODELS` | `openai-codex/gpt-5.3-codex,gemini-3-flash-preview` | Legacy model list (fallback if tier vars not set) |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | *(empty — disabled)* | OpenTelemetry collector endpoint (enables tracing) |
+| `NADIRCLAW_TELEMETRY` | *(on)* | `0`/`false`/`off` disables anonymous usage telemetry. See [Telemetry](#telemetry) |
+| `DO_NOT_TRACK` | *(unset)* | Any value but `0`/`false` disables anonymous usage telemetry ([consoledonottrack.com](https://consoledonottrack.com)) |
+
+## Telemetry
+
+NadirClaw sends anonymous usage statistics to its maintainers so we can see how many installs are active, which versions and platforms they run, and which features get used. The first time it runs, it prints a notice saying so.
+
+**Opt out** with any one of:
+
+```bash
+nadirclaw telemetry off          # persists in ~/.nadirclaw/telemetry.json
+export NADIRCLAW_TELEMETRY=0     # per environment
+export DO_NOT_TRACK=1            # the cross-tool convention
+```
+
+`nadirclaw telemetry status` shows the current state.
+
+**What is sent** (to PostHog, `us.i.posthog.com`), keyed by a random install id stored in `~/.nadirclaw/telemetry.json`:
+
+| Event | When | Properties |
+|-------|------|------------|
+| `nadirclaw_cli` | Each CLI command | The command name (e.g. `serve`, `claude onboard`). Never its arguments or options |
+| `nadirclaw_serve` | Server start | Number of tiers, provider names, model ids from Anthropic / OpenAI / Google, classifier, optimize mode, whether auth / PII redaction / prompt guard are on, and how each provider's credential was resolved (`env`, `oauth`, ...) |
+| `nadirclaw_usage` | Every 6 h and at shutdown, only when requests were served | Request counts per tier, errors, token counts, estimated cost, cache hits, fallbacks, tokens saved |
+
+Every event also carries the NadirClaw version, Python version, OS, CPU architecture, and whether it runs in CI or Docker.
+
+**Never sent:** prompts, responses, API keys or tokens, file paths, hostnames, usernames, command arguments, or model names from self-hosted or custom providers (Ollama, Together, Replicate, fine-tunes). PostHog sees the connecting IP address, as any HTTP server would, and derives a coarse location from it. `nadirclaw claude read-hook` (which runs on every Claude Code file read) sends nothing. The full implementation is one file: [`nadirclaw/analytics.py`](nadirclaw/analytics.py).
+
+This is separate from the OpenTelemetry tracing below, which only ever exports to a collector you configure.
 
 ## OpenTelemetry (Optional)
 
@@ -1640,6 +1670,7 @@ nadirclaw/
   report.py          # Log parsing and report generation
   metrics.py         # Built-in Prometheus metrics (zero dependencies)
   rate_limit.py      # Per-model rate limiting (sliding window, env-configurable)
+  analytics.py       # Anonymous usage telemetry (opt out: nadirclaw telemetry off)
   telemetry.py       # Optional OpenTelemetry integration (no-op without packages)
   auth.py            # Bearer token / API key authentication
   settings.py        # Environment-based configuration (reads ~/.nadirclaw/.env)
