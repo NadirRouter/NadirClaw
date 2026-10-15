@@ -4,6 +4,8 @@ All notable changes to NadirClaw will be documented in this file.
 
 ## [Unreleased]
 
+## [0.25.0] - 2026-10-15
+
 ### Added
 - **Anonymous usage telemetry, on by default with a first-run notice.** NadirClaw now reports which CLI commands run (names only, never arguments), the server's routing configuration at startup (tier count, provider names, public model ids, classifier, optimize mode, feature toggles, credential source), and per-tier request, token, cost, cache and fallback counts every 6 hours and at shutdown, to the maintainers' PostHog project under a random install id. Prompts, responses, keys, paths, hostnames and self-hosted or fine-tuned model names are never sent. `nadirclaw claude read-hook` sends nothing, since it runs on every Claude Code file read. Disable with `nadirclaw telemetry off`, `NADIRCLAW_TELEMETRY=0`, or `DO_NOT_TRACK=1`. Sends run on a background thread with a 3 s timeout, and short CLI commands wait at most 1 s for them on exit. Failures are swallowed, so telemetry cannot break a command or the server. See README#telemetry.
 
