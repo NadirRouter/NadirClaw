@@ -748,7 +748,8 @@ def optimize_messages(
     messages
         List of ``{"role": "...", "content": "..."}`` dicts.
     mode
-        ``"off"`` (no-op), ``"safe"`` (lossless), or ``"aggressive"``
+        ``"off"`` (no-op), ``"safe"`` (deterministic per-message transforms
+        plus history trimming past ``max_turns``), or ``"aggressive"``
         (safe + semantic deduplication via sentence embeddings).
     max_turns
         Maximum conversation turns to keep when trimming history.

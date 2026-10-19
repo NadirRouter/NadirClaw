@@ -186,7 +186,7 @@ NadirClaw is the free, source-available core, licensed under PolyForm Noncommerc
 
 ## Features
 
-- **Context Optimize** — compacts bloated context (JSON, tool schemas, chat history, whitespace) before dispatch, saving 30-70% input tokens with zero semantic loss. Modes: `off` (default), `safe` (lossless), `aggressive` (+ columnar JSON-array packing & semantic dedup), `progressive` (staged ladder that only escalates until a token budget is met). Pluggable backend (`native` default, or opt-in `headroom`). See [savings analysis](docs/context-optimize-savings.md)
+- **Context Optimize** — compacts bloated context (JSON, tool schemas, chat history, whitespace) before dispatch, cutting 29-71% of input tokens on [five synthetic payloads](docs/context-optimize-savings.md) and 1-10% on real conversational traffic ([benchmark](docs/optimizer-benchmark-2026-06.md)). Every mode except `off` also trims chat history past 40 user turns (`NADIRCLAW_OPTIMIZE_MAX_TURNS`), so long sessions lose middle turns. Modes: `off` (default), `safe` (deterministic, no model calls), `aggressive` (+ columnar JSON-array packing & semantic dedup), `progressive` (staged ladder that only escalates until a token budget is met). Pluggable backend (`native` default, or opt-in `headroom`). See [savings analysis](docs/context-optimize-savings.md)
 - **Smart routing** — classifies prompts in ~10ms using sentence embeddings
 - **Pluggable classifier** — `binary` (default, ~10ms centroid classifier) or `distilbert` (3-class fine-tuned DistilBERT that natively predicts simple/mid/complex). Select with `NADIRCLAW_COMPLEXITY_ANALYZER`
 - **Three-tier routing** — simple / mid / complex tiers with configurable score thresholds (`NADIRCLAW_TIER_THRESHOLDS`); set `NADIRCLAW_MID_MODEL` for a cost-effective middle tier
@@ -1475,7 +1475,7 @@ Average: **61.5% input token reduction** across structured payloads. Enable with
 
 ```bash
 # Pick a mode when starting the server (or set NADIRCLAW_OPTIMIZE)
-nadirclaw serve --optimize safe          # lossless: dedup, json minify, whitespace
+nadirclaw serve --optimize safe          # deterministic: dedup, json minify, whitespace, history trim past 40 turns
 nadirclaw serve --optimize aggressive    # + columnar JSON packing & semantic dedup
 nadirclaw serve --optimize progressive   # staged ladder, escalates only until budget met
 ```
@@ -1502,7 +1502,7 @@ NADIRCLAW_OPTIMIZE=safe NADIRCLAW_OPTIMIZE_BACKEND=headroom nadirclaw serve
 headroom_ml` — and **stops as soon as a token budget is met**, so you only pay the cost (and
 fidelity risk) of heavier compression when lighter stages aren't enough. With no
 `NADIRCLAW_OPTIMIZE_TARGET_TOKENS` set, it stops after `native_aggressive` (dependency-free,
-lossless); Headroom stages are skipped silently if `headroom-ai` is absent, and the lossy ML stage
+no model calls); Headroom stages are skipped silently if `headroom-ai` is absent, and the lossy ML stage
 only runs when explicitly allowed.
 
 ```bash
@@ -1561,7 +1561,7 @@ By default NadirClaw listens on `127.0.0.1` and, with no `NADIRCLAW_AUTH_TOKEN` 
 | `NADIRCLAW_PORT` | `8856` | Server port |
 | `NADIRCLAW_LOG_DIR` | `~/.nadirclaw/logs` | Log directory |
 | `NADIRCLAW_PREFER_ENV_KEYS` | `off` | Move provider env vars to the front of the credential chain, ahead of stored tokens. Set on servers so a personal OAuth/subscription token cannot capture shared traffic |
-| `NADIRCLAW_OPTIMIZE` | `off` | Context compression: `off` (disabled), `safe` (lossless), `aggressive`, or `progressive` (staged ladder that escalates to Headroom). `off` is the master on/off switch |
+| `NADIRCLAW_OPTIMIZE` | `off` | Context compression: `off` (disabled), `safe` (deterministic; trims history past 40 turns), `aggressive`, or `progressive` (staged ladder that escalates to Headroom). `off` is the master on/off switch |
 | `NADIRCLAW_OPTIMIZE_MAX_TURNS` | `40` | Max conversation turns to keep when trimming history |
 | `NADIRCLAW_OPTIMIZE_BACKEND` | `native` | Optimizer backend: `native` (built-in) or `headroom` (needs `pip install nadirclaw[headroom]`; falls back to native if absent). See [savings analysis](docs/context-optimize-savings.md#backends-native-default-vs-headroom) |
 | `NADIRCLAW_HEADROOM_KOMPRESS` | `off` | When backend is `headroom`, enable Kompress ML text compression (downloads a HuggingFace model on first use) |
