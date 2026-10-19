@@ -2,7 +2,9 @@
 
 ## Summary
 
-NadirClaw's Context Optimize compacts bloated context (JSON, tool schemas, chat history, whitespace) before sending to the LLM provider. All transforms are **lossless** — zero semantic degradation.
+NadirClaw's Context Optimize compacts bloated context (JSON, tool schemas, chat history, whitespace) before sending to the LLM provider. The per-message transforms are deterministic and keep every JSON value and code block intact. Chat history trimming is the exception: past 40 user turns (`NADIRCLAW_OPTIMIZE_MAX_TURNS`) it keeps the first turn and the latest 39 and drops the rest, in every mode except `off`.
+
+> These scenarios are synthetic and structure-heavy. On real public coding and chat traffic, measured savings are 1-10% ([optimizer benchmark](optimizer-benchmark-2026-06.md)). Measure on your own traffic with `nadirclaw optimize` before projecting a bill.
 
 Combined with smart routing, NadirClaw now saves in two ways:
 1. **Route** simpler work to cheaper models
@@ -53,7 +55,7 @@ Combined with smart routing, NadirClaw now saves in two ways:
 
 ## Safety Guarantees
 
-All safe-mode transforms are deterministic and lossless:
+All safe-mode per-message transforms are deterministic and lossless (history trimming past 40 turns is not, see above):
 
 - JSON values roundtrip exactly (parse + compact re-serialize)
 - Code blocks inside fences (```) are never modified
