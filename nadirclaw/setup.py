@@ -16,7 +16,7 @@ from typing import Dict, List, Optional
 
 import click
 
-from nadirclaw.routing import MODEL_REGISTRY
+from nadirclaw.routing import MINIMAX_MODELS, MODEL_REGISTRY
 
 # ---------------------------------------------------------------------------
 # Provider metadata
@@ -55,6 +55,14 @@ PROVIDER_INFO: Dict[str, Dict] = {
         "oauth": False,
         "credential_key": "deepseek",
     },
+    "minimax": {
+        "display": "MiniMax",
+        "description": "MiniMax-M3.1-Flash, MiniMax-M3",
+        "env_var": "MINIMAX_API_KEY",
+        "key_prefix": None,
+        "oauth": False,
+        "credential_key": "minimax",
+    },
     "ollama": {
         "display": "Ollama (local)",
         "description": "Llama, Qwen — no API key",
@@ -65,7 +73,7 @@ PROVIDER_INFO: Dict[str, Dict] = {
     },
 }
 
-PROVIDER_ORDER = ["openai", "anthropic", "google", "deepseek", "ollama"]
+PROVIDER_ORDER = ["openai", "anthropic", "google", "deepseek", "ollama", "minimax"]
 
 OLLAMA_DEFAULT_API_BASE = "http://localhost:11434"
 
@@ -77,6 +85,7 @@ _TIER_DEFAULTS = {
         "deepseek": "deepseek/deepseek-chat",
         "ollama": "ollama/llama3.1:8b",
         "anthropic": "claude-haiku-4-5-20251001",
+        "minimax": MINIMAX_MODELS[0],
     },
     "complex": {
         "anthropic": "claude-sonnet-4-5-20250929",
@@ -84,6 +93,7 @@ _TIER_DEFAULTS = {
         "google": "gemini-2.5-pro",
         "deepseek": "deepseek/deepseek-reasoner",
         "ollama": "ollama/qwen3:32b",
+        "minimax": MINIMAX_MODELS[1],
     },
     "reasoning": {
         "openai": "o3",
@@ -614,6 +624,8 @@ def get_available_models_for_providers(
     # Use API-fetched models when available
     if fetched_models:
         for provider, model_ids in fetched_models.items():
+            if provider == "minimax":
+                continue  # Use the current built-in choices, not stale API catalogs.
             if model_ids:
                 providers_covered.add(provider)
                 for mid in model_ids:
@@ -623,6 +635,8 @@ def get_available_models_for_providers(
     skip_prefixed = {m for m in MODEL_REGISTRY if m.startswith("gemini/")}
     for model, info in MODEL_REGISTRY.items():
         if model in skip_prefixed:
+            continue
+        if model.startswith("minimax/") and model not in MINIMAX_MODELS:
             continue
         # Detect provider from model name
         model_provider = _detect_model_provider(model)
@@ -668,6 +682,8 @@ def _detect_model_provider(model: str) -> Optional[str]:
         return "anthropic"
     if lower.startswith("deepseek/"):
         return "deepseek"
+    if lower.startswith("minimax/"):
+        return "minimax"
     if lower.startswith("ollama/"):
         return "ollama"
     return None

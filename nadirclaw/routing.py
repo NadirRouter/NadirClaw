@@ -158,9 +158,9 @@ MODEL_REGISTRY: Dict[str, Dict[str, Any]] = {
     "deepseek/deepseek-v4-pro": {"context_window": 1_000_000, "cost_per_m_input": 1.74, "cost_per_m_output": 3.48, "has_vision": False},
     "deepseek/deepseek-chat": {"context_window": 128_000, "cost_per_m_input": 0.28, "cost_per_m_output": 0.42, "has_vision": False},
     "deepseek/deepseek-reasoner": {"context_window": 128_000, "cost_per_m_input": 0.28, "cost_per_m_output": 0.42, "has_vision": False},
-    # MiniMax
+    # MiniMax (M3 retains the conservative long-context rate for cost estimates).
+    "minimax/MiniMax-M3.1-Flash": {"context_window": 1_000_000, "cost_per_m_input": 0.15, "cost_per_m_output": 0.60, "has_vision": True},
     "minimax/MiniMax-M3": {"context_window": 1_000_000, "cost_per_m_input": 0.60, "cost_per_m_output": 2.40, "has_vision": True},
-    "minimax/MiniMax-M2.7": {"context_window": 204_800, "cost_per_m_input": 0.30, "cost_per_m_output": 1.20, "has_vision": False},
     # Ollama (local, no cost, context varies by model)
     "ollama/llama3.1:8b": {"context_window": 128_000, "cost_per_m_input": 0, "cost_per_m_output": 0, "has_vision": False},
     "ollama/qwen3:32b": {"context_window": 128_000, "cost_per_m_input": 0, "cost_per_m_output": 0, "has_vision": False},
@@ -169,6 +169,14 @@ MODEL_REGISTRY: Dict[str, Dict[str, Any]] = {
 BUILTIN_MODEL_REGISTRY: Dict[str, Dict[str, Any]] = {
     model: dict(info) for model, info in MODEL_REGISTRY.items()
 }
+
+# Retain metadata for explicit legacy requests without advertising retired models.
+MODEL_REGISTRY["minimax/MiniMax-M2.7"] = {
+    "context_window": 204_800, "cost_per_m_input": 0.30,
+    "cost_per_m_output": 1.20, "has_vision": False,
+}
+
+MINIMAX_MODELS = ("minimax/MiniMax-M3.1-Flash", "minimax/MiniMax-M3")
 
 
 def _merge_external_model_metadata() -> None:
@@ -215,7 +223,8 @@ MODEL_ALIASES: Dict[str, str] = {
     "deepseek-v4-flash": "deepseek/deepseek-v4-flash",
     "deepseek-v4-pro": "deepseek/deepseek-v4-pro",
     "deepseek-r1": "deepseek/deepseek-reasoner",
-    "minimax": "minimax/MiniMax-M3",
+    "minimax": "minimax/MiniMax-M3.1-Flash",
+    "minimax-m3.1-flash": "minimax/MiniMax-M3.1-Flash",
     "minimax-m3": "minimax/MiniMax-M3",
     "minimax-m2.7": "minimax/MiniMax-M2.7",
     "llama": "ollama/llama3.1:8b",

@@ -25,10 +25,10 @@ dependencies = [
     "fastapi>=0.100.0",
     "uvicorn>=0.20.0",
     "litellm>=1.0.0; python_version >= '3.11'",
-    # ponytail: litellm 1.98.0 imports typing.NotRequired (3.11+) from
-    # llms/anthropic/experimental_pass_through/context_management/editors/compact.py
-    # while still declaring Requires-Python >=3.10. Drop this cap once upstream fixes it.
-    "litellm>=1.0.0,<1.98.0; python_version < '3.11'",
+    # LiteLLM 1.97.0 leaves Message reasoning types unresolved on Python 3.10;
+    # 1.98.0 also imports typing.NotRequired (3.11+). Keep 3.10 on the tested
+    # 1.96.x line until upstream restores compatibility.
+    "litellm>=1.0.0,<1.97.0; python_version < '3.11'",
     "sentence-transformers>=2.0.0",
     "numpy",
     "python-dotenv",
@@ -64,6 +64,8 @@ dev = [
     "pytest>=7.0",
     "pytest-asyncio>=0.21",
     "httpx",
+    # Recent LiteLLM imports its MCP adapter when serializing function tools.
+    "mcp>=1.0",
     "pyyaml>=6.0",
 ]
 dashboard = [
