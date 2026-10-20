@@ -1014,6 +1014,8 @@ async def _call_litellm(
             msg["tool_call_id"] = extra_fields["tool_call_id"]
         if "name" in extra_fields:
             msg["name"] = extra_fields["name"]
+        if provider == "minimax" and "reasoning_content" in extra_fields:
+            msg["reasoning_content"] = extra_fields["reasoning_content"]
         messages.append(msg)
 
     call_kwargs: Dict[str, Any] = {"model": litellm_model, "messages": messages}
@@ -1036,6 +1038,11 @@ async def _call_litellm(
         call_kwargs["thinking"] = extra["thinking"]
     if extra.get("response_format"):
         call_kwargs["response_format"] = extra["response_format"]
+    if provider == "minimax":
+        # Older LiteLLM catalogs do not yet know M3's reasoning parameters.
+        call_kwargs["allowed_openai_params"] = [
+            key for key in ("reasoning_effort", "thinking") if key in call_kwargs
+        ]
 
     if cred_provider and cred_provider != "ollama":
         api_key = get_credential(cred_provider)
@@ -1956,6 +1963,8 @@ async def _stream_litellm(
             msg["tool_call_id"] = extra_fields["tool_call_id"]
         if "name" in extra_fields:
             msg["name"] = extra_fields["name"]
+        if provider == "minimax" and "reasoning_content" in extra_fields:
+            msg["reasoning_content"] = extra_fields["reasoning_content"]
         messages.append(msg)
 
     call_kwargs: Dict[str, Any] = {
@@ -1982,6 +1991,11 @@ async def _stream_litellm(
         call_kwargs["thinking"] = extra["thinking"]
     if extra.get("response_format"):
         call_kwargs["response_format"] = extra["response_format"]
+    if provider == "minimax":
+        # Older LiteLLM catalogs do not yet know M3's reasoning parameters.
+        call_kwargs["allowed_openai_params"] = [
+            key for key in ("reasoning_effort", "thinking") if key in call_kwargs
+        ]
 
     if cred_provider and cred_provider != "ollama":
         api_key = get_credential(cred_provider)

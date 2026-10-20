@@ -102,7 +102,8 @@ class TestResolveAlias:
         assert resolve_alias("deepseek-r1") == "deepseek/deepseek-reasoner"
 
     def test_minimax(self):
-        assert resolve_alias("minimax") == "minimax/MiniMax-M3"
+        assert resolve_alias("minimax") == "minimax/MiniMax-M3.1-Flash"
+        assert resolve_alias("minimax-m3.1-flash") == "minimax/MiniMax-M3.1-Flash"
         assert resolve_alias("minimax-m3") == "minimax/MiniMax-M3"
         assert resolve_alias("minimax-m2.7") == "minimax/MiniMax-M2.7"
 
