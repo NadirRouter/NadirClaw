@@ -330,10 +330,8 @@ def format_report_text(report: Dict[str, Any]) -> str:
     if total_cost > 0.50:
         lines.append("")
         lines.append("=" * 50)
-        lines.append("This report updates in real time on Nadir Pro, with per-team")
-        lines.append("breakdowns, alerting, and a trained classifier that cuts costs")
-        lines.append("another 10-20% on the same traffic.")
-        lines.append("30-day free trial: https://getnadir.com?ref=cli-report")
+        lines.append("Hosted Nadir shows this report live in a dashboard.")
+        lines.append("No base fee: https://getnadir.com?ref=cli-report")
 
     lines.append("")
     return "\n".join(lines)

@@ -517,8 +517,8 @@ async def startup():
 
     logger.info("Ready! Listening for requests...")
     logger.info("")
-    logger.info("Want a hosted dashboard, trained classifier, and team billing?")
-    logger.info("Try Nadir Pro free: https://getnadir.com?ref=cli-serve")
+    logger.info("Want a hosted dashboard with live savings? No base fee:")
+    logger.info("https://getnadir.com?ref=cli-serve")
     logger.info("=" * 60)
 
 
