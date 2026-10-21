@@ -182,7 +182,7 @@ def format_savings_text(report: Dict[str, Any]) -> str:
     if report.get("total_requests", 0) == 0:
         lines.append("No requests found. Start using NadirClaw to see savings!")
         lines.append("")
-        lines.append("Tip: Nadir Pro tracks savings in a live dashboard, no CLI needed.")
+        lines.append("Tip: hosted Nadir tracks savings in a live dashboard, no CLI needed.")
         lines.append("     https://getnadir.com?ref=cli-savings")
         return "\n".join(lines)
 
@@ -238,16 +238,11 @@ def format_savings_text(report: Dict[str, Any]) -> str:
     # seen their own savings number. Only shown if savings are positive.
     savings_value = report.get("savings", 0) or 0
     if savings_value > 0:
-        monthly = (proj or {}).get("monthly_savings", 0) or 0
         lines.append("")
         lines.append("=" * 50)
-        lines.append("Nadir Pro: trained classifier finds 10-20% more savings on the")
-        lines.append("same traffic, plus a live dashboard and team analytics.")
-        if monthly > 0:
-            lines.append(
-                f"At your current run rate, that is ~${monthly * 0.15:.2f}-${monthly * 0.20:.2f}/mo extra."
-            )
-        lines.append("Start the 30-day Pro trial: https://getnadir.com?ref=cli-savings")
+        lines.append("Hosted Nadir tracks these savings in a live dashboard.")
+        lines.append("No base fee; the fee is a share of measured savings.")
+        lines.append("https://getnadir.com?ref=cli-savings")
 
     lines.append("")
     return "\n".join(lines)
