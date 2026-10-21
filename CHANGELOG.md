@@ -4,6 +4,14 @@ All notable changes to NadirClaw will be documented in this file.
 
 ## [Unreleased]
 
+## [0.25.1] - 2026-10-21
+
+### Changed
+- **`minimax` now resolves to MiniMax-M3.1-Flash** (#104). The built-in MiniMax catalog lists Flash, then MiniMax-M3, and MiniMax is in the setup wizard. Reasoning history is kept alongside tool calls and images, and caller-supplied thinking/effort parameters pass through per request. Explicit requests for older MiniMax models still work.
+
+### Fixed
+- **CLI upsell lines no longer promise a trial that does not exist** (#105). `report`, `savings` and `serve` printed "30-day free trial" / "Try Nadir Pro free", and `savings` printed a personal dollar forecast built on an unmeasured "10-20% more savings" figure. They now point to the hosted dashboard (no base fee) with the same `?ref=cli-*` links.
+
 ## [0.25.0] - 2026-10-15
 
 ### Added
