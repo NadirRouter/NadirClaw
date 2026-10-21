@@ -331,8 +331,7 @@ def format_report_text(report: Dict[str, Any]) -> str:
         lines.append("")
         lines.append("=" * 50)
         lines.append("Hosted Nadir shows this report live in a dashboard.")
-        lines.append("No base fee; the fee is a share of measured savings.")
-        lines.append("https://getnadir.com?ref=cli-report")
+        lines.append("No base fee: https://getnadir.com?ref=cli-report")
 
     lines.append("")
     return "\n".join(lines)
