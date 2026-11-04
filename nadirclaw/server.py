@@ -971,6 +971,19 @@ async def _call_gemini(
     return result
 
 
+def _reasoning_passthrough(provider: str | None, litellm_model: str) -> bool:
+    """Whether a client-supplied ``reasoning_content`` must be sent back.
+
+    DeepSeek and MiniMax thinking-mode APIs reject the follow-up round of a
+    tool conversation when the previous assistant turn's reasoning_content is
+    not echoed back, so the field is preserved for those model families (and
+    only those — other providers never see it).
+    """
+    if provider == "minimax":
+        return True
+    return litellm_model.startswith(("deepseek/", "deepseek-"))
+
+
 async def _call_litellm(
     model: str,
     request: "ChatCompletionRequest",
@@ -1014,7 +1027,7 @@ async def _call_litellm(
             msg["tool_call_id"] = extra_fields["tool_call_id"]
         if "name" in extra_fields:
             msg["name"] = extra_fields["name"]
-        if provider == "minimax" and "reasoning_content" in extra_fields:
+        if "reasoning_content" in extra_fields and _reasoning_passthrough(provider, litellm_model):
             msg["reasoning_content"] = extra_fields["reasoning_content"]
         messages.append(msg)
 
@@ -1963,7 +1976,7 @@ async def _stream_litellm(
             msg["tool_call_id"] = extra_fields["tool_call_id"]
         if "name" in extra_fields:
             msg["name"] = extra_fields["name"]
-        if provider == "minimax" and "reasoning_content" in extra_fields:
+        if "reasoning_content" in extra_fields and _reasoning_passthrough(provider, litellm_model):
             msg["reasoning_content"] = extra_fields["reasoning_content"]
         messages.append(msg)
 
