@@ -34,7 +34,7 @@
 </p>
 
 <p align="center">
-  <sub>Running real traffic or a team? <a href="https://getnadir.com?ref=readme-hero">Nadir Pro</a> adds a trained classifier, a live dashboard, and team billing. <strong>No fee on your own provider keys; 5.5% platform fee on credits for Nadir-managed keys.</strong></sub>
+  <sub>Running real traffic or a team? <a href="https://getnadir.com?ref=readme-hero">Nadir Pro</a> adds a trained classifier, a live dashboard, and team billing. <strong>Bring your own provider keys; Nadir charges a flat $0.002 per request, first 50 a month free, never a cut of savings.</strong></sub>
 </p>
 
 ---
@@ -179,10 +179,10 @@ NadirClaw is the free, source-available core, licensed under PolyForm Noncommerc
 | **Cost tracking** | `nadirclaw savings` CLI | Live dashboard, monthly invoices, projected savings |
 | **Extras** | Context optimize, fallback chains | Everything in Free, plus semantic cache, response healing, prompt caching passthrough |
 | **Team** | None | Org members, audit view, API key management, priority support (SSO on the roadmap) |
-| **Billing** | N/A | Own provider keys: no Nadir fee. Nadir-managed keys: 5.5% platform fee on credits (Pay as you go) or 8% (Business, adds orgs, a signed DPA and on-prem on a yearly license). Enterprise is custom ([pricing](https://getnadir.com/pricing?ref=readme-table)) |
+| **Billing** | N/A | Own provider keys on every plan; the provider bills inference. Nadir charges a flat $0.002 per request (decision calls included) from a prepaid balance, first 50 requests a month free, no fee on savings. Business is the same rate and adds orgs, a signed DPA and on-prem on a yearly license. Enterprise is custom ([pricing](https://getnadir.com/pricing?ref=readme-table)) |
 | **Best for** | Solo devs, self-hosters, anyone who wants the router running locally | Teams routing real traffic who want a hosted dashboard and want someone else to maintain the classifier |
 
-**Start at [getnadir.com](https://getnadir.com/auth?mode=signup&ref=readme-start)** with your own provider keys (BYOK on every tier), which carry no Nadir fee.
+**Start at [getnadir.com](https://getnadir.com/auth?mode=signup&ref=readme-start)** with your own provider keys (BYOK on every tier). The first 50 requests a month are free, then $0.002 per request.
 
 ## Features
 
