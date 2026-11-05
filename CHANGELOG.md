@@ -4,6 +4,11 @@ All notable changes to NadirClaw will be documented in this file.
 
 ## [Unreleased]
 
+## [0.25.2] - 2026-11-05
+
+### Changed
+- **README states current hosted pricing** (#107, #108). The PyPI page still showed the retired savings share (25% of the first $2K of measured savings, 10% above). Hosted Nadir now charges a flat $0.002 per request on your own provider keys, decision calls included, from a prepaid balance, with the first 50 requests a month free and no fee on savings. No code changes.
+
 ## [0.25.1] - 2026-10-21
 
 ### Changed
