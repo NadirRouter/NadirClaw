@@ -7,6 +7,7 @@ from pathlib import Path
 from unittest.mock import patch, MagicMock
 
 import pytest
+from dotenv import dotenv_values
 from click.testing import CliRunner
 
 from nadirclaw.setup import (
@@ -23,6 +24,7 @@ from nadirclaw.setup import (
     fetch_provider_models,
     get_available_models_for_providers,
     is_first_run,
+    prompt_model_selection,
     select_default_model,
     write_env_file,
 )
@@ -420,6 +422,135 @@ class TestFetchProviderModels:
 # ---------------------------------------------------------------------------
 
 class TestWriteEnvFile:
+    def test_reconfigure_preserves_custom_settings_and_omitted_keys(self, tmp_nadirclaw_dir):
+        _, fake_env = tmp_nadirclaw_dir
+        untouched = (
+            "# Private local settings\r\n"
+            "export NADIRCLAW_AUTH_TOKEN='keep this # token' # keep this comment\r\n"
+            "NADIRCLAW_PORT=9123\r\n"
+            "NADIRCLAW_DAILY_BUDGET=2.50\r\n"
+            "NADIRCLAW_CACHE_ENABLED=false\r\n"
+            "OPENAI_API_KEY=sk-existing\r\n"
+            "ANTHROPIC_API_KEY='sk-another'\r\n"
+            "CUSTOM_MULTILINE='first\r\nsecond'\r\n"
+            "NADIRCLAW_REASONING_MODEL=o3\r\n"
+            "OLLAMA_API_BASE=http://local-box:11434\r\n"
+        )
+        fake_env.write_bytes((untouched + "NADIRCLAW_SIMPLE_MODEL=old # budget model\r\n").encode())
+        write_env_file(simple="new-mini", complex_model="new-large")
+        content = fake_env.read_bytes().decode()
+        assert content.startswith(untouched)
+        assert "NADIRCLAW_SIMPLE_MODEL=new-mini # budget model\r\n" in content
+        parsed = dotenv_values(fake_env)
+        assert parsed["NADIRCLAW_PORT"] == "9123"
+        assert parsed["NADIRCLAW_AUTH_TOKEN"] == "keep this # token"
+        assert parsed["NADIRCLAW_DAILY_BUDGET"] == "2.50"
+        assert parsed["OPENAI_API_KEY"] == "sk-existing"
+        assert parsed["NADIRCLAW_COMPLEX_MODEL"] == "new-large"
+
+    def test_updates_duplicate_quoted_and_exported_keys_without_losing_comments(self, tmp_nadirclaw_dir):
+        _, fake_env = tmp_nadirclaw_dir
+        fake_env.write_text(
+            "export NADIRCLAW_SIMPLE_MODEL = 'old # value'  # chosen tier\n"
+            'NADIRCLAW_SIMPLE_MODEL="old\\\"value" # duplicate\n'
+            "NADIRCLAW_SIMPLE_MODEL='old'# adjacent comment\n"
+            "NADIRCLAW_COMPLEX_MODEL # previously unset\n"
+        )
+        write_env_file(simple="new", complex_model="large")
+        content = fake_env.read_text()
+        assert "export NADIRCLAW_SIMPLE_MODEL = new  # chosen tier\n" in content
+        assert "NADIRCLAW_SIMPLE_MODEL=new # duplicate\n" in content
+        assert "NADIRCLAW_SIMPLE_MODEL=new # adjacent comment\n" in content
+        assert "NADIRCLAW_COMPLEX_MODEL=large # previously unset\n" in content
+        assert dotenv_values(fake_env)["NADIRCLAW_SIMPLE_MODEL"] == "new"
+
+    @pytest.mark.parametrize("value", ["key with # spaces", "key'quote", r"key\\path\'end", "$literal=key"])
+    def test_new_keys_round_trip_through_dotenv(self, tmp_nadirclaw_dir, value):
+        _, fake_env = tmp_nadirclaw_dir
+        write_env_file(simple="flash", complex_model="large", api_keys={"OPENAI_API_KEY": value})
+        assert dotenv_values(fake_env)["OPENAI_API_KEY"] == value
+
+    @pytest.mark.parametrize("keys", [
+        {"BAD\nNAME": "value"}, {"OPENAI_API_KEY": "one\nNADIRCLAW_AUTH_TOKEN=bad"},
+        {"OPENAI_API_KEY": "one\rtwo"}, {"OPENAI_API_KEY": "nul\x00value"},
+        {"OPENAI_API_KEY": "${OTHER_SECRET}"}, {"OPENAI_API_KEY": ""},
+        {"OPENAI_API_KEY": None},
+    ])
+    def test_invalid_values_leave_file_and_backups_unchanged(self, tmp_nadirclaw_dir, keys):
+        directory, fake_env = tmp_nadirclaw_dir
+        original = b"NADIRCLAW_AUTH_TOKEN=keep\n"
+        fake_env.write_bytes(original)
+        with pytest.raises(ValueError):
+            write_env_file(simple="flash", complex_model="large", api_keys=keys)
+        assert fake_env.read_bytes() == original
+        assert list(directory.glob(".env.backup-*")) == []
+
+    def test_repeat_reconfiguration_creates_distinct_private_backups(self, tmp_nadirclaw_dir, monkeypatch):
+        directory, fake_env = tmp_nadirclaw_dir
+        fixed_datetime = MagicMock()
+        fixed_datetime.now.return_value.strftime.return_value = "same-second"
+        monkeypatch.setattr("nadirclaw.setup.datetime", fixed_datetime)
+        original = b"NADIRCLAW_AUTH_TOKEN=keep\n"
+        fake_env.write_bytes(original)
+        fake_env.chmod(0o644)
+        write_env_file(simple="first", complex_model="large")
+        first = fake_env.read_bytes()
+        write_env_file(simple="second", complex_model="large")
+        backups = list(directory.glob(".env.backup-*"))
+        assert len(backups) == 2
+        assert {path.read_bytes() for path in backups} == {original, first}
+        if platform.system() != "Windows":
+            assert all(path.stat().st_mode & 0o777 == 0o600 for path in backups)
+
+    def test_failed_replace_leaves_original_and_private_backup(self, tmp_nadirclaw_dir, monkeypatch):
+        directory, fake_env = tmp_nadirclaw_dir
+        original = b"NADIRCLAW_PORT=9123\nNADIRCLAW_AUTH_TOKEN=keep\n"
+        fake_env.write_bytes(original)
+
+        def fail_replace(source, target):
+            assert fake_env.read_bytes() == original
+            assert dotenv_values(source)["NADIRCLAW_SIMPLE_MODEL"] == "flash"
+            raise OSError("simulated replace failure")
+
+        monkeypatch.setattr("nadirclaw.setup.os.replace", fail_replace)
+        with pytest.raises(OSError, match="simulated replace failure"):
+            write_env_file(simple="flash", complex_model="large")
+        assert fake_env.read_bytes() == original
+        assert [path.read_bytes() for path in directory.glob(".env.backup-*")] == [original]
+        assert list(directory.glob(".env.tmp-*")) == []
+
+    @pytest.mark.parametrize("failed_sync", [1, 2])
+    def test_failed_write_keeps_original_and_cleans_partial_file(self, tmp_nadirclaw_dir, monkeypatch, failed_sync):
+        directory, fake_env = tmp_nadirclaw_dir
+        original = b"NADIRCLAW_AUTH_TOKEN=keep\n"
+        fake_env.write_bytes(original)
+        calls = 0
+
+        def fail_sync(fd):
+            nonlocal calls
+            calls += 1
+            if calls == failed_sync:
+                raise OSError("simulated disk failure")
+
+        monkeypatch.setattr("nadirclaw.setup.os.fsync", fail_sync)
+        with pytest.raises(OSError, match="simulated disk failure"):
+            write_env_file(simple="flash", complex_model="large")
+        assert fake_env.read_bytes() == original
+        assert list(directory.glob(".env.tmp-*")) == []
+        backups = list(directory.glob(".env.backup-*"))
+        assert len(backups) == failed_sync - 1
+        assert all(path.read_bytes() == original for path in backups)
+
+    def test_symlink_is_not_replaced(self, tmp_nadirclaw_dir):
+        directory, fake_env = tmp_nadirclaw_dir
+        target = directory / "custom.env"
+        target.write_text("NADIRCLAW_AUTH_TOKEN=keep\n")
+        fake_env.symlink_to(target)
+        with pytest.raises(ValueError, match="symlink"):
+            write_env_file(simple="flash", complex_model="large")
+        assert fake_env.is_symlink()
+        assert target.read_text() == "NADIRCLAW_AUTH_TOKEN=keep\n"
+
     def test_creates_file(self, tmp_nadirclaw_dir):
         _, fake_env = tmp_nadirclaw_dir
         path = write_env_file(
@@ -486,6 +617,11 @@ class TestWriteEnvFile:
 # ---------------------------------------------------------------------------
 
 class TestDetectExistingConfig:
+    def test_reads_dotenv_quotes_exports_and_inline_comments(self, tmp_nadirclaw_dir):
+        _, fake_env = tmp_nadirclaw_dir
+        fake_env.write_text("export OPENAI_API_KEY='key with # spaces' # comment\n")
+        assert detect_existing_config() == {"OPENAI_API_KEY": "key with # spaces"}
+
     def test_no_file(self, tmp_nadirclaw_dir):
         assert detect_existing_config() == {}
 
@@ -508,7 +644,43 @@ class TestDetectExistingConfig:
 # CLI integration
 # ---------------------------------------------------------------------------
 
+class TestPromptModelSelection:
+    @pytest.mark.parametrize("invalid", ["0", "3", "wrong", "s", "²"])
+    def test_invalid_required_choice_prompts_again(self, monkeypatch, capsys, invalid):
+        answers = iter([invalid, "2"])
+        monkeypatch.setattr("click.prompt", lambda *args, **kwargs: next(answers))
+        selected = prompt_model_selection("simple", [{"model": "first"}, {"model": "second"}], [])
+        assert selected == "second"
+        assert "Enter a number from 1 to 2" in capsys.readouterr().out
+
+    def test_optional_invalid_choice_can_then_skip(self, monkeypatch):
+        answers = iter(["9", "s"])
+        monkeypatch.setattr("click.prompt", lambda *args, **kwargs: next(answers))
+        assert prompt_model_selection("reasoning", [{"model": "o3"}], []) is None
+
 class TestSetupCLI:
+    def test_reconfigure_keeps_settings_and_reports_retained_optional_tier(self, tmp_nadirclaw_dir, monkeypatch):
+        _, fake_env = tmp_nadirclaw_dir
+        original = (
+            "# Keep this local setup\nNADIRCLAW_PORT=9123\n"
+            "NADIRCLAW_AUTH_TOKEN=local-token\nNADIRCLAW_DAILY_BUDGET=2.50\n"
+            "NADIRCLAW_CACHE_ENABLED=false\nOPENAI_API_KEY=sk-existing\n"
+            "NADIRCLAW_REASONING_MODEL=o3\n"
+        )
+        fake_env.write_text(original)
+        monkeypatch.setattr("nadirclaw.setup.prompt_provider_selection", lambda **kwargs: ["openai"])
+        monkeypatch.setattr("nadirclaw.setup.prompt_credential_for_provider", lambda *args, **kwargs: None)
+        monkeypatch.setattr("nadirclaw.setup.fetch_provider_models", lambda *args, **kwargs: ["gpt-4.1-mini", "gpt-4.1", "o3"])
+        answers = {"simple": "gpt-4.1-mini", "complex": "gpt-4.1", "reasoning": None}
+        monkeypatch.setattr("nadirclaw.setup.prompt_model_selection", lambda tier, *args: answers[tier])
+        from nadirclaw.cli import main
+
+        result = CliRunner().invoke(main, ["setup", "--reconfigure"])
+        assert result.exit_code == 0, result.output
+        assert fake_env.read_text().startswith(original)
+        assert "Reasoning:     o3" in result.output
+        assert "NADIRCLAW_SIMPLE_MODEL=gpt-4.1-mini" in fake_env.read_text()
+
     def test_setup_help(self):
         from nadirclaw.cli import main
         runner = CliRunner()

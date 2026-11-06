@@ -316,6 +316,13 @@ NADIRCLAW_PORT=8856
 
 If `~/.nadirclaw/.env` does not exist, NadirClaw falls back to `.env` in the current directory.
 
+`nadirclaw setup --reconfigure` updates the settings you supply and keeps other
+values and comments, including authentication, port, budgets, and cache settings.
+API keys and optional tiers you skip stay unchanged. To remove a saved value,
+edit the file directly. Each run saves a separate, private `.env.backup-*` file
+before replacing the configuration atomically; a failed save leaves the old file
+intact. Restart NadirClaw after changing its configuration.
+
 ### Authentication
 
 NadirClaw supports multiple ways to provide LLM credentials, checked in this order:

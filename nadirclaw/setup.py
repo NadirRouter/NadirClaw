@@ -4,10 +4,11 @@ Guides users through provider selection, credential entry, and model
 configuration on first run or via `nadirclaw setup`.
 """
 
+import io
 import json
 import os
 import re
-import shutil
+import tempfile
 import urllib.error
 import urllib.request
 from datetime import datetime
@@ -15,6 +16,8 @@ from pathlib import Path
 from typing import Dict, List, Optional
 
 import click
+from dotenv import dotenv_values
+from dotenv.parser import parse_stream
 
 from nadirclaw.routing import MINIMAX_MODELS, MODEL_REGISTRY
 
@@ -147,17 +150,10 @@ def is_first_run() -> bool:
 
 def detect_existing_config() -> Dict[str, str]:
     """Read existing .env file and return key-value pairs."""
-    config: Dict[str, str] = {}
     if not ENV_FILE.exists():
-        return config
-    for line in ENV_FILE.read_text().splitlines():
-        line = line.strip()
-        if not line or line.startswith("#"):
-            continue
-        if "=" in line:
-            key, _, value = line.partition("=")
-            config[key.strip()] = value.strip()
-    return config
+        return {}
+    return {key: value for key, value in dotenv_values(ENV_FILE, interpolate=False).items()
+            if value is not None}
 
 
 def detect_existing_credentials() -> List[str]:
@@ -742,29 +738,103 @@ def prompt_model_selection(tier: str, models: List[dict], providers: List[str]) 
     if is_optional:
         prompt_text += " or 's' to skip"
 
-    raw = click.prompt(prompt_text, default=default_idx)
-    raw = raw.strip().lower()
-
-    if is_optional and raw in ("s", "skip", ""):
-        click.echo(f"  Skipped {tier} tier.\n")
-        return None
-
-    if raw.isdigit():
-        idx = int(raw) - 1
+    while True:
+        raw = click.prompt(prompt_text, default=default_idx).strip().lower()
+        if is_optional and raw in ("s", "skip", ""):
+            click.echo(f"  Skipped {tier} tier; any existing setting is kept.\n")
+            return None
+        try:
+            idx = int(raw) - 1
+        except ValueError:
+            idx = -1
         if 0 <= idx < len(models):
             chosen = models[idx]["model"]
             click.echo(f"  Selected: {chosen}\n")
             return chosen
-
-    # Fallback to first
-    chosen = models[0]["model"]
-    click.echo(f"  Selected: {chosen}\n")
-    return chosen
+        click.echo(f"  Enter a number from 1 to {len(models)}" +
+                   (", or 's' to skip." if is_optional else "."))
 
 
 # ---------------------------------------------------------------------------
 # Step 5: Write config + summary
 # ---------------------------------------------------------------------------
+
+def _env_value(key: str, value: str) -> str:
+    """Encode one literal dotenv value without allowing extra assignments."""
+    if not isinstance(key, str) or not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", key):
+        raise ValueError("Configuration names must be valid environment variable names")
+    if (not isinstance(value, str) or not value or "${" in value
+            or any(ord(char) < 32 or ord(char) == 127 for char in value)):
+        raise ValueError(f"{key} must be nonempty text without control characters or variable references")
+    if re.fullmatch(r"[A-Za-z0-9_./:@+-]+", value):
+        return value
+    # python-dotenv decodes escaped backslashes and apostrophes in single quotes.
+    return "'" + value.replace("\\", "\\\\").replace("'", "\\'") + "'"
+
+
+def _replace_env_value(original: str, key: str, value: str) -> str:
+    """Replace a parsed binding's value, retaining its whitespace and comments."""
+    prefix = re.match(
+        rf"\s*(?:export[^\S\r\n]+)?(?:{re.escape(key)}|'{re.escape(key)}')[^\S\r\n]*(=[^\S\r\n]*)?",
+        original,
+    )
+    if prefix is None:
+        raise ValueError(f"Could not safely update {key}")
+    tail = original[prefix.end():]
+    if prefix.group(1) is None:
+        # A dotenv name without '=' has no value; keep any following comment.
+        return prefix.group().rstrip(" \t") + "=" + value + (" " if tail.startswith("#") else "") + tail
+    quoted = re.match(r"(?s)'(?:\\.|[^'\\])*'|\"(?:\\.|[^\"\\])*\"", tail)
+    if quoted:
+        end = quoted.end()
+    else:
+        line = re.split(r"[\r\n]", tail, maxsplit=1)[0]
+        comment = re.search(r"[ \t]+#", line)
+        end = len(line[:comment.start() if comment else len(line)].rstrip(" \t"))
+    suffix = tail[end:]
+    # A comment can directly follow a quoted value; an unquoted replacement
+    # needs a separator so dotenv does not read that comment as part of it.
+    return prefix.group() + value + (" " if suffix.startswith("#") else "") + suffix
+
+
+def _merge_env(content: str, updates: Dict[str, str]) -> str:
+    # Use dotenv's parser so quoted/multiline custom entries stay intact. Its
+    # set_key writer drops comments on changed lines, so retain those spans too.
+    encoded = {key: _env_value(key, value) for key, value in updates.items()}
+    remaining = dict(encoded)
+    pieces = []
+    for binding in parse_stream(io.StringIO(content)):
+        original = binding.original.string
+        if binding.key in encoded:
+            original = _replace_env_value(original, binding.key, encoded[binding.key])
+            remaining.pop(binding.key, None)
+        pieces.append(original)
+    merged = "".join(pieces)
+    newline = "\r\n" if "\r\n" in content else "\n"
+    if remaining and merged and not merged.endswith(("\n", "\r")):
+        merged += newline
+    merged += "".join(f"{key}={value}{newline}" for key, value in remaining.items())
+    parsed = dotenv_values(stream=io.StringIO(merged), interpolate=False)
+    if any(parsed.get(key) != value for key, value in updates.items()):
+        raise ValueError("Could not safely encode the configuration changes")
+    return merged
+
+
+def _private_config_file(content: bytes, prefix: str) -> Path:
+    """Create a unique owner-only file beside .env, ready for atomic rename."""
+    path = None
+    try:
+        with tempfile.NamedTemporaryFile(mode="wb", prefix=prefix, dir=CONFIG_DIR, delete=False) as handle:
+            path = Path(handle.name)
+            handle.write(content)
+            handle.flush()
+            os.fsync(handle.fileno())
+        return path
+    except BaseException:
+        if path is not None:
+            path.unlink(missing_ok=True)
+        raise
+
 
 def write_env_file(
     simple: str,
@@ -774,62 +844,36 @@ def write_env_file(
     api_keys: Optional[Dict[str, str]] = None,
     ollama_api_base: Optional[str] = None,
 ) -> Path:
-    """Write ~/.nadirclaw/.env with model configuration.
+    """Merge supplied settings, preserving all omitted values and comments.
 
-    Creates backup of existing .env if present. Sets 0o600 permissions.
-    Returns path to written file.
+    A unique private backup precedes an atomic replacement. A failed write
+    leaves the original file intact; omitted keys/optional tiers are not erased.
     """
-    import platform
-
+    if ENV_FILE.is_symlink():
+        raise ValueError("Configuration is a symlink; edit its target directly")
+    old = ENV_FILE.read_bytes() if ENV_FILE.exists() else None
+    content = old.decode("utf-8") if old is not None else (
+        "# NadirClaw configuration\n"
+        f"# Generated by `nadirclaw setup` on {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
+    )
+    updates = dict(api_keys or {})
+    updates.update(NADIRCLAW_SIMPLE_MODEL=simple, NADIRCLAW_COMPLEX_MODEL=complex_model)
+    for key, value in (("NADIRCLAW_REASONING_MODEL", reasoning), ("NADIRCLAW_FREE_MODEL", free),
+                       ("OLLAMA_API_BASE", ollama_api_base)):
+        if value is not None:
+            updates[key] = value
+    if "NADIRCLAW_PORT" not in dotenv_values(stream=io.StringIO(content), interpolate=False):
+        updates["NADIRCLAW_PORT"] = "8856"
+    merged = _merge_env(content, updates).encode("utf-8")
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-
-    # Backup existing .env
-    if ENV_FILE.exists():
-        backup_name = f".env.backup-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
-        backup_path = CONFIG_DIR / backup_name
-        shutil.copy2(ENV_FILE, backup_path)
-        click.echo(f"  Backed up existing config to {backup_path}")
-
-    lines = [
-        "# NadirClaw configuration",
-        f"# Generated by `nadirclaw setup` on {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
-        "",
-    ]
-
-    # API keys
-    if api_keys:
-        lines.append("# API Keys")
-        for env_var, value in sorted(api_keys.items()):
-            lines.append(f"{env_var}={value}")
-        lines.append("")
-
-    # Model routing
-    lines.append("# Model Routing")
-    lines.append(f"NADIRCLAW_SIMPLE_MODEL={simple}")
-    lines.append(f"NADIRCLAW_COMPLEX_MODEL={complex_model}")
-    if reasoning:
-        lines.append(f"NADIRCLAW_REASONING_MODEL={reasoning}")
-    if free:
-        lines.append(f"NADIRCLAW_FREE_MODEL={free}")
-    lines.append("")
-
-    # Ollama
-    if ollama_api_base:
-        lines.append("# Ollama")
-        lines.append(f"OLLAMA_API_BASE={ollama_api_base}")
-        lines.append("")
-
-    # Server defaults
-    lines.append("# Server")
-    lines.append("NADIRCLAW_PORT=8856")
-    lines.append("")
-
-    ENV_FILE.write_text("\n".join(lines) + "\n")
-
-    # Restrict permissions
-    if platform.system() != "Windows":
-        ENV_FILE.chmod(0o600)
-
+    if old is not None:
+        backup = _private_config_file(old, f".env.backup-{datetime.now().strftime('%Y%m%d-%H%M%S')}-")
+        click.echo(f"  Backed up existing config to {backup}")
+    temporary = _private_config_file(merged, ".env.tmp-")
+    try:
+        os.replace(temporary, ENV_FILE)
+    finally:
+        temporary.unlink(missing_ok=True)
     return ENV_FILE
 
 
@@ -1001,4 +1045,6 @@ def run_setup_wizard(reconfigure: bool = False):
     )
     click.echo(f"  Wrote {env_path}")
 
-    print_summary(providers, simple_model, complex_model, reasoning_model, free_model)
+    saved = detect_existing_config()
+    print_summary(providers, simple_model, complex_model,
+                  saved.get("NADIRCLAW_REASONING_MODEL"), saved.get("NADIRCLAW_FREE_MODEL"))
