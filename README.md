@@ -26,7 +26,7 @@
 </p>
 
 <p align="center">
-  Works with <strong>Claude Code</strong> · <strong>Cursor</strong> · <strong>Continue</strong> · <strong>Aider</strong> · <strong>Windsurf</strong> · <strong>Codex</strong> · <strong>OpenClaw</strong> · <strong>Open WebUI</strong> · Any OpenAI-compatible client
+  Works with <strong>Claude Code</strong> · <strong>Cursor</strong> · <strong>Continue</strong> · <strong>Aider</strong> · <strong>Windsurf</strong> · <strong>Codex</strong> · <strong>OpenCode</strong> · <strong>OpenClaw</strong> · <strong>Open WebUI</strong> · Any OpenAI-compatible client
 </p>
 
 <p align="center">
@@ -922,6 +922,43 @@ nadirclaw continue onboard
 ```
 
 This writes a `~/.continue/config.json` entry with NadirClaw's `auto` model. Just start the server, open Continue in your editor, and select "NadirClaw Auto" from the model dropdown.
+
+## Usage with OpenCode
+
+[OpenCode](https://opencode.ai) is an open-source coding agent for the terminal. NadirClaw plugs in as a custom OpenAI-compatible provider, so no plugin is needed.
+
+1. Start NadirClaw: `nadirclaw serve`
+2. Add a provider to `opencode.json` (project root) or `~/.config/opencode/opencode.json`:
+
+```json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "provider": {
+    "nadirclaw": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "NadirClaw (local)",
+      "options": {
+        "baseURL": "http://localhost:8856/v1",
+        "apiKey": "local"
+      },
+      "models": {
+        "auto": { "name": "NadirClaw Auto" },
+        "eco": { "name": "NadirClaw Eco" },
+        "premium": { "name": "NadirClaw Premium" }
+      }
+    }
+  },
+  "model": "nadirclaw/auto"
+}
+```
+
+3. Run `opencode`, or pick a model per run: `opencode run -m nadirclaw/auto "..."`. `opencode models` should list `nadirclaw/auto`, `nadirclaw/eco` and `nadirclaw/premium`.
+
+`apiKey` is a placeholder: NadirClaw accepts localhost requests without a token. If you set `NADIRCLAW_AUTH_TOKEN`, put that token there instead.
+
+**What gets routed where.** OpenCode sends its tool definitions on every agent turn, and NadirClaw's [agentic detection](#agentic-task-detection) sends tool-carrying requests to the complex model. So the main coding loop stays on your strong model, while OpenCode's side calls (session titles, short tool-free prompts) go to the cheap one. To push a lightweight agent or subagent to the cheap tier on purpose, give it `nadirclaw/eco` as its model. `nadirclaw report --by-model` shows the split.
+
+Tested with OpenCode 1.19.5 and 2.2.6.
 
 ## Usage with Cursor
 
