@@ -171,7 +171,7 @@ NadirClaw is the free, source-available core, licensed under PolyForm Noncommerc
 |---|---|---|
 | **License** | PolyForm Noncommercial 1.0.0 (free for noncommercial use; commercial license via [getnadir.com](https://getnadir.com)) | Proprietary |
 | **Deploy** | Self-hosted, localhost | `api.getnadir.com` or self-host via Docker |
-| **Pre-generation classifier** | Binary centroid (~10ms), opt-in DistilBERT, or **bundled** `wide_deep_asym_v3` trained checkpoint (~40ms CPU; see [`MODEL_CARD.md`](MODEL_CARD.md)) | Same trained classifier + closed-loop retraining, provider-health-aware ranking |
+| **Pre-generation classifier** | Binary centroid (~10ms), opt-in DistilBERT or Laya, or **bundled** `wide_deep_asym_v3` trained checkpoint (~40ms CPU; see [`MODEL_CARD.md`](MODEL_CARD.md)) | Same trained classifier + closed-loop retraining, provider-health-aware ranking |
 | **Post-generation verifier** | Rule-based heuristic (refusal / length / JSON checks, ~1ms) | Optional trained reference-free verifier on complete non-streaming responses; streaming bypasses it, errors fail open |
 | **Verifier-gated cascade** | Yes (heuristic verifier) | Yes (trained verifier) |
 | **Storage** | Local JSONL + SQLite | Postgres (Supabase), multi-tenant |
@@ -188,7 +188,7 @@ NadirClaw is the free, source-available core, licensed under PolyForm Noncommerc
 
 - **Context Optimize** — compacts bloated context (JSON, tool schemas, chat history, whitespace) before dispatch, cutting 29-71% of input tokens on [five synthetic payloads](docs/context-optimize-savings.md) and 1-10% on real conversational traffic ([benchmark](docs/optimizer-benchmark-2026-06.md)). Every mode except `off` also trims chat history past 40 user turns (`NADIRCLAW_OPTIMIZE_MAX_TURNS`), so long sessions lose middle turns. Modes: `off` (default), `safe` (deterministic, no model calls), `aggressive` (+ columnar JSON-array packing & semantic dedup), `progressive` (staged ladder that only escalates until a token budget is met). Pluggable backend (`native` default, or opt-in `headroom`). See [savings analysis](docs/context-optimize-savings.md)
 - **Smart routing** — classifies prompts in ~10ms using sentence embeddings
-- **Pluggable classifier** — `binary` (default, ~10ms centroid classifier) or `distilbert` (3-class fine-tuned DistilBERT that natively predicts simple/mid/complex). Select with `NADIRCLAW_COMPLEXITY_ANALYZER`
+- **Pluggable classifier** — `binary` (default, ~10ms centroid classifier), `distilbert` (3-class fine-tuned DistilBERT that natively predicts simple/mid/complex), or `laya` (Laya typed-decisions model, local CPU, opt-in extra). Select with `NADIRCLAW_COMPLEXITY_ANALYZER`
 - **Three-tier routing** — simple / mid / complex tiers with configurable score thresholds (`NADIRCLAW_TIER_THRESHOLDS`); set `NADIRCLAW_MID_MODEL` for a cost-effective middle tier
 - **N-tier YAML config** — one classifier head, any number of tiers. The default profile (`n2_default.yaml`) ships a cheap-and-strong two-tier cascade tuned on RouterArena (arena_F 0.7358, beats the legacy three-tier baseline). Switch profiles with `NADIRCLAW_TIERS_PROFILE=<name>`. Custom YAML profiles hot-reload from disk in <30s. See `nadirclaw/tier_config/` and the [N-tier docs](#n-tier-routing) below.
 - **Verifier-gated cascade** — cheap model first, score the response with a rule-based heuristic verifier (refusals, truncations, JSON-format failures, ~1ms), escalate to the next tier when the score falls below τ=0.80. Same architecture as Nadir Pro, swap the verifier for the trained DeBERTa cross-encoder. See `nadirclaw/cascade.py` (`Cascade` for 2-tier, `NTierCascade` for N≥2).
@@ -420,13 +420,14 @@ Gemini models are called natively via the Google GenAI SDK. All other models go 
 
 ### Complexity analyzer
 
-NadirClaw ships two local prompt classifiers, plus an optional remote one. Pick one with `NADIRCLAW_COMPLEXITY_ANALYZER`:
+NadirClaw ships two local prompt classifiers, an optional local Laya classifier, and an optional remote one. Pick one with `NADIRCLAW_COMPLEXITY_ANALYZER`:
 
 | Value | Model | Latency | Size | Output |
 |---|---|---|---|---|
 | `binary` *(default)* | Sentence-embedding centroid classifier | ~10ms | ~22MB | 2-class (simple / complex) — `mid` and `reasoning` come from rule overlays |
 | `distilbert` | Fine-tuned DistilBERT sequence classifier | ~30ms | ~256MB | 3-class (simple / mid / complex) predicted natively |
 | `morph` | [Morph hosted Model Router](https://docs.morphllm.com/sdk/components/router) (remote) | ~50ms + network | — | difficulty → simple / mid / complex via the same tier thresholds |
+| `laya` | [Laya typed-decisions](https://huggingface.co/convaiinnovations/laya-typed-decisions) (ModernBERT-large, local CPU) | 0.15-0.8s | ~843MB | P(simple / mid / complex), tier by a risk cutoff |
 
 ```bash
 # opt into the 3-class DistilBERT classifier
@@ -453,11 +454,35 @@ Morph returns a `difficulty` (`easy` / `medium` / `hard` / `needs_info`), which 
 
 **Fail-closed:** on a missing key, HTTP error, timeout, or unparseable response, NadirClaw logs once and serves that request from the local binary classifier — a Morph outage degrades routing quality, never availability. Repeated prompts within a session are served from a small in-memory cache. Note: the Morph call adds a small per-classification cost that NadirClaw's savings report does not yet subtract from net-saved (tracked as a follow-up).
 
+#### Laya (local, opt-in)
+
+`laya` runs the Laya typed-decisions model on your CPU. Install the extra and select it:
+
+```bash
+pip install "nadirclaw[laya]"
+NADIRCLAW_COMPLEXITY_ANALYZER=laya nadirclaw serve
+```
+
+Laya scores the work a prompt needs and returns P(simple), P(mid) and P(complex). NadirClaw routes with a risk rule: complex when P(complex) reaches the cutoff, mid when P(mid) + P(complex) reaches it, otherwise simple. Without `NADIRCLAW_MID_MODEL` there is no mid tier, so the second case routes to complex.
+
+Know what it costs before you switch:
+
+- **It is conservative.** At the default cutoff it sends most prompts to complex, short ones like `hi` and `What is 2+2?` included, so it picks your cheap model far less often than `binary`. The cutoff was fitted on 249 labelled prompts, not on outcomes; tune it with `NADIRCLAW_LAYA_CUTOFF`.
+- **It is heavy.** torch + transformers, a one-time ~843MB download of the pinned weights (revision `1a793eb5`, cached under `~/.cache/huggingface/hub/`), about 3GB of RAM, about 20s to load, and 0.15s (short prompt) to 0.8s (6,000 characters) per prompt on an Apple M5 Pro. Classifications run one at a time, off the event loop.
+
+| Env var | Default | Purpose |
+|---|---|---|
+| `NADIRCLAW_LAYA_CUTOFF` | `0.40` | Risk cutoff in (0, 1]. Lower sends more prompts up a tier. |
+| `NADIRCLAW_LAYA_PATH` | unset | Local snapshot directory, for offline machines. Unset, the pinned revision is downloaded once. |
+
+**Fail-closed:** if the `laya` package is missing, is a version other than the evaluated `0.3.20`, or the weights fail to load, NadirClaw logs a warning and uses `binary`. An error on a single prompt serves that prompt from `binary`.
+
 Test how any prompt buckets with either analyzer:
 
 ```bash
 nadirclaw classify "design a distributed rate limiter"
 NADIRCLAW_COMPLEXITY_ANALYZER=distilbert nadirclaw classify "fix this typo"
+NADIRCLAW_COMPLEXITY_ANALYZER=laya nadirclaw classify "fix this typo"
 ```
 
 ### N-tier routing

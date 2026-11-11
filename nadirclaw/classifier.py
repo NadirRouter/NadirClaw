@@ -367,6 +367,14 @@ def get_classifier() -> Any:
                 "Failed to init Morph router classifier (%s) — falling back to binary",
                 e,
             )
+    elif kind == "laya":
+        try:
+            from nadirclaw.laya_classifier import LayaClassifier
+            _active_classifier = LayaClassifier()
+            logger.info("Using Laya classifier (local CPU, fail-closed to binary)")
+            return _active_classifier
+        except Exception as e:
+            logger.warning("Failed to load Laya classifier (%s); falling back to binary", e)
     _active_classifier = get_binary_classifier()
     return _active_classifier
 
@@ -401,6 +409,15 @@ def warmup() -> None:
                 "Morph warmup failed (%s) — falling back to binary classifier",
                 e,
             )
+    elif kind == "laya":
+        try:
+            from nadirclaw.laya_classifier import LayaClassifier
+            logger.info("Warming up LayaClassifier (local CPU) ...")
+            _active_classifier = LayaClassifier()
+            logger.info("LayaClassifier warmup complete")
+            return
+        except Exception as e:
+            logger.warning("Laya warmup failed (%s); falling back to binary classifier", e)
     logger.info("Warming up BinaryComplexityClassifier ...")
     _singleton = BinaryComplexityClassifier()
     _active_classifier = _singleton

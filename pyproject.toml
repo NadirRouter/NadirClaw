@@ -89,6 +89,12 @@ telemetry = [
     "opentelemetry-exporter-otlp-proto-grpc>=1.20.0",
     "opentelemetry-instrumentation-fastapi>=0.41b0",
 ]
+laya = [
+    # Optional Laya typed-decisions classifier (Apache-2.0, huggingface.co/convaiinnovations/laya-typed-decisions).
+    # Activated with NADIRCLAW_COMPLEXITY_ANALYZER=laya. Pinned to the evaluated version: the
+    # classifier refuses any other and falls back to binary. torch/transformers come with it.
+    "laya==0.3.20",
+]
 trained = [
     # Optional dependency for the TrainedVerifier (DeBERTa-v3-small
     # cross-encoder loaded from nadirclaw/cascade-verifier-v1).

@@ -137,7 +137,7 @@ def serve(port, host, simple_model, complex_model, models, token, verbose, log_r
 def classify(prompt, fmt):
     """Classify a prompt with the configured analyzer (no server needed).
 
-    Honors NADIRCLAW_COMPLEXITY_ANALYZER (binary | distilbert).
+    Honors NADIRCLAW_COMPLEXITY_ANALYZER (binary | distilbert | morph | laya).
     """
     import asyncio
     import logging

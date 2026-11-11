@@ -173,12 +173,35 @@ class Settings:
           - "morph"                — Morph hosted Model Router (remote). Requires
                                      MORPH_API_KEY. Fails closed to "binary" on any
                                      error/timeout/missing key.
+          - "laya"                 - Laya typed-decisions model, local CPU (~1s,
+                                     ~843MB weights). Requires `nadirclaw[laya]`.
+                                     Fails closed to "binary".
 
         Set via NADIRCLAW_COMPLEXITY_ANALYZER. The DistilBERT artifact is not
         shipped in the package — install separately or train via
         `nadir.distilbert_classifier.DistilBertClassifier()`.
         """
         return os.getenv("NADIRCLAW_COMPLEXITY_ANALYZER", "binary").strip().lower()
+
+    @property
+    def LAYA_CUTOFF(self) -> float:
+        """Risk cutoff for the Laya classifier (NADIRCLAW_LAYA_CUTOFF, default 0.40).
+
+        Lower routes more prompts up a tier. Raises on a value outside (0, 1], so
+        the classifier falls back to binary instead of routing on a typo.
+        """
+        raw = os.getenv("NADIRCLAW_LAYA_CUTOFF", "").strip()
+        if not raw:
+            return 0.40
+        value = float(raw)
+        if not 0.0 < value <= 1.0:
+            raise ValueError(f"NADIRCLAW_LAYA_CUTOFF must be in (0, 1], got {raw!r}")
+        return value
+
+    @property
+    def LAYA_PATH(self) -> str:
+        """Local Laya snapshot directory (NADIRCLAW_LAYA_PATH). Empty = pinned HF revision."""
+        return os.getenv("NADIRCLAW_LAYA_PATH", "").strip()
 
     @property
     def MORPH_API_KEY(self) -> str:
