@@ -17,6 +17,7 @@ prevent silent mismatch between centroid vectors and the active embedding model.
 import json
 import logging
 import os
+import threading
 import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -331,26 +332,17 @@ def get_binary_classifier() -> BinaryComplexityClassifier:
     return _singleton
 
 
-def get_classifier() -> Any:
-    """Return whichever classifier is configured via NADIRCLAW_COMPLEXITY_ANALYZER.
+_classifier_lock = threading.Lock()  # held while a configured classifier loads
 
-    Defaults to the binary centroid classifier. Set
-    `NADIRCLAW_COMPLEXITY_ANALYZER=distilbert` to use the 3-class DistilBERT
-    classifier (requires the ~256MB model directory to be present).
-    """
-    global _active_classifier
-    if _active_classifier is not None:
-        return _active_classifier
 
-    from nadirclaw.settings import settings
-
-    kind = settings.COMPLEXITY_ANALYZER_TYPE
+def _build_classifier(kind: str) -> Any:
+    """Construct the classifier for *kind*, falling back to binary on failure."""
     if kind == "distilbert":
         try:
             from nadirclaw.distilbert_classifier import DistilBertClassifier
-            _active_classifier = DistilBertClassifier()
+            clf = DistilBertClassifier()
             logger.info("Using DistilBERT classifier (3-class: simple/mid/complex)")
-            return _active_classifier
+            return clf
         except Exception as e:
             logger.warning(
                 "Failed to load DistilBERT classifier (%s) — falling back to binary",
@@ -359,9 +351,9 @@ def get_classifier() -> Any:
     elif kind == "morph":
         try:
             from nadirclaw.morph_classifier import MorphRouterClassifier
-            _active_classifier = MorphRouterClassifier()
+            clf = MorphRouterClassifier()
             logger.info("Using Morph router classifier (remote, fail-closed to binary)")
-            return _active_classifier
+            return clf
         except Exception as e:
             logger.warning(
                 "Failed to init Morph router classifier (%s) — falling back to binary",
@@ -370,55 +362,46 @@ def get_classifier() -> Any:
     elif kind == "laya":
         try:
             from nadirclaw.laya_classifier import LayaClassifier
-            _active_classifier = LayaClassifier()
+            clf = LayaClassifier()
             logger.info("Using Laya classifier (local CPU, fail-closed to binary)")
-            return _active_classifier
+            return clf
         except Exception as e:
             logger.warning("Failed to load Laya classifier (%s); falling back to binary", e)
-    _active_classifier = get_binary_classifier()
-    return _active_classifier
+    return get_binary_classifier()
+
+
+def get_classifier() -> Any:
+    """Return whichever classifier is configured via NADIRCLAW_COMPLEXITY_ANALYZER.
+
+    Defaults to the binary centroid classifier. Set
+    `NADIRCLAW_COMPLEXITY_ANALYZER=distilbert` to use the 3-class DistilBERT
+    classifier (requires the ~256MB model directory to be present).
+
+    Called on the event loop, so it never waits on a load in flight: while
+    warmup() holds the lock, this request gets the binary classifier instead
+    of building (and blocking on) a second copy of a heavy model.
+    """
+    global _active_classifier
+    if _active_classifier is not None:
+        return _active_classifier
+    if not _classifier_lock.acquire(blocking=False):
+        return get_binary_classifier()
+    try:
+        if _active_classifier is None:
+            from nadirclaw.settings import settings
+            _active_classifier = _build_classifier(settings.COMPLEXITY_ANALYZER_TYPE)
+        return _active_classifier
+    finally:
+        _classifier_lock.release()
 
 
 def warmup() -> None:
     """Pre-warm the configured classifier at startup."""
-    global _singleton, _active_classifier
+    global _active_classifier
     from nadirclaw.settings import settings
 
-    kind = settings.COMPLEXITY_ANALYZER_TYPE
-    if kind == "distilbert":
-        try:
-            from nadirclaw.distilbert_classifier import DistilBertClassifier
-            logger.info("Warming up DistilBertClassifier (3-class) ...")
-            _active_classifier = DistilBertClassifier()
-            logger.info("DistilBertClassifier warmup complete")
-            return
-        except Exception as e:
-            logger.warning(
-                "DistilBERT warmup failed (%s) — falling back to binary classifier",
-                e,
-            )
-    elif kind == "morph":
-        try:
-            from nadirclaw.morph_classifier import MorphRouterClassifier
-            logger.info("Warming up MorphRouterClassifier (remote) ...")
-            _active_classifier = MorphRouterClassifier()
-            logger.info("MorphRouterClassifier warmup complete")
-            return
-        except Exception as e:
-            logger.warning(
-                "Morph warmup failed (%s) — falling back to binary classifier",
-                e,
-            )
-    elif kind == "laya":
-        try:
-            from nadirclaw.laya_classifier import LayaClassifier
-            logger.info("Warming up LayaClassifier (local CPU) ...")
-            _active_classifier = LayaClassifier()
-            logger.info("LayaClassifier warmup complete")
-            return
-        except Exception as e:
-            logger.warning("Laya warmup failed (%s); falling back to binary classifier", e)
-    logger.info("Warming up BinaryComplexityClassifier ...")
-    _singleton = BinaryComplexityClassifier()
-    _active_classifier = _singleton
-    logger.info("BinaryComplexityClassifier warmup complete")
+    with _classifier_lock:
+        if _active_classifier is None:
+            logger.info("Warming up %s classifier ...", settings.COMPLEXITY_ANALYZER_TYPE)
+            _active_classifier = _build_classifier(settings.COMPLEXITY_ANALYZER_TYPE)
+            logger.info("Classifier warmup complete")

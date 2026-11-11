@@ -88,3 +88,34 @@ class TestClassifierFactory:
         self._reset_singleton()
         from nadirclaw.classifier import get_classifier
         assert get_classifier() is get_classifier()
+
+
+def test_get_classifier_during_warmup_returns_binary_without_second_load(monkeypatch):
+    """A request that lands while warmup() is loading a heavy classifier must
+    not build a second copy on the event loop; it gets binary for that request."""
+    import threading
+    import nadirclaw.classifier as c
+
+    started, release = threading.Event(), threading.Event()
+    builds = []
+    heavy, binary = object(), object()
+
+    def slow_build(kind):
+        builds.append(kind)
+        started.set()
+        release.wait(5)
+        return heavy
+
+    monkeypatch.setattr(c, "_build_classifier", slow_build)
+    monkeypatch.setattr(c, "get_binary_classifier", lambda: binary)
+    monkeypatch.setattr(c, "_active_classifier", None)
+
+    t = threading.Thread(target=c.warmup)
+    t.start()
+    assert started.wait(5)
+    assert c.get_classifier() is binary  # does not block, does not build
+    release.set()
+    t.join(5)
+
+    assert c.get_classifier() is heavy
+    assert len(builds) == 1
