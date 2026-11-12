@@ -68,3 +68,27 @@ def test_api_key_token_uses_litellm_path():
     assert result.exit_code == 0, result.output
     mock_post.assert_not_called()
     mock_litellm.assert_called_once()
+
+
+def _ok_resp():
+    fake_resp = MagicMock()
+    fake_resp.choices = [MagicMock()]
+    fake_resp.choices[0].message.content = "ok"
+    return fake_resp
+
+
+def test_custom_api_base_is_passed_to_probe():
+    """NADIRCLAW_API_BASE must reach the probe, like the server's calls (#116)."""
+    with patch("nadirclaw.credentials.get_credential", return_value=None), \
+         patch("nadirclaw.settings.settings") as mock_settings, \
+         patch("litellm.completion", return_value=_ok_resp()) as mock_litellm:
+        mock_settings.SIMPLE_MODEL = "openai/qwen/qwen3.7-flash"
+        mock_settings.COMPLEX_MODEL = "gemini/gemini-2.5-pro"
+        mock_settings.API_BASE = "https://gateway.example/v1"
+        result = CliRunner().invoke(main, ["test"])
+
+    assert result.exit_code == 0, result.output
+    calls = {c.kwargs["model"]: c.kwargs for c in mock_litellm.call_args_list}
+    assert calls["openai/qwen/qwen3.7-flash"]["api_base"] == "https://gateway.example/v1"
+    # Gemini is called natively by the server, so it must not get the gateway base.
+    assert "api_base" not in calls["gemini/gemini-2.5-pro"]
