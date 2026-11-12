@@ -63,7 +63,7 @@ on them.**
 ## Verifying the setup
 
 1. **`nadirclaw test` per tier.** With the `NADIRCLAW_API_BASE` set above, the
-   probe goes to the gateway, the same as `nadirclaw serve`. NadirClaw 0.25.0
+   probe goes to the gateway, the same as `nadirclaw serve`. NadirClaw 0.25.3
    and earlier ignored it in `nadirclaw test` and sent the probe to
    `api.openai.com` with your gateway key; on those versions also
    `export OPENAI_API_BASE=https://api.uberllm.dev/v1` for the run.
