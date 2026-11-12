@@ -1878,11 +1878,19 @@ def test(simple_model, complex_model, timeout):
             else:
                 import litellm
 
+                call_kwargs = {}
+                # Same api_base rule as the server, so the probe hits the
+                # endpoint `nadirclaw serve` would use (Gemini goes native there).
+                if model.startswith(("ollama/", "ollama_chat/")):
+                    call_kwargs["api_base"] = settings.OLLAMA_API_BASE
+                elif settings.API_BASE and not model.startswith("gemini/"):
+                    call_kwargs["api_base"] = settings.API_BASE
                 resp = litellm.completion(
                     model=model,
                     messages=probe,
                     max_tokens=10,
                     timeout=timeout,
+                    **call_kwargs,
                 )
                 content = resp.choices[0].message.content or ""
             latency = int((_time.time() - t0) * 1000)

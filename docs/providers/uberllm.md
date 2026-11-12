@@ -62,13 +62,13 @@ on them.**
 
 ## Verifying the setup
 
-1. **`nadirclaw test` per tier.** `nadirclaw test` calls LiteLLM directly and
-   does not read `NADIRCLAW_API_BASE`, so give it the base URL through LiteLLM's
-   own variable for that run. Without it the probe goes to `api.openai.com`
-   with your gateway key.
+1. **`nadirclaw test` per tier.** With the `NADIRCLAW_API_BASE` set above, the
+   probe goes to the gateway, the same as `nadirclaw serve`. NadirClaw 0.25.3
+   and earlier ignored it in `nadirclaw test` and sent the probe to
+   `api.openai.com` with your gateway key; on those versions also
+   `export OPENAI_API_BASE=https://api.uberllm.dev/v1` for the run.
 
    ```bash
-   export OPENAI_API_BASE=https://api.uberllm.dev/v1
    nadirclaw test                       # simple + complex tiers
    nadirclaw test --simple-model openai/deepseek/deepseek-v4.1-flash \
                   --complex-model openai/deepseek/deepseek-v4.1-flash   # mid tier
