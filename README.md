@@ -699,6 +699,8 @@ nadirclaw serve
 For a fully worked example — env vars plus a `models.local.json` pricing
 override for a hosted third-party gateway — see
 [Routing NadirClaw at a custom OpenAI-compatible gateway](docs/providers/starveri.md).
+For a tier split that uses models from different labs behind one gateway key, see
+[Routing all three tiers through one gateway key](docs/providers/uberllm.md).
 
 ## Usage with OpenClaw
 
