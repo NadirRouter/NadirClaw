@@ -4,6 +4,9 @@ All notable changes to NadirClaw will be documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+- **A stalled provider no longer holds a request for 10+ minutes.** LiteLLM calls ran with LiteLLM's 600 s default timeout, and the OpenAI SDK retried a timed-out call twice more, so a provider that accepted the connection and went silent could hold a request for up to ~30 minutes before the fallback chain ran. New `NADIRCLAW_PROVIDER_TIMEOUT` (default 120 s, matching the native Gemini path) bounds the wait between stream chunks and, for non-streaming calls, the time to the full response; SDK retries are off for these calls because the fallback chain is the retry. `0` restores the old behavior. Local Ollama keeps LiteLLM defaults unless the variable is set, since a cold model load can take minutes.
+
 ### Added
 - **Opt-in Laya classifier** (`NADIRCLAW_COMPLEXITY_ANALYZER=laya`, `pip install "nadirclaw[laya]"`). Runs the Laya typed-decisions model (Apache-2.0, pinned `laya==0.3.20` and weights revision `1a793eb5`) on CPU with a fixed rubric and a risk rule (cutoff `NADIRCLAW_LAYA_CUTOFF`, default 0.40). It is conservative and sends most prompts to complex, and it needs ~843MB of weights and ~3GB of RAM, so `binary` stays the default. Fails closed to `binary` when the package, version or weights are missing, and per prompt on any error. Inference runs off the event loop so open streams keep flowing.
 
