@@ -84,6 +84,22 @@ def _fallback_reason(model: str, error: Exception) -> Dict[str, str]:
     }
 
 
+def _provider_timeout_kwargs(litellm_model: str) -> Dict[str, Any]:
+    """LiteLLM kwargs that turn a stalled provider into a fast failure.
+
+    ``max_retries=0`` stops the provider SDK from silently re-running a
+    timed-out call (the OpenAI SDK retries twice, tripling the wait); the
+    fallback chain is the retry. Local Ollama is exempt unless
+    NADIRCLAW_PROVIDER_TIMEOUT is set explicitly, since a cold model load can
+    legitimately take minutes before the first byte.
+    """
+    timeout = settings.PROVIDER_TIMEOUT
+    local = litellm_model.startswith(("ollama/", "ollama_chat/"))
+    if timeout <= 0 or (local and "NADIRCLAW_PROVIDER_TIMEOUT" not in os.environ):
+        return {}
+    return {"timeout": timeout, "max_retries": 0}
+
+
 def _record_provider_success(model: str) -> None:
     if settings.PROVIDER_HEALTH is not True:
         return
@@ -1178,7 +1194,7 @@ async def _call_litellm(
 
     logger.debug("Calling LiteLLM: model=%s (provider=%s)", litellm_model, provider)
     try:
-        response = await litellm.acompletion(**call_kwargs)
+        response = await litellm.acompletion(**call_kwargs, **_provider_timeout_kwargs(litellm_model))
     except Exception as e:
         # Catch rate limit errors from any provider through LiteLLM
         err_str = str(e).lower()
@@ -2021,7 +2037,7 @@ async def _stream_litellm(
         call_kwargs["api_base"] = settings.API_BASE
 
     try:
-        response = await litellm.acompletion(**call_kwargs)
+        response = await litellm.acompletion(**call_kwargs, **_provider_timeout_kwargs(litellm_model))
     except Exception as e:
         err_str = str(e).lower()
         if "429" in err_str or "rate" in err_str or "quota" in err_str or "resource_exhausted" in err_str:

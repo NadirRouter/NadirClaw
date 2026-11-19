@@ -1430,7 +1430,7 @@ NadirClaw uses a binary complexity classifier based on sentence embeddings:
    - **Gemini models** — called natively via the [Google GenAI SDK](https://github.com/googleapis/python-genai) for best performance
    - **All other models** — called via [LiteLLM](https://docs.litellm.ai), which provides a unified interface to 100+ providers
 
-6. **Fallback chains**: If the selected model fails (429 rate limit, 5xx error, or timeout), NadirClaw cascades through a configurable fallback chain. Set `NADIRCLAW_FALLBACK_CHAIN=gpt-4.1,claude-sonnet-4-5-20250929,gemini-2.5-flash` to define the order. Default chain uses all your configured tier models.
+6. **Fallback chains**: If the selected model fails (429 rate limit, 5xx error, or timeout), NadirClaw cascades through a configurable fallback chain. A provider that stalls counts as failed after `NADIRCLAW_PROVIDER_TIMEOUT` seconds (default 120). Set `NADIRCLAW_FALLBACK_CHAIN=gpt-4.1,claude-sonnet-4-5-20250929,gemini-2.5-flash` to define the order. Default chain uses all your configured tier models.
 
 7. **Per-model rate limiting**: Protect against runaway costs and provider quota exhaustion with configurable RPM limits per model. When a model hits its limit, NadirClaw automatically triggers the fallback chain — no failed requests. Configure via `NADIRCLAW_MODEL_RATE_LIMITS=gemini-3-flash-preview=30,gpt-4.1=60` or set a blanket default with `NADIRCLAW_DEFAULT_MODEL_RPM=120`. Monitor usage in real-time at `/v1/rate-limits`.
 
@@ -1612,6 +1612,7 @@ By default NadirClaw listens on `127.0.0.1` and, with no `NADIRCLAW_AUTH_TOKEN` 
 | `NADIRCLAW_REASONING_MODEL` | *(falls back to complex)* | Model for reasoning tasks |
 | `NADIRCLAW_FREE_MODEL` | *(falls back to simple)* | Free fallback model |
 | `NADIRCLAW_FALLBACK_CHAIN` | *(all tier models)* | Comma-separated cascade order on model failure |
+| `NADIRCLAW_PROVIDER_TIMEOUT` | `120` | Seconds a provider call may stall before NadirClaw moves to the fallback chain. Streaming: longest gap between chunks (a flowing stream is never cut). Non-streaming: time to the full response, so raise it for very long non-streaming generations. `0` restores LiteLLM's defaults. Local Ollama is exempt unless you set it |
 | `NADIRCLAW_DAILY_BUDGET` | *(none)* | Daily spend limit in USD (e.g. `5.00`) |
 | `NADIRCLAW_MONTHLY_BUDGET` | *(none)* | Monthly spend limit in USD (e.g. `50.00`) |
 | `NADIRCLAW_BUDGET_WARN_THRESHOLD` | `0.8` | Alert when spend reaches this fraction of budget |

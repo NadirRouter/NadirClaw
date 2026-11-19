@@ -231,6 +231,21 @@ class Settings:
             return 200
 
     @property
+    def PROVIDER_TIMEOUT(self) -> float:
+        """Seconds a LiteLLM provider call may stall before it counts as failed.
+
+        Streaming: the longest gap between chunks (a stream that keeps flowing
+        is never cut). Non-streaming: the time until the full response arrives.
+        On timeout the fallback chain takes over. LiteLLM's own default is
+        600 s, plus SDK retries. 0 disables it (LiteLLM defaults apply).
+        Default 120, matching the native Gemini path.
+        """
+        try:
+            return max(0.0, float(os.getenv("NADIRCLAW_PROVIDER_TIMEOUT", "120")))
+        except ValueError:
+            return 120.0
+
+    @property
     def FALLBACK_CHAIN(self) -> list[str]:
         """Ordered fallback chain. When a model fails, try the next one.
 
