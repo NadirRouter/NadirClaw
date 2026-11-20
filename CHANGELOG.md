@@ -4,11 +4,24 @@ All notable changes to NadirClaw will be documented in this file.
 
 ## [Unreleased]
 
+## [0.26.0] - 2026-11-19
+
 ### Fixed
-- **A stalled provider no longer holds a request for 10+ minutes.** LiteLLM calls ran with LiteLLM's 600 s default timeout, and the OpenAI SDK retried a timed-out call twice more, so a provider that accepted the connection and went silent could hold a request for up to ~30 minutes before the fallback chain ran. New `NADIRCLAW_PROVIDER_TIMEOUT` (default 120 s, matching the native Gemini path) bounds the wait between stream chunks and, for non-streaming calls, the time to the full response; SDK retries are off for these calls because the fallback chain is the retry. `0` restores the old behavior. Local Ollama keeps LiteLLM defaults unless the variable is set, since a cold model load can take minutes.
+- **A stalled provider no longer holds a request for 10+ minutes.** LiteLLM calls ran with LiteLLM's 600 s default timeout, and the OpenAI SDK retried a timed-out call twice more, so a provider that accepted the connection and went silent could hold a request for up to ~30 minutes before the fallback chain ran. New `NADIRCLAW_PROVIDER_TIMEOUT` (default 120 s, matching the native Gemini path) bounds the wait between stream chunks and, for non-streaming calls, the time to the full response; SDK retries are off for these calls because the fallback chain is the retry. `0` restores the old behavior. Local Ollama keeps LiteLLM defaults unless the variable is set, since a cold model load can take minutes. (#118)
+- **A request during classifier warmup no longer loads a second classifier** (#115). A request that arrived while a heavy classifier (`laya`, `distilbert`) was still loading in the background built another instance on the event loop, blocking the server and doubling memory. Warmup and request-time loading now share one lock and one builder.
+- **`nadirclaw test` honors `NADIRCLAW_API_BASE`** (#117). The probe called the provider directly, so with an OpenAI-compatible gateway configured it sent the gateway key to api.openai.com and could fail for a setup that `serve` handles fine. It now applies the same `api_base` rule as the server.
 
 ### Added
-- **Opt-in Laya classifier** (`NADIRCLAW_COMPLEXITY_ANALYZER=laya`, `pip install "nadirclaw[laya]"`). Runs the Laya typed-decisions model (Apache-2.0, pinned `laya==0.3.20` and weights revision `1a793eb5`) on CPU with a fixed rubric and a risk rule (cutoff `NADIRCLAW_LAYA_CUTOFF`, default 0.40). It is conservative and sends most prompts to complex, and it needs ~843MB of weights and ~3GB of RAM, so `binary` stays the default. Fails closed to `binary` when the package, version or weights are missing, and per prompt on any error. Inference runs off the event loop so open streams keep flowing.
+- **Opt-in Laya classifier** (`NADIRCLAW_COMPLEXITY_ANALYZER=laya`, `pip install "nadirclaw[laya]"`). Runs the Laya typed-decisions model (Apache-2.0, pinned `laya==0.3.20` and weights revision `1a793eb5`) on CPU with a fixed rubric and a risk rule (cutoff `NADIRCLAW_LAYA_CUTOFF`, default 0.40). It is conservative and sends most prompts to complex, and it needs ~843MB of weights and ~3GB of RAM, so `binary` stays the default. Fails closed to `binary` when the package, version or weights are missing, and per prompt on any error. Inference runs off the event loop so open streams keep flowing. (#114)
+
+### Docs
+- **OpenCode setup** (#112): NadirClaw as an OpenCode custom OpenAI-compatible provider, no plugin needed.
+- **UberLLM provider example** (#116): a cross-lab tier split behind one gateway key, in the same shape as the existing provider examples. Not an endorsement.
+
+## [0.25.3] - 2026-11-06
+
+### Changed
+- **Model setup keeps your other settings** when you change models (custom port, authentication, budget, cache), writes a unique private backup, and replaces the config atomically. Invalid model choices prompt again. Also ships the DeepSeek tool-turn fix that preserves reasoning content in thinking-mode conversations.
 
 ## [0.25.2] - 2026-11-05
 
