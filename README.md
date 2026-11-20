@@ -26,7 +26,7 @@
 </p>
 
 <p align="center">
-  Works with <strong>Claude Code</strong> · <strong>Cursor</strong> · <strong>Continue</strong> · <strong>Aider</strong> · <strong>Windsurf</strong> · <strong>Codex</strong> · <strong>OpenCode</strong> · <strong>OpenClaw</strong> · <strong>Open WebUI</strong> · Any OpenAI-compatible client
+  Works with <strong>Claude Code</strong> · <strong>Cursor</strong> · <strong>Continue</strong> · <strong>Aider</strong> · <strong>Windsurf</strong> · <strong>Codex</strong> · <strong>OpenCode</strong> · <strong>Goose</strong> · <strong>OpenClaw</strong> · <strong>Open WebUI</strong> · Any OpenAI-compatible client
 </p>
 
 <p align="center">
@@ -986,6 +986,29 @@ This writes a `~/.continue/config.json` entry with NadirClaw's `auto` model. Jus
 **What gets routed where.** OpenCode sends its tool definitions on every agent turn, and NadirClaw's [agentic detection](#agentic-task-detection) sends tool-carrying requests to the complex model. So the main coding loop stays on your strong model, while OpenCode's side calls (session titles, short tool-free prompts) go to the cheap one. To push a lightweight agent or subagent to the cheap tier on purpose, give it `nadirclaw/eco` as its model. `nadirclaw report --by-model` shows the split.
 
 Tested with OpenCode 1.19.5 and 2.2.6.
+
+## Usage with Goose
+
+[Goose](https://github.com/aaif-goose/goose) loads provider definitions from JSON files in its `custom_providers` directory, so NadirClaw needs no plugin and no Goose release. This repo ships that file: [`docs/goose/nadirclaw.json`](docs/goose/nadirclaw.json).
+
+1. Start NadirClaw: `nadirclaw serve`
+2. Install the provider file:
+
+```bash
+mkdir -p ~/.config/goose/custom_providers
+curl -fsSL https://raw.githubusercontent.com/NadirRouter/NadirClaw/main/docs/goose/nadirclaw.json \
+  -o ~/.config/goose/custom_providers/nadirclaw.json
+```
+
+On Windows the directory is `%APPDATA%\Block\goose\config\custom_providers\`.
+
+3. Restart Goose and pick **NadirClaw** in the provider list (Desktop: Settings, Models; CLI: `goose configure`), then the `nadir-auto` model. Or per shell: `GOOSE_PROVIDER=nadirclaw GOOSE_MODEL=nadir-auto goose session`.
+
+The model list comes from NadirClaw's `/v1/models`: the routing profiles (`nadir-auto`, `nadir-eco`, `nadir-premium`, ...) plus your configured tier models. NadirClaw on another host or port: set `NADIRCLAW_HOST` (default `http://localhost:8856`) in Goose's provider settings. If your server sets `NADIRCLAW_AUTH_TOKEN`, enter the same token as the provider's API key; otherwise leave it empty.
+
+**What gets routed where.** Goose sends its tool definitions on agent turns, so NadirClaw's [agentic detection](#agentic-task-detection) keeps those on your complex model, while short tool-free calls (session titles and similar) go to the simple one. Pick `nadir-eco` to force the cheap tier. `nadirclaw report --by-model` shows the split.
+
+Checked against NadirClaw's HTTP contract with Goose-shaped requests (model list, streaming with `stream_options.include_usage`, tool-carrying turns, optional bearer token). The file uses the same fields as Goose's bundled Lynkr definition.
 
 ## Usage with Cursor
 

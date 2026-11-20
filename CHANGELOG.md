@@ -4,6 +4,9 @@ All notable changes to NadirClaw will be documented in this file.
 
 ## [Unreleased]
 
+### Docs
+- **Goose setup**: a Goose custom-provider file (`docs/goose/nadirclaw.json`) and install steps, the route Goose's contribution policy recommends for OpenAI-compatible services.
+
 ## [0.26.0] - 2026-11-19
 
 ### Fixed

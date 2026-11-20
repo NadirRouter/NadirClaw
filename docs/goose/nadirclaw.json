@@ -1,0 +1,30 @@
+{
+  "name": "nadirclaw",
+  "engine": "openai",
+  "display_name": "NadirClaw",
+  "description": "Open-source local LLM router. Runs an OpenAI-compatible server on your machine and sends each request to your cheap or strong model; tool-calling agent turns stay on the strong model.",
+  "api_key_env": "NADIRCLAW_AUTH_TOKEN",
+  "base_url": "${NADIRCLAW_HOST}/v1/chat/completions",
+  "env_vars": [
+    {
+      "name": "NADIRCLAW_HOST",
+      "required": false,
+      "secret": false,
+      "primary": true,
+      "default": "http://localhost:8856",
+      "description": "Base URL of the NadirClaw server (default: http://localhost:8856)"
+    }
+  ],
+  "dynamic_models": true,
+  "models": [],
+  "supports_streaming": true,
+  "requires_auth": false,
+  "skip_canonical_filtering": true,
+  "model_doc_link": "https://github.com/NadirRouter/NadirClaw",
+  "setup_steps": [
+    "pip install nadirclaw",
+    "nadirclaw setup (pick your cheap and strong models and add their provider keys)",
+    "nadirclaw serve",
+    "Pick the nadir-auto model. Set NADIRCLAW_AUTH_TOKEN only if your server sets one"
+  ]
+}
